@@ -1482,6 +1482,9 @@ impl Renderer {
             let caps = surface.get_capabilities(&adapter);
             config.format = surface_format(&caps.formats, config.format);
             config.view_formats = vec![config.format.remove_srgb_suffix()];
+            if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) {
+                config.alpha_mode = wgpu::CompositeAlphaMode::Opaque;
+            }
             // Screenshots copy the presented frame back from the swapchain.
             if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
                 config.usage |= wgpu::TextureUsages::COPY_SRC;
@@ -1699,7 +1702,11 @@ impl Renderer {
                     targets: &[Some(wgpu::ColorTargetState {
                         format: config.format.remove_srgb_suffix(),
                         blend,
-                        write_mask: wgpu::ColorWrites::ALL,
+                        write_mask: if cfg!(target_os = "android") {
+                            wgpu::ColorWrites::COLOR
+                        } else {
+                            wgpu::ColorWrites::ALL
+                        },
                     })],
                 }),
                 multiview_mask: None,
@@ -2588,13 +2595,25 @@ impl Renderer {
                             dst_factor: wgpu::BlendFactor::One,
                             operation: wgpu::BlendOperation::Add,
                         },
-                        alpha: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Zero,
-                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                            operation: wgpu::BlendOperation::Add,
+                        alpha: if cfg!(target_os = "android") {
+                            wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            }
+                        } else {
+                            wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::Zero,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            }
                         },
                     }),
-                    write_mask: wgpu::ColorWrites::ALL,
+                    write_mask: if cfg!(target_os = "android") {
+                        wgpu::ColorWrites::COLOR
+                    } else {
+                        wgpu::ColorWrites::ALL
+                    },
                 })],
             }),
             multiview_mask: None,
