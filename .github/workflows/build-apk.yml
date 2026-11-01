@@ -97,7 +97,12 @@ jobs:
 
       - name: Install Android SDK platform and NDK
         run: |
-          sdkmanager "ndk;28.2.13676358" "build-tools;35.0.0" "platforms;android-35"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(which sdkmanager)"
+          fi
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" "ndk;28.2.13676358" "build-tools;35.0.0" "platforms;android-35"
 
       - name: Add Rust target
         run: |
