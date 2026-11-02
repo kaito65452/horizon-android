@@ -1,12 +1,14 @@
 //! A native Rust installer and version screen, sharing the game's Vulkan renderer.
 use crate::catalog::{Catalog, Page};
 use crate::game;
+#[path = "login.rs"]
+pub(crate) mod login;
 #[path = "chooser.rs"]
 mod chooser;
 #[path = "launcher_gesture.rs"]
 mod gesture;
-#[path = "login.rs"]
-mod login;
+#[path = "launcher_icons.rs"]
+mod icons;
 #[path = "launcher_pages.rs"]
 mod pages;
 use horizon_client::{
@@ -56,6 +58,10 @@ pub(super) struct Launcher {
     prepared_session: Option<PathBuf>,
     focus: Option<usize>,
     diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
+    /// Started by the Compose launcher: play at once, return by closing this process.
+    direct: bool,
+    direct_started: bool,
+    leave: bool,
 }
 
 impl Launcher {
@@ -112,7 +118,18 @@ impl Launcher {
             prepared_session: None,
             focus: None,
             diagnostic_export: None,
+            direct: false,
+            direct_started: false,
+            leave: false,
         }
+    }
+    /// The Compose launcher asked for the game: skip this launcher's pages.
+    pub(super) fn play_directly(&mut self) {
+        self.direct = true;
+    }
+    fn leave_to_launcher(&mut self, events: &ActiveEventLoop) {
+        crate::platform::finish_activity();
+        events.exit();
     }
 
     fn restore_launcher(&mut self, events: &ActiveEventLoop) {
@@ -126,6 +143,10 @@ impl Launcher {
         crate::game::android_reset_bundled_mods();
         crate::document_store::set_game_active(false);
         crate::performance::stop();
+        if self.direct {
+            self.leave_to_launcher(events);
+            return;
+        }
         crate::platform::hide();
         horizon_client::auth::clear_current();
         self.session_ready = false;
@@ -172,6 +193,9 @@ impl Launcher {
         crate::diagnostics::record_error(&error.to_string());
         self.error = Some(error.to_string());
         let _ = std::fs::write(self.home.join("android-error.txt"), error.to_string());
+        if self.direct && self.game.is_none() {
+            self.leave = true;
+        }
     }
 
     fn open(&mut self, events: &ActiveEventLoop) -> Result<()> {
@@ -409,6 +433,14 @@ impl ApplicationHandler for Launcher {
         if let Err(error) = self.open(events) {
             self.fail(error);
             events.exit();
+            return;
+        }
+        if self.direct && !std::mem::replace(&mut self.direct_started, true) {
+            if !horizon_client::official_install::ready(&self.home) {
+                self.fail("Minecraft is not installed yet. Download it from the launcher first.");
+            } else if let Err(error) = self.action(events) {
+                self.fail(error);
+            }
         }
     }
     fn suspended(&mut self, events: &ActiveEventLoop) {
@@ -437,6 +469,10 @@ impl ApplicationHandler for Launcher {
             return;
         }
         let result = match event {
+            WindowEvent::CloseRequested if self.direct => {
+                self.leave_to_launcher(events);
+                Ok(())
+            }
             WindowEvent::CloseRequested => {
                 self.request_back();
                 Ok(())
@@ -542,6 +578,10 @@ impl ApplicationHandler for Launcher {
             self.restore_launcher(events);
             return;
         }
+        if self.leave {
+            self.leave_to_launcher(events);
+            return;
+        }
         crate::diagnostics::heartbeat("launcher", || serde_json::json!({}));
         if let Some(result) = self
             .diagnostic_export
@@ -625,6 +665,9 @@ impl ApplicationHandler for Launcher {
     fn exiting(&mut self, events: &ActiveEventLoop) {
         if let Some(game) = &mut self.game {
             game.exiting(events);
+        }
+        if self.direct {
+            crate::platform::finish_activity();
         }
     }
 }

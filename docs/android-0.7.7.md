@@ -280,3 +280,14 @@ After upstream renderer/shader synchronizations, require a GLES 3.0 device smoke
 test through launcher, title and world, in addition to Rust compilation and a
 modern Vulkan device. A published nightly is not a multi-device compatibility
 certificate.
+
+## Material 3 Expressive launcher (PR #56)
+
+- The launcher is redesigned in a Material 3 Expressive style. Wide screens get a
+  navigation rail; phones held upright get a bottom navigation bar. Pages use
+  rounded cards, the Play page has a hero card and a side panel with the account,
+  the version and a large launch button. Settings are a list of rows with leading
+  icons, Material switches and chevrons; choosers use radio rows; the account
+  dialog sits on a scrim. Icons are the design system's pixel icons
+  (`horizon_theme::icons`), drawn by `android/launcher_icons.rs`.
+- Every launcher action, target and controller/keyboard focus path is unchanged.
