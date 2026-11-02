@@ -493,6 +493,11 @@ pub struct Settings {
     pub button_visibility: [u8; 14],
     pub horizontal_margin: f32,
     pub vertical_margin: f32,
+    pub button_visibility: [u8; 14],
+    pub horizontal_margin: f32,
+    pub vertical_margin: f32,
+    #[serde(default = "default_profile_name")]
+    pub active_control_layout: String,
     #[serde(default = "default_profile_name")]
     pub active_profile: String,
     #[serde(default = "default_profile_name")]
@@ -638,6 +643,7 @@ impl Default for Settings {
             button_visibility: [0; 14],
             horizontal_margin: 0.0,
             vertical_margin: 0.0,
+            active_control_layout: default_profile_name(),
             active_profile: default_profile_name(),
             default_profile: default_profile_name(),
             preset_id: default_profile_name(),

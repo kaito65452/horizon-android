@@ -111,10 +111,17 @@ pub struct Config {
     pub preset_edit_mode: String,
     #[serde(default)]
     pub theme: horizon_client::ui_theme::LauncherThemeConfig,
+    #[serde(default = "default_active_control_layout")]
+    pub active_control_layout: String,
+}
+
+fn default_active_control_layout() -> String {
+    "default".to_string()
 }
 
 fn default_true() -> bool {
     true
+}
 }
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
