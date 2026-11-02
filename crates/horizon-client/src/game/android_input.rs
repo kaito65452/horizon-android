@@ -1382,8 +1382,6 @@ impl Game<'_> {
                     if !runtime.is_pointer_penetrable(t.id) {
                         self.pad.touch.ignore(t.id);
                         return Ok(true);
-                    } else if has_events {
-                        return Ok(true);
                     }
                 }
             }

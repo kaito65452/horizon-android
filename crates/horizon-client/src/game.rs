@@ -15100,8 +15100,24 @@ impl Game<'_> {
         let mut hud = horizon_client::spans::time("hud", || self.hud(size));
         #[cfg(target_os = "android")]
         {
-            self.pad.touch.auxiliary_only =
-                self.settings.keypad.enabled && self.pad.touch.editor.is_none();
+            if (crate::touch_visible() || self.settings.keypad.enabled)
+                && self.pad.touch.editor.is_none()
+            {
+                self.pad.touch_ui.ensure_control_runtime(
+                    &crate::backend::data_dir(),
+                    &self.settings.touch.active_control_layout,
+                );
+                if let Some(runtime) = self.pad.touch_ui.control_runtime.as_mut() {
+                    runtime.set_screen_dimensions(hud.width, hud.height, hud.scale);
+                    let releases = runtime.set_in_menu(self.pad_in_menu());
+                    if !releases.is_empty() {
+                        self.dispatch_layout_output_events(releases);
+                    }
+                }
+            }
+            self.pad.touch.auxiliary_only = (self.settings.keypad.enabled
+                || self.pad.touch_ui.control_runtime.is_some())
+                && self.pad.touch.editor.is_none();
             self.pad.touch.update_visibility(
                 crate::touch_visible(),
                 (self.frame_ticks / 20.0).clamp(0.0, 0.25),
@@ -15117,7 +15133,9 @@ impl Game<'_> {
                 &profile_name,
                 None,
             );
-        } else {
+        } else if self.pad.touch_ui.control_runtime.is_none()
+            && self.pad.touch_ui.editor.is_none()
+        {
             #[cfg(target_os = "android")]
             self.android_sync_pointer();
             // Draw the virtual mouse pointer directly above the vanilla game/menu GUI layer
@@ -15175,17 +15193,6 @@ impl Game<'_> {
             if self.pad.touch.editor.is_none() {
                 self.pad.touch_ui.goy_mode = self.pad.touch.settings.control_style
                     == horizon_client::touch::ControlStyle::GoyControl;
-                self.pad.touch_ui.ensure_control_runtime(
-                    &crate::backend::data_dir(),
-                    &self.settings.touch.active_control_layout,
-                );
-                if let Some(runtime) = self.pad.touch_ui.control_runtime.as_mut() {
-                    runtime.set_screen_dimensions(hud.width, hud.height, hud.scale);
-                    let releases = runtime.set_in_menu(self.pad_in_menu());
-                    if !releases.is_empty() {
-                        self.dispatch_layout_output_events(releases);
-                    }
-                }
                 self.pad
                     .touch_ui
                     .draw(&mut hud, &self.gui.atlas, self.pad_in_menu());
