@@ -1771,6 +1771,8 @@ dependencies = [
  "horizon-dualsense",
  "horizon-theme",
  "png",
+ "serde",
+ "serde_json",
  "winit",
 ]
 
