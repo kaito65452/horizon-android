@@ -14911,9 +14911,10 @@ impl Game<'_> {
                     &crate::backend::data_dir(),
                     &self.settings.touch.active_control_layout,
                 );
+                let in_menu = self.pad_in_menu();
                 if let Some(runtime) = self.pad.touch_ui.control_runtime.as_mut() {
                     runtime.set_screen_dimensions(hud.width, hud.height, hud.scale);
-                    let releases = runtime.set_in_menu(self.pad_in_menu());
+                    let releases = runtime.set_in_menu(in_menu);
                     if !releases.is_empty() {
                         self.dispatch_layout_output_events(releases);
                     }

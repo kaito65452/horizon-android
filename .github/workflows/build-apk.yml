@@ -27,8 +27,6 @@ on:
       - 'build-apk*'
       - 'feat/build-apk*'
       - 'ci/*'
-    paths:
-      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read

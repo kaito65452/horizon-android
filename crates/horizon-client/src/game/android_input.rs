@@ -283,9 +283,7 @@ impl Game<'_> {
                 }
                 LayoutOutputEvent::SendText(text) => {
                     if self.screen == Screen::Chat {
-                        if let Some(cs) = self.ui.chat_screen.as_mut() {
-                            cs.insert(&text);
-                        }
+                        self.chat_type(&text);
                     }
                 }
             }
@@ -499,7 +497,7 @@ impl Game<'_> {
                                 self.dispatch_layout_output_events(releases);
                             }
                             self.settings.touch.active_control_layout = slug.clone();
-                            let _ = self.save_options();
+                            self.settings.save(&Self::options_path());
                         }
                         if let Some(dialog) = self.pad.touch_ui.replacement_dialog.as_mut() {
                             for (i, l) in dialog.layouts.iter_mut().enumerate() {

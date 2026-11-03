@@ -1919,24 +1919,24 @@ impl Launcher {
             self.targets.clear();
             self.list_targets.clear();
             self.list_view = None;
-            ui.rounded(0.0, 0.0, w, h, 0.0, horizon_client::hud::rgba(0, 0, 0, 160));
+            ui.rounded(0.0, 0.0, w, h, 0.0, m3::SCRIM);
             let width = (w - 32.0).min(360.0);
             let x = (w - width) * 0.5;
             let y = (h - 160.0) * 0.5;
-            ui.rounded(x, y, width, 160.0, 8.0, color::RAISED);
+            ui.rounded(x, y, width, 160.0, 28.0, m3::CONTAINER_HIGH);
             ui.text(
                 Face::Medium,
                 22.0,
-                x + 20.0,
+                x + 24.0,
                 y + 24.0,
-                color::TEXT,
+                m3::ON_SURFACE,
                 "Exit application?",
             );
-            let bw = (width - 52.0) * 0.5;
+            let bw = (width - 60.0) * 0.5;
             button(
                 &mut ui,
                 &mut self.targets,
-                [x + 20.0, y + 92.0, bw, 44.0],
+                [x + 24.0, y + 92.0, bw, 44.0],
                 "Cancel",
                 Action::Dismiss,
                 false,
@@ -1944,10 +1944,10 @@ impl Launcher {
             button(
                 &mut ui,
                 &mut self.targets,
-                [x + 32.0 + bw, y + 92.0, bw, 44.0],
+                [x + 36.0 + bw, y + 92.0, bw, 44.0],
                 "Exit",
                 Action::ConfirmExit,
-                false,
+                true,
             );
         }
         if let Some(action) = self.pending_focus.take() {
