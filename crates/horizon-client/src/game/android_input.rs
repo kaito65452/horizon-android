@@ -513,12 +513,18 @@ impl Game<'_> {
                     }
                     Action::OpenControlEditor => {
                         let data_dir = crate::backend::data_dir();
-                        let active = self.settings.touch.active_control_layout.as_str();
-                        if let Some(runtime) = self.pad.touch_ui.control_runtime.as_mut() {
-                            let releases = runtime.release_all_inputs();
+                        let active = self.settings.touch.active_control_layout.clone();
+                        let releases = self
+                            .pad
+                            .touch_ui
+                            .control_runtime
+                            .as_mut()
+                            .map(|rt| rt.release_all_inputs())
+                            .unwrap_or_default();
+                        if !releases.is_empty() {
                             self.dispatch_layout_output_events(releases);
                         }
-                        self.pad.touch_ui.open_editor(&data_dir, active);
+                        self.pad.touch_ui.open_editor(&data_dir, &active);
                     }
                     Action::CloseControlEditor => {
                         self.pad.touch_ui.close_editor();
@@ -621,26 +627,39 @@ impl Game<'_> {
         }
 
         if self.pad.touch_ui.replacement_dialog.is_none() {
-            if let Some(runtime) = self.pad.touch_ui.control_runtime.as_mut() {
-                runtime.set_screen_dimensions(b.width, b.height, b.scale);
-                let menu_releases = runtime.set_in_menu(self.pad_in_menu());
-                if !menu_releases.is_empty() {
-                    self.dispatch_layout_output_events(menu_releases);
+            let in_menu = self.pad_in_menu();
+            let (menu_releases, was_owned, out_events, is_owned, is_penetrable) = {
+                if let Some(runtime) = self.pad.touch_ui.control_runtime.as_mut() {
+                    runtime.set_screen_dimensions(b.width, b.height, b.scale);
+                    let menu_releases = runtime.set_in_menu(in_menu);
+                    let was_owned = runtime.owns_pointer(t.id);
+                    let out_events = runtime.handle_touch(t.id, t.phase, (p[0], p[1]));
+                    let is_owned = runtime.owns_pointer(t.id);
+                    let is_penetrable = runtime.is_pointer_penetrable(t.id);
+                    (
+                        menu_releases,
+                        was_owned,
+                        out_events,
+                        is_owned,
+                        is_penetrable,
+                    )
+                } else {
+                    (Vec::new(), false, Vec::new(), false, true)
                 }
-                let was_owned = runtime.owns_pointer(t.id);
-                let out_events = runtime.handle_touch(t.id, t.phase, (p[0], p[1]));
-                let is_owned = runtime.owns_pointer(t.id);
-                let has_events = !out_events.is_empty();
+            };
 
-                if has_events {
-                    self.dispatch_layout_output_events(out_events);
-                }
+            if !menu_releases.is_empty() {
+                self.dispatch_layout_output_events(menu_releases);
+            }
 
-                if was_owned || is_owned {
-                    if !runtime.is_pointer_penetrable(t.id) {
-                        self.pad.touch.ignore(t.id);
-                        return Ok(true);
-                    }
+            if !out_events.is_empty() {
+                self.dispatch_layout_output_events(out_events);
+            }
+
+            if was_owned || is_owned {
+                if !is_penetrable {
+                    self.pad.touch.ignore(t.id);
+                    return Ok(true);
                 }
             }
         }
