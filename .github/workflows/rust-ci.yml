@@ -51,7 +51,6 @@ jobs:
 
   compiler-matrix:
     name: Clippy and tests (${{ matrix.toolchain }})
-    needs: format
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
@@ -93,7 +92,6 @@ jobs:
   android-target-check:
     if: github.event_name == 'workflow_dispatch'
     name: Android target check (manual)
-    needs: format
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
