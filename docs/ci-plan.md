@@ -5,3 +5,6 @@ Android build tool: Gradle wrapper/configuration (Gradle 8.14 in existing APK wo
 Targets: GitHub Linux host checks; Android native target checks remain opt-in/heavy in the existing workflow.
 CI scope: Rust fast checks run on relevant Rust changes; Android source checks/build workflow remains unchanged; no full APK added to routine CI.
 Workflow changes: new Rust stable/beta/1.95.0 (workspace MSRV, set by `horizon-mods`) matrix plus rustfmt gate in `.github/workflows/rust-ci.yml`, with an opt-in `workflow_dispatch` `toolchain` input and a manual aarch64 Android target check; `android-dev.yml` and `android-source.yml` are unchanged.
+
+First run (2026-11-04, https://github.com/kaito65452/horizon-android/actions/runs/41791010576): the workflow parses and runs all jobs in parallel on GitHub runners. It fails on pre-existing repo state, not on the workflow: `cargo fmt --all --check` reports formatting drift (e.g. `horizon-client/src/android/launcher_pages.rs`, `android/login.rs`) and `cargo clippy -- -D warnings` reports real lints (e.g. `horizon-client-input/src/keybinds.rs`, `horizon-world/src/datafix/*`). Making these pass means formatting the tree and fixing lints — a separate change, deliberately out of scope here.
+
