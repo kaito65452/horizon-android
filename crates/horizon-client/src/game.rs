@@ -18464,15 +18464,9 @@ impl<'a> Game<'a> {
             pause: false,
             debug: false,
             screen: Screen::Playing,
-            voice: {
-                let mut v = horizon_client::voice::VoiceChatClient::new(
-                    &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-                );
-                if !settings.touch.svc_enabled {
-                    v.config.enabled = false;
-                }
-                v
-            },
+            voice: horizon_client::voice::VoiceChatClient::new(
+                &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            ),
             window: None,
             renderer: None,
             entity_vertices: Vec::new(),

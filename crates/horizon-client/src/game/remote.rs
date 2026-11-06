@@ -9245,6 +9245,9 @@ impl Game<'_> {
     }
 
     pub(super) fn remote_voicechat_payload(&mut self, channel: &str, data: &[u8]) {
+        if !self.settings.touch.svc_enabled {
+            return;
+        }
         match self.voice.handle_custom_payload(channel, data) {
             Ok(Some((resp_channel, resp_data))) => {
                 self.send(S::CustomPayload(
@@ -9262,7 +9265,7 @@ impl Game<'_> {
     }
 
     pub(super) fn initiate_voice_handshake(&mut self) {
-        if !self.voice.config.enabled {
+        if !self.settings.touch.svc_enabled {
             return;
         }
         if let Some(r) = self.remote.as_ref() {
@@ -9277,7 +9280,7 @@ impl Game<'_> {
     }
 
     pub(super) fn tick_voice_chat(&mut self) {
-        if !self.voice.config.enabled {
+        if !self.settings.touch.svc_enabled {
             return;
         }
         if self.server_packs.is_busy() || self.pack_reload.is_some() {

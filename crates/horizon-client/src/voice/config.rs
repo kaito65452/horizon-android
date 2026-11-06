@@ -14,15 +14,8 @@ fn default_output_volume() -> f32 {
     1.0
 }
 
-fn default_svc_enabled() -> bool {
-    true
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SvcProtocolConfig {
-    /// Master toggle for the built-in Simple Voice Chat (SVC) subsystem
-    #[serde(default = "default_svc_enabled")]
-    pub enabled: bool,
     /// Active protocol compatibility version sent to the server (default: 21)
     pub compatibility_version: i32,
     /// List of fallback versions to attempt during auto-negotiation
@@ -60,7 +53,6 @@ pub struct SvcProtocolConfig {
 impl Default for SvcProtocolConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
             compatibility_version: DEFAULT_COMPATIBILITY_VERSION,
             fallback_versions: DEFAULT_FALLBACK_VERSIONS.to_vec(),
             fallback_index: 0,

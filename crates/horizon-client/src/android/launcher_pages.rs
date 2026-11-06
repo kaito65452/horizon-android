@@ -4044,8 +4044,6 @@ impl Launcher {
             }
             SettingsCategory::Launcher => {
                 let c = &self.catalog.config;
-                let svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
                 let count = 13;
                 let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
                 let max_scroll =
@@ -4160,7 +4158,7 @@ impl Launcher {
                     (
                         "Simple Voice Chat (SVC)",
                         "Enable built-in proximity voice chat, HUD indicator & 3D spatial audio in multiplayer",
-                        SettingControl::Toggle(svc_cfg.enabled, Action::ToggleSvcFeature),
+                        SettingControl::Toggle(touch_cfg.svc_enabled, Action::ToggleSvcFeature),
                     ),
                 ];
 
@@ -5141,8 +5139,6 @@ impl Launcher {
             }
             SettingsCategory::Experimental => {
                 let c = &self.catalog.config;
-                let svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
                 let count = 12;
                 let max_scroll = (count as f32 * step_y - (list_bottom - list_top)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
@@ -5157,7 +5153,7 @@ impl Launcher {
                 } else {
                     "Balanced Default"
                 };
-                let svc_badge = if svc_cfg.enabled {
+                let svc_badge = if touch_cfg.svc_enabled {
                     "SVC Enabled"
                 } else {
                     "SVC Disabled"
@@ -5223,7 +5219,7 @@ impl Launcher {
                     (
                         "Simple Voice Chat (SVC)",
                         "Enable built-in proximity voice chat, HUD indicator & UDP audio engine in multiplayer",
-                        SettingControl::Toggle(svc_cfg.enabled, Action::ToggleSvcFeature),
+                        SettingControl::Toggle(touch_cfg.svc_enabled, Action::ToggleSvcFeature),
                     ),
                     (
                         "SVC RNNoise Neural Denoiser",
@@ -5632,19 +5628,11 @@ impl Launcher {
             }
             Some(Action::ToggleSvcFeature) => {
                 let game_home = self.catalog.config.game_home(&self.home);
-                let mut svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
-                svc_cfg.enabled = !svc_cfg.enabled;
-                let _ = svc_cfg.save_to_dir(&game_home);
-                let _ = svc_cfg.save_to_dir(&self.home);
-                let enabled = svc_cfg.enabled;
-                self.modify_touch_settings(|t| t.svc_enabled = enabled);
-                self.catalog.status = if enabled {
-                    "Simple Voice Chat (SVC) enabled."
-                } else {
-                    "Simple Voice Chat (SVC) disabled."
-                }
-                .into();
+                let enabled = horizon_client::touch::Settings::load_from(
+                    &game_home.join("horizon-touch.json"),
+                )
+                .svc_enabled;
+                self.set_svc_enabled(!enabled);
             }
             Some(Action::ToggleSvcRnnoise) => {
                 let game_home = self.catalog.config.game_home(&self.home);
@@ -6809,6 +6797,18 @@ impl Launcher {
         } else {
             let _ = t.save_to(&game_home.join("horizon-touch.json"));
         }
+    }
+
+    /// Turns the built-in Simple Voice Chat engine on or off for this profile.
+    /// The stable game reads this switch from `horizon-touch.json`; no voice code is changed.
+    fn set_svc_enabled(&mut self, enabled: bool) {
+        self.modify_touch_settings(|t| t.svc_enabled = enabled);
+        self.catalog.status = if enabled {
+            "Simple Voice Chat (SVC) enabled."
+        } else {
+            "Simple Voice Chat (SVC) disabled."
+        }
+        .into();
     }
 
     pub(super) fn ui_density(&self) -> f32 {
