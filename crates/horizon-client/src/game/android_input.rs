@@ -1002,12 +1002,10 @@ impl Game<'_> {
                     self.pad.touch.settings.svc_enabled = next;
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
-                    if next {
-                        if self.remote.is_some() {
-                            self.initiate_voice_handshake();
-                        }
-                    } else {
+                    if !next {
                         self.voice.disconnect();
+                    } else if self.remote.is_some() {
+                        self.initiate_voice_handshake();
                     }
                 }
                 InGameMenuAction::SendCustomInput(token) => {
