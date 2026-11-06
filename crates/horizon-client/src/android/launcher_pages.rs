@@ -5139,6 +5139,8 @@ impl Launcher {
             }
             SettingsCategory::Experimental => {
                 let c = &self.catalog.config;
+                let svc_cfg =
+                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
                 let count = 12;
                 let max_scroll = (count as f32 * step_y - (list_bottom - list_top)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
