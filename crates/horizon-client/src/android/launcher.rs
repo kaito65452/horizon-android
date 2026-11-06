@@ -9,6 +9,8 @@ mod gesture;
 mod login;
 #[path = "launcher_pages.rs"]
 mod pages;
+#[path = "wardrobe.rs"]
+mod wardrobe;
 use horizon_client::{
     Result,
     gfx::Renderer,
@@ -27,6 +29,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
+struct PreparedAccount {
+    key: String,
+    file: PathBuf,
+    appearance: crate::skins::cloud::Cache,
+}
 pub(super) struct Launcher {
     home: PathBuf,
     controller_edges: horizon_client::gamepad::Edges,
@@ -56,14 +63,57 @@ pub(super) struct Launcher {
     chooser: Option<chooser::Chooser>,
     exit_confirmation: bool,
     login: login::Login,
-    session_worker: Option<mpsc::Receiver<std::result::Result<Option<PathBuf>, String>>>,
+    wardrobe: wardrobe::Wardrobe,
+    session_worker: Option<mpsc::Receiver<std::result::Result<PreparedAccount, String>>>,
     session_ready: bool,
     prepared_session: Option<PathBuf>,
+    pub(super) launching: bool,
+    pub(super) launch_pending_tick: bool,
+    pub(super) diagnostics_modal_open: bool,
     focus: Option<usize>,
     diagnostic_export: Option<mpsc::Receiver<std::result::Result<String, String>>>,
 }
 
 impl Launcher {
+    pub(super) fn refresh_wardrobe_account(&mut self) {
+        if self.catalog.page == Page::Skins {
+            self.catalog.scroll = 0.0;
+        }
+        // The header shows this appearance even when another page is open.
+        self.wardrobe.open(
+            &self.catalog.config.name,
+            &self.catalog.config.microsoft_client_id,
+        );
+    }
+
+    fn edit_text(&mut self, output: horizon_client::osk::Output) {
+        if let Some(tc) = &mut self.control_editor
+            && horizon_client::touch_ui::apply_editor_or_preset_output(
+                tc.editor.as_mut(),
+                None,
+                &output,
+            )
+        {
+            let game_home = self.catalog.config.game_home(&self.home);
+            let _ = tc.settings.save_to(&game_home.join("horizon-touch.json"));
+            if horizon_client::touch_ui::output_dismisses(&output) {
+                crate::platform::hide();
+            }
+            return;
+        }
+        if self.login.edit(self.catalog.editing, &output) {
+            if matches!(
+                output,
+                horizon_client::osk::Output::Enter | horizon_client::osk::Output::Close
+            ) {
+                self.catalog.editing = None;
+                crate::platform::hide();
+            }
+        } else {
+            self.catalog.edit(output, &self.home);
+        }
+    }
+
     pub(super) fn new(home: PathBuf) -> Self {
         // Upgrade existing installations and pre-verify structure transforms in the background
         // so pressing Play launches immediately without main-thread I/O stalls.
@@ -89,21 +139,35 @@ impl Launcher {
         }
         horizon_client::android_runtime::graphics_startup::configure(home.clone());
         if horizon_client::android_runtime::graphics_startup::recover(&home) {
-            catalog.config.renderer = crate::catalog::RendererMode::OpenGl;
+            catalog.config.renderer = crate::catalog::RendererMode::VulkanCompatibility;
             if let Err(error) = catalog.config.save(&home) {
                 log::warn!("Could not save graphics recovery choice: {error}");
             }
-            catalog.status = "Previous Vulkan startup was interrupted. Using OpenGL ES recovery; you can change Rendering mode in Settings.".into();
+            catalog.status = "Previous Vulkan startup was interrupted. Using Vulkan compatibility; you can change Rendering mode in Settings.".into();
         }
         crate::configure_input_mode(catalog.config.input_host);
         crate::device_runtime::configure(catalog.config.device);
         horizon_client::ui_theme::set_ui_scale_percent(catalog.config.ui_scale_percent);
-        // First run: the launcher's control editor and the game both start
-        // from the GoyControl factory layout.
-        let touch_file = catalog.config.game_home(&home).join("horizon-touch.json");
+        horizon_client::ui_theme::motion::set_launcher_animations_disabled(
+            catalog.config.disable_launcher_animations,
+        );
+        horizon_client::ui_theme::motion::set_game_animations_disabled(
+            catalog.config.disable_game_animations,
+        );
+        // First run: ensure independent MCPE and GoyControl storage directories exist,
+        // and initialize MCPE Controls as the default active control system on fresh installs.
+        let game_home = catalog.config.game_home(&home);
+        horizon_client::touch::Settings::ensure_system_storage(
+            &game_home,
+            horizon_client::touch::ControlStyle::Mcpe,
+        );
+        horizon_client::touch::Settings::ensure_system_storage(
+            &game_home,
+            horizon_client::touch::ControlStyle::GoyControl,
+        );
+        let touch_file = game_home.join("horizon-touch.json");
         if !touch_file.exists() {
-            let mut touch = horizon_client::touch::Settings::default();
-            touch.set_control_style(horizon_client::touch::ControlStyle::GoyControl);
+            let touch = horizon_client::touch::Settings::default_mcpe();
             if let Some(dir) = touch_file.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
@@ -115,22 +179,41 @@ impl Launcher {
         let prewarm_session_worker = if crate::account::Accounts::load().selected().is_some() {
             let id = catalog.config.microsoft_client_id.clone();
             let game_home = catalog.config.game_home(&home);
+            let wardrobe_home = home.join("wardrobe");
             let (tx, rx) = mpsc::channel();
             std::thread::spawn(move || {
                 let res = (|| {
-                    login::Login::session(&id)?
-                        .map(|(a, s)| {
-                            crate::account::write_session_file(&game_home.join("sessions"), &a, &s)
-                        })
-                        .transpose()
+                    let (account, secrets) = login::Login::session(&id)?
+                        .ok_or("The selected account changed. Choose Play again.")?;
+                    let appearance = crate::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
+                        .unwrap_or_default();
+                    let file = crate::account::write_session_file(
+                        &game_home.join("sessions"),
+                        &account,
+                        &secrets,
+                    )?;
+                    Ok(PreparedAccount {
+                        key: account.key(),
+                        file,
+                        appearance,
+                    })
                 })();
-                let _ = tx.send(res);
+                if let Err(unsent) = tx.send(res)
+                    && let Ok(prepared) = unsent.0
+                {
+                    let _ = std::fs::remove_file(prepared.file);
+                }
             });
             Some(rx)
         } else {
             None
         };
+        // Load the selected wardrobe and its last head before the first draw:
+        // the account pill must have the real face instantly, not after a page visit.
+        let mut wardrobe = wardrobe::Wardrobe::new(&home);
+        wardrobe.open(&catalog.config.name, &catalog.config.microsoft_client_id);
         Self {
+            wardrobe,
             home,
             controller_edges: Default::default(),
             controller_repeat: None,
@@ -162,6 +245,9 @@ impl Launcher {
             session_worker: prewarm_session_worker,
             session_ready: false,
             prepared_session: None,
+            launching: false,
+            launch_pending_tick: false,
+            diagnostics_modal_open: false,
             focus: None,
             diagnostic_export: None,
         }
@@ -178,10 +264,13 @@ impl Launcher {
         crate::game::android_reset_bundled_mods();
         crate::document_store::set_game_active(false);
         crate::performance::stop();
+        let _ = crate::platform::capture_mouse(false);
         crate::platform::hide();
         horizon_client::auth::clear_current();
         self.session_ready = false;
         self.prepared_session = None;
+        self.launching = false;
+        self.launch_pending_tick = false;
         horizon_client::discord_presence::stop();
         horizon_client::ui_theme::reset_atlas();
         self.cursor = (0.0, 0.0);
@@ -221,6 +310,8 @@ impl Launcher {
     }
     fn fail(&mut self, error: impl std::fmt::Display) {
         log::error!("{error}");
+        self.launching = false;
+        self.launch_pending_tick = false;
         crate::diagnostics::record_error(&error.to_string());
         self.error = Some(error.to_string());
         let _ = std::fs::write(self.home.join("android-error.txt"), error.to_string());
@@ -246,12 +337,24 @@ impl Launcher {
             events.create_window(Window::default_attributes().with_title("Horizon Android"))?,
         );
         crate::display::prepare(&window)?;
+        let vanilla_dir = self
+            .home
+            .join(".local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        let atlas_root = if vanilla_dir.join("assets/minecraft/textures/gui").is_dir() {
+            vanilla_dir
+        } else {
+            self.home.join("installer")
+        };
         let gui = game::UiResources {
-            atlas: HudAtlas::build(&self.home.join("installer"))?,
+            atlas: HudAtlas::build(&atlas_root)?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces {
                 size: 1,
                 pixels: [0u8; 4].repeat(6),
             }),
+            sounds: Some(horizon_client::sound_events::SoundRegistry::load(
+                &atlas_root,
+            )),
         };
         self.renderer = Some(game::loading_renderer(
             window.clone(),
@@ -271,25 +374,49 @@ impl Launcher {
     }
 
     fn request_back(&mut self) {
-        crate::platform::hide();
-        if let Some(editor) = self.control_editor.take() {
-            let game_home = self.catalog.config.game_home(&self.home);
-            let _ = editor.settings.save_profile(&game_home, &editor.settings.active_profile.clone());
-            self.catalog.status = "Saved HUD touch control layout.".into();
+        if crate::platform::active() && self.control_editor.is_some() {
+            crate::platform::hide();
             return;
         }
-        if self.exit_confirmation {
+        crate::platform::hide();
+        if let Some(tc) = &mut self.control_editor {
+            let game_home = self.catalog.config.game_home(&self.home);
+            if tc.request_editor_back() {
+                let _ = tc.settings.save_to(&game_home.join("horizon-touch.json"));
+                self.control_editor = None;
+            }
+            return;
+        }
+        if !self.anim.intro_done {
+            self.anim.intro_done = true;
+            return;
+        }
+        if self.diagnostics_modal_open {
+            self.diagnostics_modal_open = false;
+        } else if self.exit_confirmation {
             self.exit_confirmation = false;
+        } else if self.catalog.fm_modal.take().is_some() {
+            self.catalog.editing = None;
         } else if self.catalog.project_modal.take().is_some() {
             self.catalog.scroll = 0.0;
         } else if self.login.visible {
             self.login.hide();
         } else if self.chooser.take().is_some() {
             // Back dismisses the current dialog, including the exit question.
+        } else if self.catalog.page == Page::Installed
+            && self.catalog.installed_sub_tab == crate::catalog::InstalledSubTab::FileManager
+            && self.catalog.fm_back(&self.home)
+        {
+            // Back in File Manager pops the directory history stack.
         } else if self.catalog.page == Page::Settings
             && self.catalog.settings_category != crate::catalog::SettingsCategory::Overview
         {
-            self.catalog.settings_category = crate::catalog::SettingsCategory::Overview;
+            self.catalog.settings_category =
+                if self.catalog.settings_category == crate::catalog::SettingsCategory::Theme {
+                    crate::catalog::SettingsCategory::Launcher
+                } else {
+                    crate::catalog::SettingsCategory::Overview
+                };
             self.catalog.scroll = 0.0;
             self.anim.trigger_page_transition();
         } else if self.catalog.editing.take().is_none() {
@@ -310,6 +437,7 @@ impl Launcher {
             || self.chooser.is_some()
             || self.worker.is_some()
             || self.session_worker.is_some()
+            || self.launch_pending_tick
         {
             return Ok(());
         }
@@ -327,6 +455,52 @@ impl Launcher {
         crate::configure_input_mode(self.catalog.config.input_host);
         crate::device_runtime::configure(self.catalog.config.device);
         if horizon_client::official_install::ready(&self.home) {
+            if !self.launching {
+                self.launching = true;
+                self.error = None;
+                self.catalog.status = "Launching Minecraft 26.3...".into();
+                let game_home = self.catalog.config.game_home(&self.home);
+                if !self.session_ready && crate::account::Accounts::load().selected().is_some() {
+                    let id = self.catalog.config.microsoft_client_id.clone();
+                    let wardrobe_home = self.home.join("wardrobe");
+                    let (sender, receiver) = mpsc::channel();
+                    self.session_worker = Some(receiver);
+                    self.catalog.status = "Preparing account session and appearance...".into();
+                    std::thread::spawn(move || {
+                        let result = (|| {
+                            let (account, secrets) = login::Login::session(&id)?
+                                .ok_or("The selected account changed. Choose Play again.")?;
+                            let appearance =
+                                crate::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
+                                    .unwrap_or_default();
+                            let file = crate::account::write_session_file(
+                                &game_home.join("sessions"),
+                                &account,
+                                &secrets,
+                            )?;
+                            Ok(PreparedAccount {
+                                key: account.key(),
+                                file,
+                                appearance,
+                            })
+                        })();
+                        if let Err(unsent) = sender.send(result)
+                            && let Ok(prepared) = unsent.0
+                        {
+                            let _ = std::fs::remove_file(prepared.file);
+                        }
+                    });
+                    if let Some(window) = &self.window {
+                        window.request_redraw();
+                    }
+                    return Ok(());
+                }
+                self.launch_pending_tick = true;
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                return Ok(());
+            }
             horizon_client::android_resources::repair_structure_transforms(
                 &self.home.join("engine-data.zip"),
                 &self
@@ -357,27 +531,42 @@ impl Launcher {
             let game_home = self.catalog.config.game_home(&self.home);
             if !self.session_ready && crate::account::Accounts::load().selected().is_some() {
                 let id = self.catalog.config.microsoft_client_id.clone();
+                let wardrobe_home = self.home.join("wardrobe");
                 let (sender, receiver) = mpsc::channel();
                 self.session_worker = Some(receiver);
-                self.catalog.status = "Preparing Microsoft session...".into();
+                self.catalog.status = "Preparing account session and appearance...".into();
                 std::thread::spawn(move || {
                     let result = (|| {
-                        login::Login::session(&id)?
-                            .map(|(a, s)| {
-                                crate::account::write_session_file(
-                                    &game_home.join("sessions"),
-                                    &a,
-                                    &s,
-                                )
-                            })
-                            .transpose()
+                        let (account, secrets) = login::Login::session(&id)?
+                            .ok_or("The selected account changed. Choose Play again.")?;
+                        let appearance =
+                            crate::skins::cloud::fetch(&account, &secrets, &wardrobe_home)
+                                .unwrap_or_default();
+                        let file = crate::account::write_session_file(
+                            &game_home.join("sessions"),
+                            &account,
+                            &secrets,
+                        )?;
+                        Ok(PreparedAccount {
+                            key: account.key(),
+                            file,
+                            appearance,
+                        })
                     })();
-                    let _ = sender.send(result);
+                    if let Err(unsent) = sender.send(result)
+                        && let Ok(prepared) = unsent.0
+                    {
+                        let _ = std::fs::remove_file(prepared.file);
+                    }
                 });
                 return Ok(());
             }
             self.session_ready = false;
             std::fs::create_dir_all(&game_home)?;
+            if crate::account::Accounts::load().selected().is_none() {
+                self.wardrobe
+                    .prepare_game(&self.catalog.config.name, &game_home)?;
+            }
             let extra_arguments = if crate::PUBLIC_BUILD {
                 Vec::new()
             } else {
@@ -415,7 +604,7 @@ impl Launcher {
                     .join(horizon_core::VANILLA_VERSION),
                 game_home,
                 session_file: self.prepared_session.take(),
-                offline_name: self.catalog.config.name.clone(),
+                offline_name: crate::catalog::truncate_player_name(&self.catalog.config.name),
                 server: self.catalog.config.server.clone(),
                 control_socket: (!crate::PUBLIC_BUILD).then(|| self.home.join("control.json")),
                 extra_arguments,
@@ -602,8 +791,7 @@ impl ApplicationHandler for Launcher {
                 }
             }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
-                self.catalog
-                    .edit(horizon_client::osk::Output::Text(text), &self.home);
+                self.edit_text(horizon_client::osk::Output::Text(text));
                 Ok(())
             }
             _ => Ok(()),
@@ -666,17 +854,30 @@ impl ApplicationHandler for Launcher {
                 }
             }
         }
+        if let Some(tc) = &mut self.control_editor
+            && let Some(ed) = &mut tc.editor
+            && std::mem::take(&mut ed.keyboard_request)
+        {
+            let text = if ed.editing_save_desc {
+                ed.save_desc_input.clone()
+            } else {
+                ed.save_name_input.clone()
+            };
+            crate::platform::show(&text);
+        }
         for out in crate::platform::poll() {
             if matches!(out, horizon_client::osk::Output::Enter) {
                 crate::platform::hide();
             }
-            self.catalog.edit(out, &self.home);
+            self.edit_text(out);
         }
         if let Some(audio) = &mut self.audio {
             audio.tick(false, &Default::default());
         }
         self.catalog.poll(&self.home);
+        self.wardrobe.poll();
         if let Some(notice) = crate::documents::poll() {
+            self.wardrobe.reload();
             self.catalog.status = notice.text;
             if notice.changed {
                 self.catalog.refresh(&self.home);
@@ -686,18 +887,61 @@ impl ApplicationHandler for Launcher {
         for result in crate::gallery::poll() {
             self.catalog.status = result.unwrap_or_else(|e| format!("File export failed: {e}"));
         }
-        self.login.poll();
+        if self.login.poll() {
+            self.session_worker = None;
+            self.prepared_session = None;
+            self.session_ready = false;
+            self.refresh_wardrobe_account();
+        }
         if let Some(result) = self.session_worker.as_ref().and_then(|w| w.try_recv().ok()) {
-            let launch_pending = self.catalog.status == "Preparing Microsoft session...";
+            let launch_pending = self.launching
+                || self.catalog.status == "Preparing account session and appearance...";
             self.session_worker = None;
             match result {
-                Ok(file) => {
-                    self.prepared_session = file;
-                    self.session_ready = true;
-                    if launch_pending {
-                        self.catalog.status.clear();
-                        if let Err(e) = self.action(events) {
-                            self.fail(e);
+                Ok(prepared) => {
+                    // Only the current selection may publish the game handoff.
+                    if crate::account::Accounts::load()
+                        .selected()
+                        .is_none_or(|a| a.key() != prepared.key)
+                    {
+                        self.launching = false;
+                        self.launch_pending_tick = false;
+                        let _ = std::fs::remove_file(prepared.file);
+                        self.catalog.status =
+                            "The selected account changed. Choose Play again.".into();
+                    } else {
+                        let root = self.home.join("wardrobe");
+                        let cloud = prepared.appearance.skin.as_deref().map(|p| {
+                            (
+                                p,
+                                prepared.appearance.slim,
+                                prepared.appearance.cape.as_deref(),
+                            )
+                        });
+                        let appearance =
+                            crate::skins::library::Library::load(&root).and_then(|library| {
+                                library.prepare_game(
+                                    &root,
+                                    &prepared.key,
+                                    &self.catalog.config.game_home(&self.home),
+                                    cloud,
+                                )
+                            });
+                        match appearance {
+                            Ok(()) => {
+                                self.prepared_session = Some(prepared.file);
+                                self.session_ready = true;
+                                if launch_pending {
+                                    self.catalog.status.clear();
+                                    if let Err(e) = self.action(events) {
+                                        self.fail(e);
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                let _ = std::fs::remove_file(prepared.file);
+                                self.fail(error);
+                            }
                         }
                     }
                 }
@@ -711,16 +955,35 @@ impl ApplicationHandler for Launcher {
             }
         }
 
+        if self.launch_pending_tick {
+            self.launch_pending_tick = false;
+            if let Err(error) = self.action(events) {
+                self.fail(error);
+            }
+            if self.game.is_some() {
+                return;
+            }
+        }
         if let Some(window) = &self.window {
             window.request_redraw();
         }
         let frame_ms = if self.worker.is_some()
+            || self.launching
+            || self.session_worker.is_some()
             || self.catalog.busy()
             || self.drag.is_some()
             || self.login.pending()
             || self.control_editor.is_some()
-            || self.catalog.project_modal.as_ref().is_some_and(|m| m.loading)
+            || self
+                .catalog
+                .project_modal
+                .as_ref()
+                .is_some_and(|m| m.loading)
             || self.anim.is_active()
+            || (self.catalog.page == Page::Skins && self.wardrobe.is_animating())
+            || self
+                .feedback
+                .is_some_and(|(_, t)| t.elapsed() < Duration::from_millis(180))
         {
             16
         } else {

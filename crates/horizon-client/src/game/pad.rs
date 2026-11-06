@@ -29,6 +29,10 @@ pub(super) struct Pads {
     #[cfg(target_os = "android")]
     pub(super) custom_keys: std::collections::HashSet<KeyCode>,
     #[cfg(target_os = "android")]
+    pub(super) custom_pressed_at: std::collections::HashMap<String, u64>,
+    #[cfg(target_os = "android")]
+    pub(super) late_custom_releases: Vec<String>,
+    #[cfg(target_os = "android")]
     pub(super) hardware_keys: std::collections::HashSet<KeyCode>,
     #[cfg(target_os = "android")]
     last_input_mode: Option<horizon_client::android_gamepad::InputMode>,
@@ -139,7 +143,7 @@ mod hardware {
         }
         pub(super) fn pad_output_frame(&mut self) {
             #[cfg(target_os = "android")]
-            if !self.settings.controller.vibration {
+            if !self.settings.controller.vibration || !self.pad.touch.settings.vibrate {
                 crate::platform::cancel_vibration();
             }
         }
@@ -167,26 +171,34 @@ impl Pads {
                 "key.sneak" => {
                     self.custom_keys.contains(&KeyCode::ShiftLeft)
                         || self.custom_keys.contains(&KeyCode::ShiftRight)
-                        || self.touch.held_custom_tokens().any(|t| {
-                            matches!(
-                                t,
-                                "key.keyboard.left.shift"
-                                    | "key.keyboard.right.shift"
-                                    | "action:key.sneak"
-                            )
-                        })
+                        || self
+                            .touch
+                            .held_custom_tokens()
+                            .chain(self.late_custom_releases.iter().map(String::as_str))
+                            .any(|t| {
+                                matches!(
+                                    t,
+                                    "key.keyboard.left.shift"
+                                        | "key.keyboard.right.shift"
+                                        | "action:key.sneak"
+                                )
+                            })
                 }
                 "key.sprint" => {
                     self.custom_keys.contains(&KeyCode::ControlLeft)
                         || self.custom_keys.contains(&KeyCode::ControlRight)
-                        || self.touch.held_custom_tokens().any(|t| {
-                            matches!(
-                                t,
-                                "key.keyboard.left.control"
-                                    | "key.keyboard.right.control"
-                                    | "action:key.sprint"
-                            )
-                        })
+                        || self
+                            .touch
+                            .held_custom_tokens()
+                            .chain(self.late_custom_releases.iter().map(String::as_str))
+                            .any(|t| {
+                                matches!(
+                                    t,
+                                    "key.keyboard.left.control"
+                                        | "key.keyboard.right.control"
+                                        | "action:key.sprint"
+                                )
+                            })
                 }
                 _ => false,
             };
@@ -234,6 +246,9 @@ impl Game<'_> {
                 &crate::backend::game_home(),
             );
             self.pad.touch.inventory_mode = self.android_inventory_controls();
+            if !self.pad.touch.inventory_mode {
+                self.pad.touch.inventory_shift = false;
+            }
             self.android_virtual_mouse_clicks(event_loop);
             let active = horizon_client::android_runtime::active_input();
             if self.pad.last_input_mode.replace(active).is_some_and(|old| {
@@ -327,12 +342,31 @@ impl Game<'_> {
                     if self.remote.is_some() {
                         self.remote_start_attack();
                     } else {
-                        self.attack();
+                        if self.attack() {
+                            self.reset_attack_strength();
+                        }
+                        self.swing_arm();
                     }
                 } else if !held_use {
-                    // Preserve normal block placement and empty-hand interaction.
-                    // Items with a use action wait for the long-press instead.
-                    touch.triggers[0] = 1.0;
+                    if self.pick().is_none()
+                        && self.using.is_none()
+                        && self.screen == Screen::Playing
+                    {
+                        // In Java Edition, clicking in air initiates an attack / arm swing.
+                        if self.remote.is_some() {
+                            self.remote_start_attack();
+                        } else {
+                            if !self.creative {
+                                self.clicks.miss_time = 10;
+                            }
+                            self.reset_attack_strength();
+                            self.swing_arm();
+                        }
+                    } else {
+                        // Preserve normal block placement and empty-hand interaction.
+                        // Items with a use action wait for the long-press instead.
+                        touch.triggers[0] = 1.0;
+                    }
                 }
             }
             state.merge(&touch)
@@ -365,6 +399,14 @@ impl Game<'_> {
                 self.pad_button_logged(event_loop, button, false);
             } else {
                 self.pad.late_releases.push(button);
+            }
+        }
+        #[cfg(target_os = "android")]
+        for token in std::mem::take(&mut self.pad.late_custom_releases) {
+            if !ticking || self.pad.custom_pressed_at.get(&token) != Some(&self.ticks) {
+                self.android_dispatch_custom_token(&token, false);
+            } else {
+                self.pad.late_custom_releases.push(token);
             }
         }
         for (button, down) in edges {
@@ -716,6 +758,10 @@ impl Game<'_> {
     /// playing (a pad lying idle while the mouse plays stays still).
     pub(super) fn pad_rumble(&mut self, rumble: Rumble) {
         let settings = &self.settings.controller;
+        #[cfg(target_os = "android")]
+        if !self.pad.touch.settings.vibrate {
+            return;
+        }
         if (!settings.enabled && !cfg!(target_os = "android"))
             || !settings.vibration
             || !self.pad.in_use

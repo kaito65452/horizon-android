@@ -202,6 +202,7 @@ mod native_entities;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
+mod voice_ui;
 #[cfg(target_os = "android")]
 use android_bundled::{
     official_minimap, official_recipes, official_recipes_glue, official_zoom, smartf3,
@@ -549,6 +550,7 @@ impl Options {
                 .and_then(|()| std::env::set_current_dir(&dir))
                 .map_err(|e| format!("game folder {}: {e}", dir.display()))?;
         }
+        horizon_client::skins::appearance::configure(std::path::Path::new("."))?;
         // Vanilla's quick play (Main, QuickPlay.joinSingleplayerWorld): only a
         // world that exists opens; else the title screen. --world also creates one.
         if let Some(world) = o.quick_play.take() {
@@ -790,6 +792,8 @@ enum Screen {
     Mod,
     /// DebugOptionsScreen, F3+F6 (game/debug_options.rs).
     DebugOptions,
+    /// Simple Voice Chat modal screen
+    VoiceChat,
 }
 impl Screen {
     /// The id native mods see for this screen (`NativeScreenView.id`, the
@@ -817,6 +821,7 @@ impl Screen {
             Screen::Win => "win",
             Screen::DebugOptions => "debug_options",
             Screen::Mod => "mod",
+            Screen::VoiceChat => "voice_chat",
         }
     }
 }
@@ -1444,6 +1449,14 @@ impl LevelAccess for GameLevel<'_> {
         self.world.block(pos.x, pos.y, pos.z)
     }
     fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+        self.set_raw_with_flags(pos, state, horizon_world::level::flags::UPDATE_ALL)
+    }
+    fn set_raw_with_flags(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        flags: i32,
+    ) -> Option<BlockStateId> {
         // `Level.setBlock`: a server level of the Debug preset never changes.
         if self.debug && !self.client_side {
             return None;
@@ -1455,7 +1468,10 @@ impl LevelAccess for GameLevel<'_> {
             return None;
         }
         let previous = self.world.block(pos.x, pos.y, pos.z);
-        self.world.set(pos.x, pos.y, pos.z, state).ok()?;
+        let visible = flags & horizon_world::level::flags::UPDATE_INVISIBLE == 0;
+        self.world
+            .set_with_visibility(pos.x, pos.y, pos.z, state, visible)
+            .ok()?;
         Some(previous)
     }
     fn is_loaded(&self, pos: BlockPos) -> bool {
@@ -1879,6 +1895,9 @@ pub struct UiResources {
     pub atlas: HudAtlas,
     /// The title screen's panorama faces.
     pub panorama: Arc<horizon_client::gfx::panorama::Faces>,
+    /// Preloaded sound registry so Android title screen initialization does not
+    /// stall the UI thread reading `sounds.json`.
+    pub sounds: Option<horizon_client::sound_events::SoundRegistry>,
 }
 impl UiResources {
     /// From a resource root layering packs over `defaults`, the game's own
@@ -1887,6 +1906,7 @@ impl UiResources {
         Ok(Self {
             atlas: HudAtlas::build_over(root, defaults)?,
             panorama: Arc::new(horizon_client::gfx::panorama::Faces::load(root)),
+            sounds: Some(horizon_client::sound_events::SoundRegistry::load(root)),
         })
     }
     /// What a server's game holds, since it draws nothing: the font, which books
@@ -1898,6 +1918,7 @@ impl UiResources {
                 size: 1,
                 pixels: [0u8; 4].repeat(6),
             }),
+            sounds: None,
         })
     }
 }
@@ -2211,6 +2232,8 @@ struct Game<'a> {
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: horizon_client::widgets::Cursor,
     captured: bool,
+    os_mouse_captured: bool,
+    was_menu_blurred: bool,
     /// Only the local player owning keyboard and mouse changes the native pointer.
     keyboard_mouse: bool,
     /// This view's corner in its shared window; cursor warps include the offset.
@@ -2246,6 +2269,7 @@ struct Game<'a> {
     pause: bool,
     debug: bool,
     screen: Screen,
+    pub voice: horizon_client::voice::VoiceChatClient,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// CPU geometry storage retained across frames, including empty/title frames.
@@ -3360,7 +3384,14 @@ impl Game<'_> {
         player.mobility_restricted = blind;
         player.yaw = self.yaw;
         player.pitch = self.pitch;
-        player.auto_jump_enabled = self.settings.auto_jump;
+        #[cfg(target_os = "android")]
+        {
+            player.auto_jump_enabled = self.settings.auto_jump || self.pad.touch.settings.auto_jump;
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            player.auto_jump_enabled = self.settings.auto_jump;
+        }
         player.item_use_speed = item_use_speed;
         player.item_use_slows_sprint = item_use_slows_sprint;
         player.respiration = respiration;
@@ -7559,6 +7590,9 @@ impl Game<'_> {
             self.turn_player(xo * zoom, yo * zoom);
         }
     }
+    pub(super) fn singleplayer_paused(&self) -> bool {
+        self.pause || self.pauses_game()
+    }
     /// `Minecraft.pause`: a single-player game with a pausing screen open.
     fn pauses_game(&self) -> bool {
         self.has_singleplayer_server()
@@ -7666,13 +7700,17 @@ impl Game<'_> {
         if !capture {
             self.stop_mining();
             #[cfg(target_os = "android")]
-            crate::platform::capture_mouse(false);
+            {
+                self.os_mouse_captured = false;
+                let _ = crate::platform::capture_mouse(false);
+            }
         }
         // The real pointer takes over from an agent's.
         self.agent_pointer = false;
         // Splitscreen: another player has the pointer; this one's menus leave it alone.
         if !self.keyboard_mouse {
             self.captured = false;
+            self.os_mouse_captured = false;
             return;
         }
         if capture && !self.captured && !cfg!(target_os = "macos") {
@@ -7717,8 +7755,13 @@ impl Game<'_> {
                 .is_ok();
             #[cfg(target_os = "android")]
             {
-                self.captured =
-                    !crate::keyboard_mouse_input() || crate::platform::capture_mouse(true);
+                self.captured = capture;
+                self.os_mouse_captured = if capture && crate::keyboard_mouse_input() {
+                    crate::platform::capture_mouse(true)
+                } else {
+                    let _ = crate::platform::capture_mouse(false);
+                    false
+                };
             }
             #[cfg(not(target_os = "macos"))]
             if self.captured && self.focused {
@@ -7742,6 +7785,7 @@ impl Game<'_> {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
             }
             self.captured = false;
+            self.os_mouse_captured = false;
         }
         // MouseHandler.grabMouse and releaseMouse: the mouse position is
         // the window's centre whenever the pointer's grab state changes, so
@@ -8351,10 +8395,12 @@ impl Game<'_> {
             }
             Screen::Chat => self.draw_chat_screen(&mut batch),
             Screen::Mod => self.draw_mod_screen(&mut batch),
+            Screen::VoiceChat => self.draw_voice_chat_screen(&mut batch),
             Screen::Playing | Screen::Options | Screen::Win => {}
         }
         self.fire_screen_render_post(&mut batch);
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_saving_indicator(b));
+        self.draw_voice_hud_indicator(&mut batch);
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_toasts(b, !show_hud));
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| {
             self.draw_pack_toasts(b, !show_hud)
@@ -9930,10 +9976,25 @@ impl Game<'_> {
     /// and a sneak the key no longer held: #4166's in-game report), so a
     /// cached key set is not vanilla's answer.
     pub(super) fn has_shift_down(&self) -> bool {
+        #[cfg(target_os = "android")]
+        if (self.android_inventory_controls() && self.pad.touch.inventory_shift)
+            || self.pad.touch_ui.modifier_latched(KeyCode::ShiftLeft)
+            || self.pad.custom_keys.contains(&KeyCode::ShiftLeft)
+            || self.pad.custom_keys.contains(&KeyCode::ShiftRight)
+        {
+            return true;
+        }
         self.modifiers.shift_key()
     }
     /// The same live word for Control (`InputWithModifiers.hasControlDown`).
     pub(super) fn has_control_down(&self) -> bool {
+        #[cfg(target_os = "android")]
+        if self.pad.touch_ui.modifier_latched(KeyCode::ControlLeft)
+            || self.pad.custom_keys.contains(&KeyCode::ControlLeft)
+            || self.pad.custom_keys.contains(&KeyCode::ControlRight)
+        {
+            return true;
+        }
         self.modifiers.control_key()
     }
     /// Real events word the modifiers by their own `ModifiersChanged`; a
@@ -13490,7 +13551,19 @@ impl Game<'_> {
     fn apply_settings(&mut self) {
         #[cfg(target_os = "android")]
         {
-            self.pad.touch.settings = self.settings.touch.clone();
+            if self.settings.touch.auto_jump != self.settings.auto_jump {
+                self.settings.touch.auto_jump = self.settings.auto_jump;
+                let _ = self.settings.touch.save();
+            }
+            if self.settings.touch.sprint_toggle != self.settings.toggle_sprint {
+                let s = self.settings.toggle_sprint || self.settings.touch.sprint_toggle;
+                self.settings.touch.sprint_toggle = s;
+                self.settings.touch.toggle_sprint = s;
+                self.settings.toggle_sprint = s;
+            }
+            if self.pad.touch.editor.is_none() {
+                self.pad.touch.settings = self.settings.touch.clone();
+            }
             self.pad.touch.force_crosshair =
                 !crate::touch_visible() || self.settings.keypad.enabled;
             let changed =
@@ -14725,6 +14798,40 @@ impl Game<'_> {
         // Load the profile's scheme before drawing the first frame or outline.
         #[cfg(target_os = "android")]
         self.pad.touch.viewport(size[0], size[1]);
+        let raw_menu_blur = self.menu_blur();
+        #[cfg(target_os = "android")]
+        let in_world_stationary_overlay = !self.shows_panorama()
+            && self.player.is_some()
+            && !self.pad.touch_ui.floating_menu
+            && (self.singleplayer_paused()
+                || self.screen != Screen::Playing
+                || self.pad.touch.editor.is_some())
+            && (self.singleplayer_paused()
+                || self.pad.touch.editor.is_some()
+                || self.pad.touch.state().left == [0.0, 0.0]);
+        #[cfg(not(target_os = "android"))]
+        let in_world_stationary_overlay = false;
+        let menu_blur = if in_world_stationary_overlay {
+            raw_menu_blur.or(Some(0.0))
+        } else {
+            raw_menu_blur
+        };
+        let menu_blur_cache = ((self.singleplayer_paused() || self.screen == Screen::Options)
+            && !self.shows_panorama()
+            && menu_blur.is_some())
+            || in_world_stationary_overlay;
+        if !menu_blur_cache || !self.was_menu_blurred {
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.invalidate_menu_blur();
+            }
+        }
+        self.was_menu_blurred = menu_blur_cache;
+        let skip_world_for_blur = menu_blur_cache
+            && menu_blur.is_some_and(|r| {
+                self.renderer
+                    .as_ref()
+                    .is_some_and(|renderer| renderer.has_cached_menu_blur(r))
+            });
         let alpha = self.clock.fraction();
         // Camera.getCameraEntityPartialTicks: the view, the hand and the
         // player's own model stay smooth while the level is frozen.
@@ -14767,6 +14874,7 @@ impl Game<'_> {
                 .solid_render;
         // The cave culling search runs on its worker while the frame is prepared.
         if cave_culling
+            && !skip_world_for_blur
             && self.title.is_none()
             && let Some(renderer) = self.renderer.as_mut()
         {
@@ -14882,72 +14990,79 @@ impl Game<'_> {
         // does not open menus for spectators, so those never show it. An open
         // screen does not hide it: vanilla checks the HUD and the game mode, not the screen.
         let adventure = self.mode == horizon_client::command::args::GameMode::Adventure;
-        let outline =
-            if touch_target_visible && !self.ui.hide_gui && (self.may_build() || adventure) {
-                self.pick()
-                    .filter(|h| {
-                        self.may_build()
-                            || !self.block_action_restricted(h.pos)
-                            || self.can_place_on_in_adventure(h.pos)
-                    })
-                    .filter(|h| {
-                        let state = self.world.block(h.pos[0], h.pos[1], h.pos[2]);
-                        let mut canceled = false;
-                        self.native_block_highlight(h.pos, state, alpha as f32, &mut canceled);
-                        !canceled
-                    })
-                    .map(|h| {
-                        let state = self.world.block(h.pos[0], h.pos[1], h.pos[2]);
-                        let f = self.res.facts().get(state);
-                        outline_after_terrain = self
-                            .pack
-                            .render
-                            .model_catalog
-                            .collect(state, BlockPos::new(h.pos[0], h.pos[1], h.pos[2]))
-                            .is_ok_and(|models| {
-                                models
-                                    .iter()
-                                    .any(|(_, model)| model.faces.iter().any(|f| f.translucent))
-                            });
-                        let o = if f.outline_offset {
-                            self.pack
-                                .context
-                                .tables
-                                .offset(state, h.pos[0], h.pos[2])
-                                .unwrap_or([0.0; 3])
-                        } else {
-                            [0.0; 3]
-                        };
-                        let p = h.pos.map(f64::from);
-                        if let Some(b) = self.context_outline(h.pos, state) {
-                            return horizon_client::blocks::cube_edges()
+        let outline = if !skip_world_for_blur
+            && touch_target_visible
+            && !self.ui.hide_gui
+            && (self.may_build() || adventure)
+        {
+            self.pick()
+                .filter(|h| {
+                    self.may_build()
+                        || !self.block_action_restricted(h.pos)
+                        || self.can_place_on_in_adventure(h.pos)
+                })
+                .filter(|h| {
+                    let state = self.world.block(h.pos[0], h.pos[1], h.pos[2]);
+                    let mut canceled = false;
+                    self.native_block_highlight(h.pos, state, alpha as f32, &mut canceled);
+                    !canceled
+                })
+                .map(|h| {
+                    let state = self.world.block(h.pos[0], h.pos[1], h.pos[2]);
+                    let f = self.res.facts().get(state);
+                    outline_after_terrain = self
+                        .pack
+                        .render
+                        .model_catalog
+                        .collect(state, BlockPos::new(h.pos[0], h.pos[1], h.pos[2]))
+                        .is_ok_and(|models| {
+                            models
                                 .iter()
-                                .map(|e| {
-                                    std::array::from_fn(|i| {
-                                        let k = i % 3;
-                                        p[k] + b[k] + e[i] * (b[k + 3] - b[k])
-                                    })
-                                })
-                                .collect();
-                        }
-                        f.outline_edges
+                                .any(|(_, model)| model.faces.iter().any(|f| f.translucent))
+                        });
+                    let o = if f.outline_offset {
+                        self.pack
+                            .context
+                            .tables
+                            .offset(state, h.pos[0], h.pos[2])
+                            .unwrap_or([0.0; 3])
+                    } else {
+                        [0.0; 3]
+                    };
+                    let p = h.pos.map(f64::from);
+                    if let Some(b) = self.context_outline(h.pos, state) {
+                        return horizon_client::blocks::cube_edges()
                             .iter()
-                            .map(|e| std::array::from_fn(|i| p[i % 3] + o[i % 3] + e[i]))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            };
+                            .map(|e| {
+                                std::array::from_fn(|i| {
+                                    let k = i % 3;
+                                    p[k] + b[k] + e[i] * (b[k + 3] - b[k])
+                                })
+                            })
+                            .collect();
+                    }
+                    f.outline_edges
+                        .iter()
+                        .map(|e| std::array::from_fn(|i| p[i % 3] + o[i % 3] + e[i]))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let mut hud = horizon_client::spans::time("hud", || self.hud(size));
         #[cfg(target_os = "android")]
         {
             self.pad.touch.auxiliary_only =
                 self.settings.keypad.enabled && self.pad.touch.editor.is_none();
+            self.pad.touch.update_visibility(
+                crate::touch_visible(),
+                (self.frame_ticks / 20.0).clamp(0.0, 0.25),
+            );
         }
         #[cfg(target_os = "android")]
         if self.pad.touch.editor.is_some() {
-            let profile_name = self.pad.touch.settings.active_profile.clone();
+            let profile_name = self.pad.touch.settings.preset_name.clone();
             horizon_client::touch_ui::draw_hud_editor(
                 &self.pad.touch,
                 &mut hud,
@@ -14956,10 +15071,32 @@ impl Game<'_> {
                 None,
             );
         } else {
+            #[cfg(target_os = "android")]
+            self.android_sync_pointer();
+            // Draw the virtual mouse pointer directly above the vanilla game/menu GUI layer
+            // and strictly underneath our touch controls and floating menu overlays.
+            #[cfg(target_os = "android")]
+            if self.pad.touch_ui.virtual_mouse {
+                horizon_client::touch_ui::draw_pointer(
+                    &mut hud,
+                    &self.gui.atlas,
+                    self.cursor,
+                    self.pad.touch.settings.virtual_mouse_pointer_scale,
+                );
+            }
             let in_menu = self.pad_in_menu();
-            self.pad.touch.in_menu = in_menu;
+            let waiting_for_key = self.screen == Screen::Options && self.options_waiting_for_key();
+            let hud_in_menu = in_menu && !waiting_for_key;
+            self.pad.touch.in_menu = hud_in_menu;
             self.pad.touch.goy_rendered_by_ui = true;
-            if self.player.is_some() || self.settings.keypad.enabled {
+            if (in_menu || !self.ui.hide_gui)
+                && (self.player.is_some() || self.settings.keypad.enabled)
+                && (!hud_in_menu
+                    || self.android_inventory_controls()
+                    || self.pad.touch.settings.layouts[self.pad.touch.settings.mode.index()]
+                        .iter()
+                        .any(|p| p.visible_in_menu))
+            {
                 self.pad.touch.context_use =
                     self.pad.touch.settings.contextual_interact && self.touch_context_use();
                 self.pad.touch.vertical_movement = self.player.as_ref().is_some_and(|p| p.flying);
@@ -14970,19 +15107,22 @@ impl Game<'_> {
                 self.pad.touch.break_progress = self.touch_mining_progress();
                 self.pad.touch.draw(&mut hud, &self.gui.atlas);
             }
-            if !self.settings.keypad.enabled {
+            if !self.settings.keypad.enabled && (in_menu || !self.ui.hide_gui) {
                 horizon_client::touch_ui::draw_goy_hud(
                     &self.pad.touch,
                     &mut hud,
                     &self.gui.atlas,
-                    in_menu,
+                    hud_in_menu,
                     self.pad.touch_ui.virtual_mouse,
                 );
             }
         }
         #[cfg(target_os = "android")]
         {
+            self.android_sync_pointer();
             if self.pad.touch.editor.is_none() {
+                self.pad.touch_ui.goy_mode = self.pad.touch.settings.control_style
+                    == horizon_client::touch::ControlStyle::GoyControl;
                 self.pad
                     .touch_ui
                     .draw(&mut hud, &self.gui.atlas, self.pad_in_menu());
@@ -15039,24 +15179,25 @@ impl Game<'_> {
         self.see_through_vertices.clear();
         self.glowing_vertices.get_mut().clear();
         self.shadow_only_vertices.get_mut().clear();
-        if !title {
+        let skip_world = title || skip_world_for_blur;
+        if !skip_world {
             entities = horizon_client::spans::time("entity_geometry", || {
                 self.entity_geometry(camera, alpha, entities)
             });
         }
-        let bolts = if title {
+        let bolts = if skip_world {
             Vec::new()
         } else {
             self.bolt_instances(camera)
         };
         let mut additive = Vec::new();
-        if !title && self.dim == Dim::End {
+        if !skip_world && self.dim == Dim::End {
             let mut dragon = Vec::new();
             self.dragon_geometry(camera, alpha, &mut dragon, &mut additive);
             self.dragon_fireball_geometry(camera, alpha, &mut dragon);
             entities.extend(dragon);
         }
-        let (celestial, stars) = if title {
+        let (celestial, stars) = if skip_world {
             (Vec::new(), None)
         } else if self.dim == Dim::Overworld
             && self.potions.effects.get("darkness").is_none()
@@ -15069,19 +15210,19 @@ impl Game<'_> {
         } else {
             (Vec::new(), None)
         };
-        let mut hand = if title || self.scoping() {
+        let mut hand = if skip_world || self.scoping() {
             Vec::new()
         } else {
             self.hand_geometry(camera_alpha)
         };
         // GameRenderer.render3dHud: the screen effects after the hand, in
         // its pass (the hand pass draws with `bob * view`).
-        if !title {
+        if !skip_world {
             let view = bob * horizon_client::camera::view_matrix(yaw, pitch);
             let aspect = size[0] as f32 / size[1].max(1) as f32;
             self.item_activation_geometry(camera_alpha as f32, view, aspect, &mut hand);
         }
-        let screen = if title {
+        let screen = if skip_world {
             Vec::new()
         } else {
             let scale = self
@@ -15091,19 +15232,20 @@ impl Game<'_> {
                 .unwrap_or(1.0) as f32;
             self.screen_quads(alpha as f32, size, scale)
         };
-        if !title {
+        if !skip_world {
             self.end_geometry(camera, &mut entities);
         }
-        let weather = if !title && self.dim == Dim::Overworld && self.settings.horizon.weather {
+        let weather = if !skip_world && self.dim == Dim::Overworld && self.settings.horizon.weather
+        {
             horizon_client::spans::time("weather", || self.weather_geometry(camera, alpha))
         } else {
             Vec::new()
         };
-        let border = (!title)
+        let border = (!skip_world)
             .then(|| self.border_draw(camera.to_array(), alpha as f32))
             .flatten();
         let see_through = std::mem::take(&mut self.see_through_vertices);
-        if title {
+        if skip_world {
             self.dynamic_lights.clear();
         } else {
             self.gather_dynamic_lights(camera, alpha);
@@ -15138,6 +15280,7 @@ impl Game<'_> {
             shadow_cache: self.settings.horizon.shadow_cache,
             distance,
             detail_distance: (self.streaming.radius * 16) as f32,
+            distant_terrain: self.lod.is_some(),
             depth_far,
             underwater,
             water_plane: if title
@@ -15246,7 +15389,8 @@ impl Game<'_> {
             boss_darken: self
                 .boss_overlay
                 .darken_amount(self.clock.fraction() as f32),
-            menu_blur: self.menu_blur(),
+            menu_blur,
+            menu_blur_cache,
             post_effects: horizon_client::post_chain::Request {
                 effects: &requested_post_effects,
                 root: &self.options.resources,
@@ -15267,7 +15411,11 @@ impl Game<'_> {
                     ..Default::default()
                 },
             },
-            chunk_fade: self.settings.chunk_fade,
+            chunk_fade: if horizon_client::ui_theme::motion::game_animations_disabled() {
+                0.0
+            } else {
+                self.settings.chunk_fade
+            },
         };
         let result = match self.renderer.as_mut() {
             Some(renderer) => {
@@ -15489,6 +15637,10 @@ impl Game<'_> {
                 Screen::Win => self.close_win_screen()?,
                 Screen::Mod => self.close_mod_screen(true),
                 Screen::DebugOptions => self.close_debug_options(),
+                Screen::VoiceChat => {
+                    self.screen = Screen::Playing;
+                    self.capture(true);
+                }
             },
             KeyCode::Digit1
             | KeyCode::Digit2
@@ -15588,6 +15740,20 @@ impl Game<'_> {
             KeyCode::KeyQ if self.screen == Screen::Playing => {
                 let all = drop_whole_stack(self.modifiers);
                 self.drop_held(all);
+            }
+            KeyCode::KeyV if self.screen == Screen::VoiceChat => {
+                self.screen = Screen::Playing;
+                self.capture(true);
+            }
+            KeyCode::KeyV if self.screen == Screen::Playing => {
+                self.screen = Screen::VoiceChat;
+                self.capture(false);
+            }
+            KeyCode::KeyM if self.screen == Screen::Playing => {
+                self.voice_toggle_mute();
+            }
+            KeyCode::KeyN if self.screen == Screen::Playing => {
+                self.voice_toggle_disable();
             }
             KeyCode::Digit1
             | KeyCode::Digit2
@@ -16104,6 +16270,10 @@ impl ApplicationHandler for Game<'_> {
                 ) {
                     return;
                 }
+                crate::touch_input(false);
+                if crate::keyboard_mouse_input() && self.captured && !self.os_mouse_captured {
+                    self.os_mouse_captured = crate::platform::capture_mouse(true);
+                }
             }
             self.mouse.on_move(0.0, 0.0, x, y, true, true);
             self.last_input = Instant::now();
@@ -16152,9 +16322,10 @@ impl Game<'_> {
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && event.state == ElementState::Pressed
             && let PhysicalKey::Code(key) = event.physical_key
-            && let Some(name) = horizon_client::keybinds::key_name(key)
-            && self.pad.touch.capture_custom_key(name)
+            && self.pad.touch.capture_custom_key_code(key)
         {
+            self.settings.touch = self.pad.touch.settings.clone();
+            crate::platform::hide();
             return;
         }
         #[cfg(target_os = "android")]
@@ -16176,21 +16347,25 @@ impl Game<'_> {
         | WindowEvent::MouseWheel { device_id, .. } = &event
             && winit::platform::android::native_pointer_device(*device_id)
         {
-            let before = crate::keyboard_mouse_input();
             let accepted = horizon_client::android_runtime::note_input(
                 horizon_client::android_gamepad::InputMode::KeyboardMouse,
             );
             if !accepted && !self.pad_in_menu() {
                 return;
             }
-            if !before && crate::keyboard_mouse_input() && self.captured {
-                self.capture(false);
-                self.capture(true);
+            if crate::keyboard_mouse_input() && self.captured && !self.os_mouse_captured {
+                self.os_mouse_captured = crate::platform::capture_mouse(true);
             }
         }
         #[cfg(target_os = "android")]
         match &event {
-            WindowEvent::Touch(_) => crate::touch_input(true),
+            WindowEvent::Touch(_) => {
+                crate::touch_input(true);
+                if self.os_mouse_captured {
+                    self.os_mouse_captured = false;
+                    let _ = crate::platform::capture_mouse(false);
+                }
+            }
             WindowEvent::KeyboardInput {
                 device_id,
                 event,
@@ -16198,7 +16373,10 @@ impl Game<'_> {
             } if event.state == ElementState::Pressed
                 && winit::platform::android::native_device_id(*device_id) > 0 =>
             {
-                crate::touch_input(false)
+                crate::touch_input(false);
+                if crate::keyboard_mouse_input() && self.captured && !self.os_mouse_captured {
+                    self.os_mouse_captured = crate::platform::capture_mouse(true);
+                }
             }
             _ => {}
         }
@@ -16245,15 +16423,16 @@ impl Game<'_> {
         #[cfg(target_os = "android")]
         if matches!(&event,WindowEvent::KeyboardInput {event,..} if event.state==ElementState::Pressed && event.logical_key==winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack))
         {
-            if self.pad.touch.editor.is_some() {
-                self.pad.touch.cancel_editor();
-                let _ = self.pad.touch.settings.save();
-                self.settings.touch = self.pad.touch.settings.clone();
-                self.pause = false;
-                return;
-            }
             if crate::platform::active() {
                 crate::platform::hide();
+                return;
+            }
+            if self.pad.touch.editor.is_some() {
+                if self.pad.touch.request_editor_back() {
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                    self.pause = false;
+                }
                 return;
             }
             self.pad.touch.clear();
@@ -16268,11 +16447,93 @@ impl Game<'_> {
             && matches!(&event,WindowEvent::KeyboardInput{event,..}
             if event.state==ElementState::Pressed && event.physical_key==PhysicalKey::Code(KeyCode::Escape))
         {
-            self.pad.touch.cancel_editor();
-            let _ = self.pad.touch.settings.save();
-            self.settings.touch = self.pad.touch.settings.clone();
-            self.pause = false;
+            if crate::platform::active() {
+                crate::platform::hide();
+                return;
+            }
+            if self.pad.touch.request_editor_back() {
+                let _ = self.pad.touch.settings.save();
+                self.settings.touch = self.pad.touch.settings.clone();
+                self.pause = false;
+            }
             return;
+        }
+        #[cfg(target_os = "android")]
+        if let WindowEvent::KeyboardInput { event, .. } = &event
+            && event.state == ElementState::Pressed
+        {
+            if self.pad.touch.editor.is_some() {
+                if let PhysicalKey::Code(code) = event.physical_key
+                    && self.pad.touch.capture_custom_key_code(code)
+                {
+                    self.settings.touch = self.pad.touch.settings.clone();
+                    crate::platform::hide();
+                    return;
+                }
+                if let Some(txt) = event.text.as_deref()
+                    && self.pad.touch.capture_custom_text(txt)
+                {
+                    self.settings.touch = self.pad.touch.settings.clone();
+                    crate::platform::hide();
+                    return;
+                }
+            }
+            if self.pad.touch_ui.custom_input_picker != horizon_client::touch::PickerStep::None {
+                if let PhysicalKey::Code(code) = event.physical_key
+                    && let Some(token) = self.pad.touch_ui.capture_custom_input_key(code)
+                {
+                    crate::platform::hide();
+                    self.android_custom_token_tap(&token);
+                    return;
+                }
+                if let Some(txt) = event.text.as_deref()
+                    && let Some(token) = self.pad.touch_ui.capture_custom_input_text(txt)
+                {
+                    crate::platform::hide();
+                    self.android_custom_token_tap(&token);
+                    return;
+                }
+            }
+        }
+        #[cfg(target_os = "android")]
+        if let WindowEvent::KeyboardInput { event, .. } = &event
+            && event.state == ElementState::Pressed
+            && (self
+                .pad
+                .touch
+                .editor
+                .as_ref()
+                .is_some_and(|e| e.save_dialog_open)
+                || self.pad.touch_ui.preset_dialog.is_some())
+        {
+            if let PhysicalKey::Code(code) = event.physical_key {
+                if matches!(code, KeyCode::Backspace | KeyCode::Enter | KeyCode::Escape) {
+                    let out = horizon_client::osk::Output::Key(code);
+                    horizon_client::touch_ui::apply_editor_or_preset_output(
+                        self.pad.touch.editor.as_mut(),
+                        self.pad.touch_ui.preset_dialog.as_mut(),
+                        &out,
+                    );
+                    if horizon_client::touch_ui::output_dismisses(&out) {
+                        crate::platform::hide();
+                    }
+                    return;
+                }
+            }
+            if let Some(txt) = event.text.as_deref()
+                && !txt.is_empty()
+            {
+                let out = horizon_client::osk::Output::Text(txt.to_owned());
+                horizon_client::touch_ui::apply_editor_or_preset_output(
+                    self.pad.touch.editor.as_mut(),
+                    self.pad.touch_ui.preset_dialog.as_mut(),
+                    &out,
+                );
+                if horizon_client::touch_ui::output_dismisses(&out) {
+                    crate::platform::hide();
+                }
+                return;
+            }
         }
         #[cfg(target_os = "android")]
         if let WindowEvent::Touch(touch) = &event {
@@ -16308,11 +16569,10 @@ impl Game<'_> {
                         self.pause = false;
                     }
                 }
-                if self.pad.touch.editor.is_none() {
-                    self.settings.touch = self.pad.touch.settings.clone();
-                }
+                self.settings.touch = self.pad.touch.settings.clone();
                 if std::mem::take(&mut self.pad.touch.clicked) {
                     self.audio.play_button_click();
+                    self.android_touch_haptic(10);
                 }
                 return;
             }
@@ -16333,16 +16593,32 @@ impl Game<'_> {
                 touch.location.y as f32 / size.height.max(1) as f32,
             ];
             let in_menu = self.pad_in_menu();
-            self.pad.touch.in_menu = in_menu;
-            let menu_custom_hit = in_menu
+            let waiting_for_key = self.screen == Screen::Options && self.options_waiting_for_key();
+            self.pad.touch.in_menu = in_menu && !waiting_for_key;
+            let touch_controls_hidden = !crate::touch_visible()
+                && self.pad.touch.hud_opacity_scale <= 0.01
+                && self.pad.touch.editor.is_none();
+            let menu_custom_hit = !touch_controls_hidden
+                && in_menu
                 && !self.settings.keypad.enabled
                 && (self.pad.touch.owns_pointer(touch.id)
                     || (touch.phase == TouchPhase::Started
                         && self.pad.touch.custom_at(overlay_point).is_some()));
-            let inventory_control = self.android_inventory_controls()
+            let inventory_control = !touch_controls_hidden
+                && self.android_inventory_controls()
                 && (self.pad.touch.owns_pointer(touch.id)
                     || (touch.phase == TouchPhase::Started
                         && self.pad.touch.control_at_point(overlay_point)));
+            if inventory_control
+                && touch.phase == TouchPhase::Started
+                && self.pad.touch.custom_at(overlay_point).is_none()
+                && self.pad.touch.control_at(overlay_point)
+                    == Some(horizon_client::touch::Control::Sneak)
+            {
+                self.pad.touch.inventory_shift ^= true;
+                self.pad.touch.ignore(touch.id);
+                return;
+            }
             if (menu_custom_hit || inventory_control)
                 && self.pad.touch.menu_update(
                     touch.id,
@@ -16380,10 +16656,15 @@ impl Game<'_> {
                 return;
             }
             if !self.pad_in_menu() || inventory_control {
-                if !crate::touch_visible() && !self.settings.keypad.enabled {
+                if touch_controls_hidden
+                    || (!crate::touch_visible() && !self.settings.keypad.enabled)
+                {
                     return;
                 }
                 self.pad.in_use = true;
+                if !self.pad_in_menu() && !self.captured && self.focused {
+                    self.capture(true);
+                }
                 if touch.phase == TouchPhase::Started {
                     let batch = HudBatch::new([size.width, size.height]);
                     let point = [
@@ -16406,7 +16687,7 @@ impl Game<'_> {
                     self.pad.touch.projectile_crosshair = self.touch_projectile_crosshair();
                     self.pad.touch.hold_uses_item = self.touch_item_held_use();
                 }
-                let delta = self.pad.touch.update(
+                let raw_delta = self.pad.touch.update(
                     touch.id,
                     [
                         touch.location.x as f32 / size.width.max(1) as f32,
@@ -16418,8 +16699,23 @@ impl Game<'_> {
                 if self.pad.touch.has_pending_key_events() {
                     self.android_custom_events();
                 }
+                if self.pad.touch_ui.virtual_mouse
+                    && (raw_delta[0] != 0.0 || raw_delta[1] != 0.0)
+                    && let Some(b) = self.gui_scale()
+                {
+                    let vm_sens = self
+                        .pad
+                        .touch
+                        .settings
+                        .virtual_mouse_sensitivity
+                        .clamp(0.25, 4.0);
+                    self.cursor = (
+                        (self.cursor.0 + raw_delta[0] * b.width * vm_sens).clamp(0.0, b.width),
+                        (self.cursor.1 + raw_delta[1] * b.height * vm_sens).clamp(0.0, b.height),
+                    );
+                }
                 let delta = horizon_client::touch::camera_delta_with_mouse(
-                    delta,
+                    raw_delta,
                     size.width,
                     size.height,
                     &self.pad.touch.settings,
@@ -16459,8 +16755,9 @@ impl Game<'_> {
                 }
             } else {
                 if !self.android_inventory_controls() {
-                    self.pad.touch.clear();
+                    self.pad.touch.clear_world_gesture();
                 }
+                self.android_sync_pointer();
                 if !matches!(self.screen, Screen::Inventory | Screen::Creative) {
                     self.android_menu_touch(touch, event_loop, id);
                     return;
@@ -16539,6 +16836,8 @@ impl Game<'_> {
         if let WindowEvent::Focused(false) = &event {
             #[cfg(target_os = "android")]
             {
+                self.os_mouse_captured = false;
+                let _ = crate::platform::capture_mouse(false);
                 crate::device_runtime::suspend();
                 self.android_release_touch_keys(true);
                 horizon_client::android_runtime::clear_gamepads();
@@ -16875,7 +17174,24 @@ impl Game<'_> {
                 WindowEvent::Focused(focused) => {
                     self.focused = focused;
                     self.focus_lost = (!focused).then(Instant::now);
+                    #[cfg(target_os = "android")]
+                    if focused && self.captured && crate::keyboard_mouse_input() {
+                        self.os_mouse_captured = crate::platform::capture_mouse(true);
+                        self.mouse.set_ignore_first_move();
+                    } else if !focused {
+                        self.os_mouse_captured = false;
+                        let _ = crate::platform::capture_mouse(false);
+                    }
                     if !focused && self.control.is_none() {
+                        if self.has_singleplayer_server()
+                            && !self.is_published()
+                            && self.title.is_none()
+                        {
+                            self.pause = true;
+                            if let Some(server) = &self.integrated {
+                                server.set_paused(true);
+                            }
+                        }
                         self.keys.clear();
                         // Latched sneak/sprint live in `toggles`, not in the
                         // physical keys: put them back so a short alt-tab
@@ -17279,6 +17595,9 @@ impl Game<'_> {
                         Screen::DebugOptions if button == MouseButton::Left => {
                             self.debug_options_release()
                         }
+                        Screen::VoiceChat if pressed && button == MouseButton::Left => {
+                            self.voice_chat_click();
+                        }
                         Screen::ConfirmLink if pressed && button == MouseButton::Left => {
                             self.confirm_link_click()
                         }
@@ -17584,6 +17903,9 @@ impl Game<'_> {
                     };
                     self.mod_key(key, event.state == ElementState::Pressed, event.repeat);
                     self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
+                    if key == KeyCode::CapsLock {
+                        self.voice_ptt(event.state == ElementState::Pressed);
+                    }
                     // Screen.keyPressed sees the physical key, repeats included.
                     if event.state == ElementState::Pressed
                         && self.screen == Screen::Inventory
@@ -18122,6 +18444,8 @@ impl<'a> Game<'a> {
             cursor: (0.0, 0.0),
             cursor_icon: horizon_client::widgets::Cursor::Arrow,
             captured: false,
+            os_mouse_captured: false,
+            was_menu_blurred: false,
             keyboard_mouse: true,
             view_at: [0, 0],
             split_hud: Default::default(),
@@ -18140,6 +18464,15 @@ impl<'a> Game<'a> {
             pause: false,
             debug: false,
             screen: Screen::Playing,
+            voice: {
+                let mut v = horizon_client::voice::VoiceChatClient::new(
+                    &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                );
+                if !settings.touch.svc_enabled {
+                    v.config.enabled = false;
+                }
+                v
+            },
             window: None,
             renderer: None,
             entity_vertices: Vec::new(),
@@ -19188,6 +19521,12 @@ fn load_resources(
     let parallel = threads > 1;
     let mut offer = |ui: UiResources, root: &std::path::Path| {
         if menu {
+            horizon_client::ui::load_metadata(root);
+            let source = root.to_path_buf();
+            horizon_client::lang::set(horizon_client::lang::Language::load(
+                &[&source],
+                &settings.language,
+            ));
             horizon_client::telemetry::mark_ui_ready();
             log::info!(
                 "Horizon: UI bundle ready after {} ms",
@@ -19304,7 +19643,9 @@ fn load_resources(
     // The block entity renderer's face visibility: the meshes' own, whose
     // shapes already hold their faces, not a second load of the same tables.
     let visibility = pack.context.tables.visibility.clone();
-    let rest_loader = if menu {
+    // On Android, complete all rest resources and worldgen preload on the loading worker
+    // before transitioning to the MC Title Menu so the title menu never freezes on handoff.
+    let rest_loader = if menu && !cfg!(target_os = "android") {
         let resources = resources.clone();
         let root = root.clone();
         let rest_progress = progress.clone();
@@ -19356,6 +19697,15 @@ fn load_resources(
             .rest
             .set(rest)
             .map_err(|_| "world resources already loaded")?;
+        if menu {
+            world_loading::preload_world_data_now(&root, assets.registry);
+            progress.set(9);
+            horizon_client::telemetry::mark_rest_ready();
+            log::info!(
+                "Horizon: rest-ready after {} ms",
+                started.elapsed().as_millis()
+            );
+        }
         None
     };
     Ok(Loaded {
@@ -19687,6 +20037,7 @@ pub(crate) fn loading_frame(hud: &HudBatch) -> Frame<'_> {
         shadow_cache: false,
         distance: 12.0,
         detail_distance: 12.0,
+        distant_terrain: false,
         depth_far: 1000.0,
         underwater: false,
         water_plane: None,
@@ -19740,6 +20091,7 @@ pub(crate) fn loading_frame(hud: &HudBatch) -> Frame<'_> {
         chunk_fade: 0.0,
         post_effects: horizon_client::post_chain::Request::none(),
         menu_blur: None,
+        menu_blur_cache: false,
     }
 }
 
@@ -19998,7 +20350,7 @@ impl Loading {
             self.prepared_renderer = Some(job.join().map_err(|_| "renderer worker panicked")??);
             return Ok(());
         }
-        if !cfg!(target_os = "android") || self.prepared_renderer.is_some() {
+        if !cfg!(target_os = "android") || !self.shown || self.prepared_renderer.is_some() {
             return Ok(());
         }
         let Some(Ok(loaded)) = &mut self.loaded else {
@@ -20008,9 +20360,13 @@ impl Loading {
             return Ok(());
         };
         let options = self.options.as_ref().ok_or("loading already finished")?;
-        if options.offscreen || previous.info.backend != wgpu::Backend::Vulkan {
+        if options.offscreen
+            || previous.info.backend != wgpu::Backend::Vulkan
+            || previous.matches_sprite_layout(loaded.pack.render.texture_layers)
+        {
             return Ok(());
         }
+        let _ = previous.device.poll(wgpu::PollType::wait_indefinitely());
         let gui = self.gui.as_ref().ok_or("missing menu bundle")?;
         let window = self.window.clone().ok_or("window closed")?;
         let context = previous.background_context();
@@ -20046,6 +20402,9 @@ impl Loading {
                         api,
                     ))
                     .map_err(|error| error.to_string());
+                    if let Ok(r) = &result {
+                        let _ = r.device.poll(wgpu::PollType::wait_indefinitely());
+                    }
                     log::info!(
                         "Horizon: background renderer prepared in {} ms",
                         started.elapsed().as_millis()
@@ -20165,29 +20524,34 @@ impl Loading {
     }
     /// The menu bundle arrived: rebuild the loading screen with the real atlas
     /// and title panorama.
-    fn set_ui(&mut self, gui: UiResources, root: PathBuf) {
+    fn set_ui(&mut self, mut gui: UiResources, root: PathBuf) {
         log::info!(
             "Horizon: loading the title artwork after {} ms",
             self.started.elapsed().as_millis()
         );
-        self.menu.set_root(root, &self.settings);
+        self.menu.set_root(root, &self.settings, gui.sounds.take());
         self.gui = Some(gui);
         horizon_client::ui_theme::reset_atlas();
         self.apply_menu_settings();
         let Some(window) = self.window.clone() else {
             return;
         };
-        let offscreen = self.options.as_ref().is_some_and(|o| o.offscreen);
-        if let Some(renderer) = &mut self.renderer {
-            renderer.release_surface();
-        }
         let bundle = self.gui.as_ref().expect("the menu bundle was just set");
+        if let Some(renderer) = &mut self.renderer {
+            if let Err(e) = renderer.set_loading_ui(&bundle.atlas, bundle.panorama.as_ref()) {
+                self.error = Some(e);
+            } else {
+                horizon_client::hud::GUI_SCALE.store(self.settings.gui_scale, Ordering::Relaxed);
+            }
+            return;
+        }
+        let offscreen = self.options.as_ref().is_some_and(|o| o.offscreen);
         match loading_renderer(
             window,
             offscreen,
             Some(&bundle.atlas),
             Some(bundle.panorama.as_ref()),
-            self.renderer.as_ref(),
+            None,
             rendering_api(&self.settings),
         ) {
             Ok(r) => {
@@ -20199,6 +20563,10 @@ impl Loading {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(target_os = "android")]
+        if let (Some(w), Some(r)) = (&self.window, &mut self.renderer) {
+            let _ = crate::display::apply(w, r);
+        }
+        #[cfg(target_os = "android")]
         self.menu_android_keyboard();
         #[cfg(target_os = "android")]
         if let Err(error) = self.menu_gamepad_frame(event_loop) {
@@ -20209,7 +20577,7 @@ impl Loading {
         // The loop may run once more after exit(): keep the first error, the
         // one that ended loading.
         if self.error.is_some() {
-            event_loop.exit();
+            crate::game::exit_app(event_loop);
             return;
         }
         if horizon_threads::stop_requests() > 0 {
@@ -20222,6 +20590,24 @@ impl Loading {
             crate::game::exit_app(event_loop);
             return;
         }
+        #[cfg(target_os = "android")]
+        if self.shown
+            && self
+                .renderer_job
+                .as_ref()
+                .is_some_and(|job| !job.is_finished())
+        {
+            // Never submit or present on the shared Vulkan Queue from android_main
+            // while the background worker is uploading textures or compiling pipelines.
+            crate::diagnostics::heartbeat(
+                "game_resource_loading",
+                || serde_json::json!({"gpu":self.renderer.as_ref().map(|r| &r.info.name)}),
+            );
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(16),
+            ));
+            return;
+        }
         if let Some(w) = &self.window {
             if self.options.as_ref().is_some_and(|o| o.offscreen) {
                 self.draw();
@@ -20232,6 +20618,19 @@ impl Loading {
         event_loop.set_control_flow(ControlFlow::Poll);
     }
     fn draw(&mut self) {
+        #[cfg(target_os = "android")]
+        if self.shown
+            && self
+                .renderer_job
+                .as_ref()
+                .is_some_and(|job| !job.is_finished())
+        {
+            crate::diagnostics::heartbeat(
+                "game_resource_loading",
+                || serde_json::json!({"gpu":self.renderer.as_ref().map(|r| &r.info.name)}),
+            );
+            return;
+        }
         let Some(size) = self
             .renderer
             .as_ref()
@@ -20282,6 +20681,7 @@ impl Loading {
                 renderer.gpu_times.clear();
             }
         }
+        let _ = horizon_client::spans::take();
         if !self.shown {
             self.shown = true;
             log::info!(
@@ -20312,6 +20712,35 @@ impl Loading {
                 .iter()
                 .map(|(rect, animation)| (*rect, animation.clone(), (usize::MAX, 0, 0)))
                 .collect();
+            renderer
+                .hud
+                .set_text_shader(&renderer.device, gui.atlas.text_shader.as_deref());
+            renderer
+        } else if let Some(mut renderer) = self
+            .renderer
+            .take()
+            .filter(|r| r.matches_sprite_layout(loaded.pack.render.texture_layers))
+        {
+            let assets = &loaded.pack.render;
+            renderer.set_world_assets(
+                &assets.pixels,
+                assets.sprite_size,
+                assets.sprite_minimum_size,
+                assets.texture_layers,
+                &assets.sprite_mips,
+                &assets.animations,
+                (&loaded.pack.forcefield.2, loaded.pack.forcefield.0),
+                loaded.renderer_cpu,
+            )?;
+            renderer.hud.sprite_animations = gui
+                .atlas
+                .sprite_animations
+                .iter()
+                .map(|(rect, animation)| (*rect, animation.clone(), (usize::MAX, 0, 0)))
+                .collect();
+            renderer
+                .hud
+                .set_text_shader(&renderer.device, gui.atlas.text_shader.as_deref());
             renderer
         } else {
             if let Some(renderer) = &mut self.renderer {
@@ -20374,6 +20803,7 @@ impl Loading {
         game.panorama_rotation = self.panorama_rotation;
         self.menu.handoff(&mut game);
         game.apply_settings();
+        let _ = horizon_client::spans::take();
         game.previous = Instant::now();
         log::info!(
             "Horizon: startup handoff {} ms (renderer {} ms, start_game {} ms)",
@@ -20579,18 +21009,27 @@ fn loading_app(
     Ok(App::Loading(Box::new(loading)))
 }
 
-/// GoyControl is the factory touch layout: a first launch writes it once, so
-/// the on-screen buttons exist before the first frame.
+/// MCPE is the default factory touch control system on a fresh installation,
+/// and both `controls/mcpe/` and `controls/goycontrol/` protected Default
+/// layouts are initialized before the first frame.
 #[cfg(target_os = "android")]
 fn ensure_factory_touch_layout() {
+    let home = std::path::Path::new(".");
+    horizon_client::touch::Settings::ensure_system_storage(
+        home,
+        horizon_client::touch::ControlStyle::Mcpe,
+    );
+    horizon_client::touch::Settings::ensure_system_storage(
+        home,
+        horizon_client::touch::ControlStyle::GoyControl,
+    );
     let path = std::path::Path::new("horizon-touch.json");
     if path.exists() {
         return;
     }
-    let mut settings = horizon_client::touch::Settings::default();
-    settings.set_control_style(horizon_client::touch::ControlStyle::GoyControl);
+    let settings = horizon_client::touch::Settings::default_mcpe();
     if let Err(error) = settings.save_to(path) {
-        log::warn!("Cannot write the factory touch layout: {error}");
+        log::warn!("Cannot write the factory MCPE touch layout: {error}");
     }
 }
 

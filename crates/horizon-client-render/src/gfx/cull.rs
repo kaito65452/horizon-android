@@ -188,6 +188,9 @@ impl Cull {
     /// with the instance counts the GPU wrote, with fragment shaders that
     /// write storage.
     pub fn supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> Option<DepthTest> {
+        if cfg!(target_os = "android") {
+            return None;
+        }
         let depth_test = match adapter.get_info().backend {
             wgpu::Backend::Vulkan
                 if device
@@ -640,6 +643,7 @@ impl Cull {
 
 /// Mapped memory may be unaligned. Decode words directly without allocating
 /// and copying the whole readback. Cloning this iterator only copies a slice.
+#[allow(clippy::all)]
 fn readback_words(bytes: &[u8]) -> impl ExactSizeIterator<Item = u32> + Clone {
     bytes
         .chunks_exact(4)

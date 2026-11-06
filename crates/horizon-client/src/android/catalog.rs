@@ -21,6 +21,22 @@ pub fn source_only_mod(project: &Project) -> bool {
 /// Account tokens and client secrets are never bundled.
 pub const MICROSOFT_CLIENT_ID: &str = "00000000441cc96b";
 
+/// Minecraft player names are at most 16 UTF-16 units; a longer name fails the
+/// integrated-server handshake with only a generic disconnect.
+pub fn truncate_player_name(name: &str) -> String {
+    let mut units = 0;
+    let mut out = String::new();
+    for c in name.chars() {
+        let w = c.len_utf16();
+        if units + w > 16 {
+            break;
+        }
+        units += w;
+        out.push(c);
+    }
+    out
+}
+
 /// Real Vulkan rendering paths; these do not select a different driver or API.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -76,9 +92,19 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub fast_chunk_upload: bool,
     #[serde(default)]
+    pub disable_launcher_animations: bool,
+    #[serde(default)]
+    pub disable_game_animations: bool,
+    #[serde(default)]
     pub last_name_changed: String,
     #[serde(default)]
     pub custom_profile_name: String,
+    #[serde(default)]
+    pub custom_profile_desc: String,
+    #[serde(default)]
+    pub preset_edit_mode: String,
+    #[serde(default)]
+    pub theme: horizon_client::ui_theme::LauncherThemeConfig,
 }
 
 fn default_true() -> bool {
@@ -133,7 +159,7 @@ impl Config {
             .unwrap_or_default();
         let mut config: Self = serde_json::from_value(value.clone()).unwrap_or_default();
         if cfg!(target_pointer_width = "32") && value.get("renderer").is_none() {
-            config.renderer = RendererMode::OpenGl;
+            config.renderer = RendererMode::VulkanCompatibility;
         }
         // Ignore saved app registrations while this dev build uses the fixed ID.
         config.microsoft_client_id =
@@ -146,6 +172,17 @@ impl Config {
             .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
             .unwrap_or_default();
         config.device.migrate_missing(&value, &legacy);
+        config.name = truncate_player_name(&config.name);
+        config.theme.sanitize();
+        horizon_client::ui_theme::set_active_theme(config.theme.resolve());
+        horizon_client::ui_theme::motion::set_reduced_motion(
+            config.disable_launcher_animations
+                || config.super_perf_mode
+                || config.battery_perf_mode,
+        );
+        horizon_client::ui_theme::motion::set_game_animations_disabled(
+            config.disable_game_animations,
+        );
         config
     }
     pub fn save(&self, home: &Path) -> Result<(), String> {
@@ -212,6 +249,15 @@ impl Config {
         let _ = std::fs::create_dir_all(&game);
         let options_path = game.join("options.txt");
         let mut settings = horizon_client::settings::Settings::load(&options_path);
+        horizon_client::ui_theme::motion::set_game_animations_disabled(
+            self.disable_game_animations,
+        );
+        if self.disable_game_animations {
+            settings.horizon.animated_textures = false;
+            settings.chunk_fade = 0.0;
+            settings.view_bobbing = false;
+            settings.menu_blur = 0;
+        }
         if self.super_perf_mode {
             settings.render_distance = settings.render_distance.min(8);
             settings.simulation_distance = settings.simulation_distance.min(6);
@@ -219,6 +265,8 @@ impl Config {
             settings.clouds = "false".into();
             settings.particles = 2;
             settings.entity_shadows = false;
+            settings.cutout_leaves = false;
+            settings.smooth_lighting = false;
             settings.graphics_preset = "fast".into();
             settings.horizon.upload_budget_kib = 1536;
         } else if self.battery_perf_mode {
@@ -230,11 +278,19 @@ impl Config {
         } else if self.max_fps_mode {
             settings.max_fps = 260;
             settings.vsync = false;
-            if self.fast_chunk_upload {
-                settings.horizon.upload_budget_kib = 4096;
-            }
         }
+        if self.fast_chunk_upload {
+            settings.horizon.upload_budget_kib = settings.horizon.upload_budget_kib.max(4096);
+        }
+        settings.horizon.cave_culling = true;
+        settings.horizon.entity_culling = true;
+        settings.horizon.resolution_scale = self.render_scale.percent().clamp(25, 100);
         settings.save(&options_path);
+        let touch_path = game.join("horizon-touch.json");
+        let mut touch_cfg = horizon_client::touch::Settings::load_from(&touch_path);
+        touch_cfg.disable_game_animations = self.disable_game_animations;
+        touch_cfg.resolution_scale_percent = self.render_scale.percent().clamp(25, 100);
+        let _ = touch_cfg.save_to(&touch_path);
     }
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -245,15 +301,17 @@ pub enum Page {
     Shaders,
     Installed,
     Settings,
+    Skins,
 }
 impl Page {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Play,
         Self::Mods,
         Self::Packs,
         Self::Shaders,
         Self::Installed,
         Self::Settings,
+        Self::Skins,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -263,6 +321,7 @@ impl Page {
             Self::Shaders => "Shaders",
             Self::Installed => "Installed",
             Self::Settings => "Settings",
+            Self::Skins => "Skins",
         }
     }
     pub fn is_catalog(self) -> bool {
@@ -279,6 +338,7 @@ pub enum SettingsCategory {
     Overview,
     Video,
     Launcher,
+    Theme,
     Controls,
     Experimental,
     Diagnostics,
@@ -290,6 +350,7 @@ impl SettingsCategory {
             Self::Overview => "Settings",
             Self::Video => "Video Settings",
             Self::Launcher => "Launcher Settings",
+            Self::Theme => "Theme Customization",
             Self::Controls => "Controls & HUD Layout",
             Self::Experimental => "Experimental Stuff",
             Self::Diagnostics => "Diagnostics & Logs",
@@ -420,11 +481,105 @@ pub enum ModalUpdate {
 
 type IconData = (String, u32, u32, Vec<u8>, Option<String>);
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InstalledSubTab {
+    #[default]
+    Library,
+    FileManager,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InstalledFilter {
+    #[default]
+    All,
+    Mods,
+    Packs,
+    Shaders,
+}
+
+impl InstalledFilter {
+    pub const ALL: [Self; 4] = [Self::All, Self::Mods, Self::Packs, Self::Shaders];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Mods => "Mods",
+            Self::Packs => "Resource Packs",
+            Self::Shaders => "Shaders",
+        }
+    }
+    pub fn matches(self, kind: horizon_client::content_files::Kind) -> bool {
+        match self {
+            Self::All => true,
+            Self::Mods => kind == horizon_client::content_files::Kind::Mods,
+            Self::Packs => kind == horizon_client::content_files::Kind::Packs,
+            Self::Shaders => kind == horizon_client::content_files::Kind::Shaders,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InstalledSort {
+    #[default]
+    Name,
+    Type,
+    Size,
+    Status,
+}
+
+impl InstalledSort {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Sort: Name",
+            Self::Type => "Sort: Type",
+            Self::Size => "Sort: Size",
+            Self::Status => "Sort: Status",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Type,
+            Self::Type => Self::Size,
+            Self::Size => Self::Status,
+            Self::Status => Self::Name,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum FmModal {
+    ConfirmDelete { paths: Vec<String> },
+    Rename { target_rel: String },
+    NewFolder,
+    Details(crate::document_store::FmFileDetails),
+}
+
+pub fn format_file_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MiB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KiB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
 pub struct Catalog {
     pub local: Vec<LocalItem>,
     pub bundled_enabled: std::collections::BTreeSet<String>,
     pub sections: [bool; 3],
     pub pending_delete: Option<LocalItem>,
+    pub installed_sub_tab: InstalledSubTab,
+    pub installed_filter: InstalledFilter,
+    pub installed_sort: InstalledSort,
+    pub installed_query: String,
+    pub fm_current_dir: String,
+    pub fm_back_stack: Vec<String>,
+    pub fm_forward_stack: Vec<String>,
+    pub fm_entries: Vec<crate::document_store::FmEntry>,
+    pub fm_selected: std::collections::BTreeSet<String>,
+    pub fm_clipboard: Option<(Vec<PathBuf>, bool)>,
+    pub fm_modal: Option<FmModal>,
+    pub fm_input_text: String,
     downloaded: Vec<(browser::SourceId, String)>,
     pub downloading: Option<(browser::SourceId, String)>,
     pub downloading_title: String,
@@ -460,6 +615,9 @@ pub struct LocalItem {
     pub file: String,
     pub title: String,
     pub enabled: bool,
+    pub size_bytes: u64,
+    pub badge: &'static str,
+    pub subtitle: String,
 }
 impl Catalog {
     pub fn new(home: &Path) -> Self {
@@ -467,8 +625,20 @@ impl Catalog {
         let mut result = Self {
             local: vec![],
             bundled_enabled: Default::default(),
-            sections: [false, false, false],
+            sections: [true, true, true],
             pending_delete: None,
+            installed_sub_tab: InstalledSubTab::Library,
+            installed_filter: InstalledFilter::All,
+            installed_sort: InstalledSort::Name,
+            installed_query: String::new(),
+            fm_current_dir: String::new(),
+            fm_back_stack: Vec::new(),
+            fm_forward_stack: Vec::new(),
+            fm_entries: Vec::new(),
+            fm_selected: Default::default(),
+            fm_clipboard: None,
+            fm_modal: None,
+            fm_input_text: String::new(),
             downloaded: vec![],
             downloading: None,
             downloading_title: String::new(),
@@ -506,7 +676,15 @@ impl Catalog {
         self.page = Page::Installed;
         self.scroll = 0.0;
         self.editing = None;
-        self.sections = [false; 3];
+        if let Some(k) = kind {
+            self.installed_sub_tab = InstalledSubTab::Library;
+            self.installed_filter = match k {
+                horizon_client::content_files::Kind::Mods => InstalledFilter::Mods,
+                horizon_client::content_files::Kind::Packs => InstalledFilter::Packs,
+                horizon_client::content_files::Kind::Shaders => InstalledFilter::Shaders,
+            };
+        }
+        self.sections = [true; 3];
         if let Some(i) = horizon_client::content_files::Kind::ALL
             .iter()
             .position(|k| Some(*k) == kind)
@@ -556,11 +734,39 @@ impl Catalog {
                         .or_else(|| name.strip_suffix(".jar"))
                         .is_some_and(|id| on.enabled.contains(id)),
                 };
+                let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let badge = match kind {
+                    horizon_client::content_files::Kind::Mods => "MOD",
+                    horizon_client::content_files::Kind::Packs => "PACK",
+                    horizon_client::content_files::Kind::Shaders => "SHADER",
+                };
+                let ext_tag = if name.ends_with(".hmod") {
+                    "Horizon Mod (.hmod)"
+                } else if name.ends_with(".jar") {
+                    "Java Mod (.jar)"
+                } else if name.ends_with(".hshader") {
+                    "Horizon Shader (.hshader)"
+                } else if kind == horizon_client::content_files::Kind::Shaders {
+                    "Shader Pack (.zip)"
+                } else {
+                    "Resource Pack (.zip)"
+                };
+                let subtitle = format!("{ext_tag}  •  {}  •  {name}", format_file_size(size_bytes));
+                let clean_title = name
+                    .strip_suffix(".hmod")
+                    .or_else(|| name.strip_suffix(".jar"))
+                    .or_else(|| name.strip_suffix(".hshader"))
+                    .or_else(|| name.strip_suffix(".zip"))
+                    .unwrap_or(&name)
+                    .to_owned();
                 self.local.push(LocalItem {
                     kind,
-                    file: name.clone(),
-                    title: name,
+                    file: name,
+                    title: clean_title,
                     enabled,
+                    size_bytes,
+                    badge,
+                    subtitle,
                 });
             }
         }
@@ -574,7 +780,11 @@ impl Catalog {
                 .strip_prefix("horizon-mods/")
                 .unwrap_or(&e.file)
                 .to_owned();
-            if self.local.iter().any(|item| item.file == file_name || item.file == e.file) {
+            if self
+                .local
+                .iter()
+                .any(|item| item.file == file_name || item.file == e.file)
+            {
                 continue;
             }
             let mod_id = file_name
@@ -584,14 +794,236 @@ impl Catalog {
                 .or_else(|| file_name.strip_suffix(".hmod"))
                 .or_else(|| file_name.strip_suffix(".jar"))
                 .unwrap_or(&file_name);
+            let full_path = game.join(&e.file);
+            let size_bytes = std::fs::metadata(&full_path).map(|m| m.len()).unwrap_or(0);
+            let subtitle = format!(
+                "Mod Package ({})  •  {}  •  {}",
+                e.number,
+                format_file_size(size_bytes),
+                file_name
+            );
             self.local.push(LocalItem {
                 kind: horizon_client::content_files::Kind::Mods,
                 file: e.file.clone(),
                 title: format!("{} ({})", e.title, e.version),
                 enabled: on.enabled.contains(mod_id),
+                size_bytes,
+                badge: "MOD",
+                subtitle,
             });
         }
-        self.local.sort_by_key(|e| e.title.to_lowercase());
+        self.sort_local_items();
+        self.refresh_fm(home);
+    }
+
+    pub fn sort_local_items(&mut self) {
+        match self.installed_sort {
+            InstalledSort::Name => {
+                self.local
+                    .sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            }
+            InstalledSort::Type => {
+                self.local.sort_by(|a, b| {
+                    a.badge
+                        .cmp(b.badge)
+                        .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                });
+            }
+            InstalledSort::Size => {
+                self.local.sort_by(|a, b| {
+                    b.size_bytes
+                        .cmp(&a.size_bytes)
+                        .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                });
+            }
+            InstalledSort::Status => {
+                self.local.sort_by(|a, b| {
+                    b.enabled
+                        .cmp(&a.enabled)
+                        .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                });
+            }
+        }
+    }
+
+    pub fn search_worker_active(&self) -> bool {
+        self.search_worker.is_some()
+    }
+
+    pub fn refresh_fm(&mut self, home: &Path) {
+        let game = self.config.game_home(home);
+        match crate::document_store::list_fm_dir(home, &game, &self.fm_current_dir) {
+            Ok(entries) => {
+                self.fm_selected
+                    .retain(|sel| entries.iter().any(|e| &e.rel_path == sel));
+                self.fm_entries = entries;
+            }
+            Err(_) => {
+                self.fm_current_dir.clear();
+                self.fm_selected.clear();
+                self.fm_entries =
+                    crate::document_store::list_fm_dir(home, &game, "").unwrap_or_default();
+            }
+        }
+    }
+
+    pub fn fm_navigate(&mut self, home: &Path, target_rel: String) {
+        let clean = target_rel.trim().trim_matches('/').to_owned();
+        if clean != self.fm_current_dir {
+            self.fm_back_stack.push(self.fm_current_dir.clone());
+            self.fm_forward_stack.clear();
+            self.fm_current_dir = clean;
+            self.fm_selected.clear();
+            self.scroll = 0.0;
+        }
+        self.refresh_fm(home);
+    }
+
+    pub fn fm_back(&mut self, home: &Path) -> bool {
+        let Some(prev) = self.fm_back_stack.pop() else {
+            return false;
+        };
+        self.fm_forward_stack.push(self.fm_current_dir.clone());
+        self.fm_current_dir = prev;
+        self.fm_selected.clear();
+        self.scroll = 0.0;
+        self.refresh_fm(home);
+        true
+    }
+
+    pub fn fm_forward(&mut self, home: &Path) -> bool {
+        let Some(next) = self.fm_forward_stack.pop() else {
+            return false;
+        };
+        self.fm_back_stack.push(self.fm_current_dir.clone());
+        self.fm_current_dir = next;
+        self.fm_selected.clear();
+        self.scroll = 0.0;
+        self.refresh_fm(home);
+        true
+    }
+
+    pub fn fm_up(&mut self, home: &Path) {
+        if self.fm_current_dir.is_empty() {
+            return;
+        }
+        let parent = self
+            .fm_current_dir
+            .rsplit_once('/')
+            .map(|(p, _)| p.to_owned())
+            .unwrap_or_default();
+        self.fm_navigate(home, parent);
+    }
+
+    pub fn fm_copy_or_cut(&mut self, home: &Path, is_cut: bool) {
+        if self.fm_selected.is_empty() {
+            self.status = "Select one or more files or folders first.".into();
+            return;
+        }
+        let game = self.config.game_home(home);
+        let mut paths = Vec::new();
+        for rel in &self.fm_selected {
+            if is_cut && crate::document_store::is_protected_root_folder(rel) {
+                self.status = format!("Built-in root folder '{rel}' cannot be moved.");
+                return;
+            }
+            match crate::document_store::resolve_fm_path(home, &game, rel) {
+                Ok(p) => paths.push(p),
+                Err(e) => {
+                    self.status = e;
+                    return;
+                }
+            }
+        }
+        let count = paths.len();
+        self.fm_clipboard = Some((paths, is_cut));
+        self.status = format!(
+            "{} {count} item(s) to clipboard. Open destination folder and tap Paste.",
+            if is_cut { "Cut" } else { "Copied" }
+        );
+    }
+
+    pub fn fm_paste_here(&mut self, home: &Path) {
+        let Some((sources, is_cut)) = self.fm_clipboard.clone() else {
+            self.status = "Clipboard is empty.".into();
+            return;
+        };
+        let game = self.config.game_home(home);
+        match crate::document_store::fm_paste(home, &game, &sources, is_cut, &self.fm_current_dir) {
+            Ok(count) => {
+                if is_cut {
+                    self.fm_clipboard = None;
+                }
+                self.fm_selected.clear();
+                self.status = format!(
+                    "{} {count} item(s) into '/{}'.",
+                    if is_cut { "Moved" } else { "Pasted" },
+                    self.fm_current_dir
+                );
+                self.refresh(home);
+            }
+            Err(e) => {
+                self.status = e;
+            }
+        }
+    }
+
+    pub fn fm_confirm_delete(&mut self, home: &Path) {
+        let Some(FmModal::ConfirmDelete { paths }) = self.fm_modal.take() else {
+            return;
+        };
+        let game = self.config.game_home(home);
+        match crate::document_store::fm_delete(home, &game, &paths) {
+            Ok(count) => {
+                self.fm_selected.clear();
+                self.status = format!("Deleted {count} item(s).");
+                self.refresh(home);
+            }
+            Err(e) => {
+                self.status = e;
+            }
+        }
+    }
+
+    pub fn fm_submit_rename(&mut self, home: &Path) {
+        let Some(FmModal::Rename { target_rel }) = self.fm_modal.clone() else {
+            return;
+        };
+        let game = self.config.game_home(home);
+        let new_name = self.fm_input_text.trim().to_owned();
+        match crate::document_store::fm_rename(home, &game, &target_rel, &new_name) {
+            Ok(_) => {
+                self.fm_modal = None;
+                self.editing = None;
+                self.fm_selected.clear();
+                crate::platform::hide();
+                self.status = format!("Renamed to '{new_name}'.");
+                self.refresh(home);
+            }
+            Err(e) => {
+                self.status = e;
+            }
+        }
+    }
+
+    pub fn fm_submit_new_folder(&mut self, home: &Path) {
+        if !matches!(self.fm_modal, Some(FmModal::NewFolder)) {
+            return;
+        }
+        let game = self.config.game_home(home);
+        let folder_name = self.fm_input_text.trim().to_owned();
+        match crate::document_store::fm_mkdir(home, &game, &self.fm_current_dir, &folder_name) {
+            Ok(_) => {
+                self.fm_modal = None;
+                self.editing = None;
+                crate::platform::hide();
+                self.status = format!("Created folder '{folder_name}'.");
+                self.refresh(home);
+            }
+            Err(e) => {
+                self.status = e;
+            }
+        }
     }
     pub fn busy(&self) -> bool {
         self.worker.is_some()
@@ -605,11 +1037,7 @@ impl Catalog {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        if s.is_empty() {
-            self.status.clone()
-        } else {
-            s
-        }
+        if s.is_empty() { self.status.clone() } else { s }
     }
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Relaxed)
@@ -746,7 +1174,8 @@ impl Catalog {
         if self.downloading.is_some() && self.busy() {
             let frac = self.progress_fraction().clamp(0.0, 1.0);
             let total = f64::from(self.downloading_size_mib.max(1.0));
-            self.transfer.observe(total * f64::from(frac), self.is_paused());
+            self.transfer
+                .observe(total * f64::from(frac), self.is_paused());
         }
         let reply = self.worker.as_ref().and_then(|rx| match rx.try_recv() {
             Ok(v) => Some(v),
@@ -796,7 +1225,9 @@ impl Catalog {
         // Collect both direct icon URLs and Horizon/bundled items that need a Modrinth name search
         // for their PFP and description.
         let mut tasks: Vec<(String, String, Option<String>, Kind)> = Vec::new();
-        if self.page == Page::Mods && self.config.mod_source == crate::shader_catalog::Origin::Horizon {
+        if self.page == Page::Mods
+            && self.config.mod_source == crate::shader_catalog::Origin::Horizon
+        {
             for (id, title, _) in horizon_client::mod_list::ANDROID_BUNDLED {
                 if !self.icons.contains_key(id) {
                     tasks.push((id.to_owned(), title.to_owned(), None, Kind::Mod));
@@ -807,7 +1238,11 @@ impl Catalog {
             if self.icons.contains_key(&p.id) {
                 continue;
             }
-            let direct = p.icon.as_ref().map(|u| u.trim().to_owned()).filter(|u| !u.is_empty());
+            let direct = p
+                .icon
+                .as_ref()
+                .map(|u| u.trim().to_owned())
+                .filter(|u| !u.is_empty());
             tasks.push((p.id.clone(), p.title.clone(), direct, p.kind));
         }
         if tasks.is_empty() {
@@ -900,7 +1335,9 @@ impl Catalog {
             let mut icon_url = project.icon.clone();
 
             if let Some(source) = browser::source(project.source) {
-                if let Ok(v) = source.versions(&project) && !v.is_empty() {
+                if let Ok(v) = source.versions(&project)
+                    && !v.is_empty()
+                {
                     versions = v;
                 }
                 if let Ok(d) = source.details(&project) {
@@ -922,7 +1359,10 @@ impl Catalog {
 
             // For Horizon list items (or bundled mods), search Modrinth by the project's name
             // to enrich with Modrinth's full description, PFP icon, and gallery screenshots!
-            if project.source == browser::SourceId::Horizon || gallery.is_empty() || icon_url.is_none() {
+            if project.source == browser::SourceId::Horizon
+                || gallery.is_empty()
+                || icon_url.is_none()
+            {
                 if let Some(m_hit) = lookup_modrinth_by_name(&project.title, project.kind) {
                     if icon_url.is_none() {
                         icon_url = m_hit.icon.clone();
@@ -944,9 +1384,13 @@ impl Catalog {
                                 if caps.is_empty() {
                                     description = body_clean;
                                 } else {
-                                    description = format!("{}
+                                    description = format!(
+                                        "{}
 
-{}", caps.join(" • "), body_clean);
+{}",
+                                        caps.join(" • "),
+                                        body_clean
+                                    );
                                 }
                             } else {
                                 description = body_clean;
@@ -1056,19 +1500,18 @@ impl Catalog {
             && self.config.mod_source == crate::shader_catalog::Origin::Modrinth
         {
             format!(
-                "{} Modrinth mods ready to port and install",
+                "{} Java mods - browsing only; this Rust client cannot run Java loaders",
                 items.len()
             )
         } else if self.page == Page::Mods {
+            let source_only = items.iter().filter(|p| source_only_mod(p)).count();
             format!(
-                "{} Horizon mods available to install",
-                items.len()
+                "{} .hmod / {} source-only .hnmod (not supported yet)",
+                items.len().saturating_sub(source_only),
+                source_only
             )
         } else {
-            format!(
-                "{} results - select Install to download",
-                items.len()
-            )
+            format!("{} results - select Install to download", items.len())
         };
         self.results = items;
     }
@@ -1162,14 +1605,19 @@ impl Catalog {
         let Some(project) = self.results.get(index).cloned() else {
             return;
         };
+        if source_only_mod(&project) {
+            self.status = "This .hnmod needs a separately compiled client. Android support is planned; sandboxed .hmod mods can be installed now.".into();
+            return;
+        }
+        if project.kind == Kind::Mod && project.source == browser::SourceId::Modrinth {
+            self.status = "Modrinth Java mods are not supported on Android; this list is for browsing. Horizon .hmod mods install normally.".into();
+            return;
+        }
         if self.busy() || self.download_label(&project).is_some() {
             return;
         }
         let game = self.config.game_home(home);
-        if !matches!(
-            project.kind,
-            Kind::ResourcePack | Kind::Shader | Kind::Mod
-        ) {
+        if !matches!(project.kind, Kind::ResourcePack | Kind::Shader | Kind::Mod) {
             return;
         }
         self.downloading = Some((project.source, project.id.clone()));
@@ -1389,19 +1837,45 @@ impl Catalog {
         use horizon_client::osk::Output;
         let is_name = self.editing == Some("name");
         let is_profile_name = self.editing == Some("profile_name");
+        let is_theme_field = matches!(
+            self.editing,
+            Some(
+                "theme_bg"
+                    | "theme_surface"
+                    | "theme_accent"
+                    | "theme_grad_start"
+                    | "theme_grad_mid"
+                    | "theme_grad_end"
+            )
+        );
+        if is_theme_field {
+            self.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+        }
         let field = match self.editing {
             Some("name") => &mut self.config.name,
             Some("profile_name") => &mut self.config.custom_profile_name,
+            Some("profile_desc") => &mut self.config.custom_profile_desc,
             Some("server") => &mut self.config.server,
             Some("render_scale") => &mut self.render_scale_text,
             Some("client_id") => &mut self.config.microsoft_client_id,
+            Some("theme_bg") => &mut self.config.theme.custom_bg_hex,
+            Some("theme_surface") => &mut self.config.theme.custom_surface_hex,
+            Some("theme_accent") => &mut self.config.theme.custom_accent_hex,
+            Some("theme_grad_start") => &mut self.config.theme.gradient_start_hex,
+            Some("theme_grad_mid") => &mut self.config.theme.gradient_mid_hex,
+            Some("theme_grad_end") => &mut self.config.theme.gradient_end_hex,
+            Some("installed_search") => &mut self.installed_query,
+            Some("fm_rename" | "fm_new_folder") => &mut self.fm_input_text,
             _ => &mut self.query,
         };
         match out {
             Output::Text(s) => {
-                field.push_str(&s);
                 if is_name {
+                    let combined = format!("{}{}", field, s);
+                    *field = truncate_player_name(&combined);
                     self.config.touch_name_changed();
+                } else {
+                    field.push_str(&s);
                 }
             }
             Output::Backspace => {
@@ -1410,8 +1884,27 @@ impl Catalog {
                     self.config.touch_name_changed();
                 }
             }
+            Output::Key(_) => {}
             Output::Enter | Output::Close => {
-                if self.editing == Some("render_scale") {
+                if self.editing == Some("fm_rename") {
+                    if matches!(out, Output::Enter) {
+                        self.fm_submit_rename(home);
+                    } else {
+                        self.editing = None;
+                    }
+                    return;
+                } else if self.editing == Some("fm_new_folder") {
+                    if matches!(out, Output::Enter) {
+                        self.fm_submit_new_folder(home);
+                    } else {
+                        self.editing = None;
+                    }
+                    return;
+                } else if self.editing == Some("installed_search") {
+                    self.editing = None;
+                    self.scroll = 0.0;
+                    return;
+                } else if self.editing == Some("render_scale") {
                     match crate::display::RenderScale::parse(&self.render_scale_text) {
                         Ok(scale) => {
                             self.config.render_scale = scale;
@@ -1425,6 +1918,17 @@ impl Catalog {
                 } else if is_name {
                     self.config.touch_name_changed();
                 } else if is_profile_name {
+                    if matches!(out, Output::Enter)
+                        && (self.config.preset_edit_mode == "copy"
+                            || self.config.preset_edit_mode == "edit")
+                    {
+                        self.editing = Some("profile_desc");
+                        let _ = self.config.save(home);
+                        crate::platform::show(&self.config.custom_profile_desc);
+                        self.status =
+                            "Step 2/2: Edit preset description and press Enter to save.".into();
+                        return;
+                    }
                     let game_home = self.config.game_home(home);
                     let clean = horizon_client::touch::Settings::sanitize_profile_name(
                         &self.config.custom_profile_name,
@@ -1435,9 +1939,49 @@ impl Catalog {
                     );
                     touch.active_profile = clean.clone();
                     let _ = touch.save_profile(&game_home, &clean);
-                    self.status = format!(
-                        "Saved controls as '{clean}' in controlmap/{clean}.json."
+                    self.status =
+                        format!("Saved controls as '{clean}' in controlmap/{clean}.json.");
+                } else if self.editing == Some("profile_desc") {
+                    let game_home = self.config.game_home(home);
+                    let mut touch = horizon_client::touch::Settings::load_from(
+                        &game_home.join("horizon-touch.json"),
                     );
+                    let name = self.config.custom_profile_name.trim().to_owned();
+                    let desc = self.config.custom_profile_desc.trim().to_owned();
+                    if self.config.preset_edit_mode == "edit" && !touch.is_default_preset() {
+                        if !name.is_empty() {
+                            touch.preset_name = name.clone();
+                        }
+                        touch.preset_description = desc;
+                        let _ = touch.save_replace_preset(&game_home);
+                        self.status = format!(
+                            "Updated {} preset '{}'.",
+                            touch.control_style.label(),
+                            touch.preset_name
+                        );
+                    } else {
+                        let final_name = if name.is_empty() {
+                            format!("{} Copy", touch.preset_name)
+                        } else {
+                            name
+                        };
+                        let _ = touch.save_new_preset(&game_home, &final_name, &desc);
+                        self.status = format!(
+                            "Saved new {} preset '{}' (controls/{}/{}.json).",
+                            touch.control_style.label(),
+                            touch.preset_name,
+                            touch.control_style.storage_subdir(),
+                            touch.preset_id
+                        );
+                    }
+                    self.config.preset_edit_mode.clear();
+                }
+                if is_theme_field {
+                    self.config.theme.sanitize();
+                    horizon_client::ui_theme::set_active_theme(self.config.theme.resolve());
+                    self.status = "Custom theme color applied and saved.".into();
+                } else {
+                    horizon_client::ui_theme::set_active_theme(self.config.theme.resolve());
                 }
                 self.editing = None;
                 let _ = self.config.save(home);
@@ -1516,11 +2060,7 @@ fn install_modrinth_jar_fallback(
 }
 
 fn lookup_modrinth_by_name(title: &str, kind: Kind) -> Option<Project> {
-    let clean_title = title
-        .split('(')
-        .next()
-        .unwrap_or(title)
-        .trim();
+    let clean_title = title.split('(').next().unwrap_or(title).trim();
     let mut query = Query::new(clean_title, kind);
     query.everything = true;
     query.limit = 5;
@@ -1531,7 +2071,9 @@ fn lookup_modrinth_by_name(title: &str, kind: Kind) -> Option<Project> {
     };
     let lower = clean_title.to_lowercase();
     hits.iter()
-        .find(|p| p.title.to_lowercase() == lower || p.slug.to_lowercase() == lower.replace(' ', "-"))
+        .find(|p| {
+            p.title.to_lowercase() == lower || p.slug.to_lowercase() == lower.replace(' ', "-")
+        })
         .cloned()
         .or_else(|| hits.into_iter().next())
 }
@@ -1547,7 +2089,15 @@ fn clean_markdown_body(raw: &str) -> String {
             }
             continue;
         }
-        if trimmed.starts_with("![") || trimmed.starts_with("<img") || trimmed.starts_with("<a ") || trimmed.starts_with("<div") || trimmed.starts_with("</div") || trimmed.starts_with("<p align") || trimmed.starts_with("<center") || trimmed.starts_with("</center") {
+        if trimmed.starts_with("![")
+            || trimmed.starts_with("<img")
+            || trimmed.starts_with("<a ")
+            || trimmed.starts_with("<div")
+            || trimmed.starts_with("</div")
+            || trimmed.starts_with("<p align")
+            || trimmed.starts_with("<center")
+            || trimmed.starts_with("</center")
+        {
             continue;
         }
         let mut clean_line = String::with_capacity(trimmed.len());

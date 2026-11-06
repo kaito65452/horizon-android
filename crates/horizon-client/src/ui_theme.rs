@@ -68,6 +68,8 @@ pub mod color {
     }
 }
 
+pub type Color = u32;
+
 /// The launcher's type scale and shapes (`horizon_theme`), in dp.
 pub(crate) const SMALL: f32 = horizon_theme::CAPTION.px;
 pub(crate) const BODY: f32 = horizon_theme::LABEL.px;
@@ -136,6 +138,14 @@ pub enum Icon {
     Undo,
     Redo,
     Plus,
+    Crosshair,
+    Pencil,
+    Copy,
+    ArrowRight,
+    Folder,
+    FileText,
+    Trash,
+    Share,
 }
 
 struct Fonts {
@@ -166,8 +176,8 @@ impl Fonts {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Key {
     Glyph(Face, u16, u16),
-    /// A quarter disc (`false`) or a 1px quarter ring of this radius in pixels.
-    Corner(u16, bool),
+    /// A quarter disc (`0`) or a quarter ring of `(radius_px, thickness_px)`.
+    Corner(u16, u16),
     /// A supersampled vector icon at this pixel size.
     Vector(Icon, u16),
 }
@@ -185,6 +195,7 @@ struct Cache {
     images: HashMap<String, Rect>,
     shelf: (u32, u32, u32),
     pending: Vec<crate::font::Patch>,
+    glyph_scratch: Vec<(f32, f32, Rect)>,
     /// The atlas the entries were uploaded to (a new atlas starts over).
     atlas: usize,
 }
@@ -201,10 +212,11 @@ fn with_cache<R>(atlas: &HudAtlas, f: impl FnOnce(&mut Cache) -> R) -> R {
         let id = atlas as *const HudAtlas as usize;
         let cache = c.get_or_insert_with(|| Cache {
             fonts: Fonts::load(),
-            entries: HashMap::new(),
-            images: HashMap::new(),
+            entries: HashMap::with_capacity(512),
+            images: HashMap::with_capacity(64),
             shelf: (0, 0, 0),
-            pending: Vec::new(),
+            pending: Vec::with_capacity(64),
+            glyph_scratch: Vec::with_capacity(128),
             atlas: id,
         });
         if cache.atlas != id {
@@ -398,7 +410,7 @@ fn icon_hit(icon: Icon, u: f32, v: f32) -> bool {
             chev_top || chev_bot || underscore
         }
         Icon::MicrosoftGrid => {
-            // 2x2 four-pane window grid matching Settings -> Account.
+            // 2x2 four-pane window grid matching Settings -> Account / Buttons.
             let in_x = (0.18..=0.46).contains(&u) || (0.54..=0.82).contains(&u);
             let in_y = (0.18..=0.46).contains(&v) || (0.54..=0.82).contains(&v);
             in_x && in_y
@@ -456,6 +468,69 @@ fn icon_hit(icon: Icon, u: f32, v: f32) -> bool {
             let h_bar = seg_dist(u, v, 0.22, 0.50, 0.78, 0.50) <= 0.068;
             let v_bar = seg_dist(u, v, 0.50, 0.22, 0.50, 0.78) <= 0.068;
             h_bar || v_bar
+        }
+        Icon::Crosshair => {
+            let (dx, dy) = (u - 0.50, v - 0.50);
+            let d = (dx * dx + dy * dy).sqrt();
+            let outer_ring = (0.23..=0.30).contains(&d);
+            let center_dot = d <= 0.065;
+            let h_tick = (v - 0.50).abs() <= 0.042 && (0.12..=0.37).contains(&u.min(1.0 - u));
+            let v_tick = (u - 0.50).abs() <= 0.042 && (0.12..=0.37).contains(&v.min(1.0 - v));
+            outer_ring || center_dot || h_tick || v_tick
+        }
+        Icon::Pencil => {
+            let shaft = seg_dist(u, v, 0.30, 0.70, 0.75, 0.25) <= 0.082;
+            let tip = seg_dist(u, v, 0.19, 0.81, 0.28, 0.72) <= 0.048;
+            let gap = seg_dist(u, v, 0.62, 0.38, 0.65, 0.35) <= 0.095;
+            (shaft && !gap) || tip
+        }
+        Icon::Copy => {
+            let front_outer = (0.32..=0.82).contains(&u) && (0.32..=0.84).contains(&v);
+            let front_inner = (0.39..=0.75).contains(&u) && (0.39..=0.77).contains(&v);
+            let front = front_outer && !front_inner;
+            let back_outer = (0.18..=0.68).contains(&u)
+                && (0.16..=0.68).contains(&v)
+                && !((0.28..=0.86).contains(&u) && (0.28..=0.88).contains(&v));
+            let back_inner = (0.25..=0.61).contains(&u) && (0.23..=0.61).contains(&v);
+            let back = back_outer && !back_inner;
+            front || back
+        }
+        Icon::ArrowRight => {
+            let top = seg_dist(u, v, 0.38, 0.24, 0.66, 0.50) <= 0.055;
+            let bot = seg_dist(u, v, 0.66, 0.50, 0.38, 0.76) <= 0.055;
+            top || bot
+        }
+        Icon::Folder => {
+            let in_tab = (0.14..=0.46).contains(&u) && (0.20..=0.34).contains(&v);
+            let in_body = (0.14..=0.86).contains(&u) && (0.30..=0.80).contains(&v);
+            let top_seam = (0.18..=0.82).contains(&u) && (0.35..=0.40).contains(&v);
+            (in_tab || in_body) && !top_seam
+        }
+        Icon::FileText => {
+            let outer = (0.22..=0.78).contains(&u) && (0.16..=0.84).contains(&v);
+            let inner = (0.29..=0.71).contains(&u) && (0.23..=0.77).contains(&v);
+            let line1 = seg_dist(u, v, 0.35, 0.38, 0.65, 0.38) <= 0.035;
+            let line2 = seg_dist(u, v, 0.35, 0.52, 0.65, 0.52) <= 0.035;
+            let line3 = seg_dist(u, v, 0.35, 0.66, 0.55, 0.66) <= 0.035;
+            (outer && !inner) || line1 || line2 || line3
+        }
+        Icon::Trash => {
+            let lid = seg_dist(u, v, 0.22, 0.26, 0.78, 0.26) <= 0.045;
+            let handle = (0.40..=0.60).contains(&u) && (0.17..=0.26).contains(&v);
+            let body_outer = (0.28..=0.72).contains(&u) && (0.30..=0.84).contains(&v);
+            let body_inner = (0.35..=0.65).contains(&u) && (0.36..=0.77).contains(&v);
+            let slat1 = seg_dist(u, v, 0.44, 0.42, 0.44, 0.71) <= 0.032;
+            let slat2 = seg_dist(u, v, 0.56, 0.42, 0.56, 0.71) <= 0.032;
+            lid || handle || (body_outer && !body_inner) || slat1 || slat2
+        }
+        Icon::Share => {
+            let tray_l = seg_dist(u, v, 0.22, 0.56, 0.22, 0.80) <= 0.048;
+            let tray_r = seg_dist(u, v, 0.78, 0.56, 0.78, 0.80) <= 0.048;
+            let tray_b = seg_dist(u, v, 0.22, 0.80, 0.78, 0.80) <= 0.048;
+            let stem = seg_dist(u, v, 0.50, 0.20, 0.50, 0.62) <= 0.048;
+            let head_l = seg_dist(u, v, 0.34, 0.36, 0.50, 0.20) <= 0.048;
+            let head_r = seg_dist(u, v, 0.66, 0.36, 0.50, 0.20) <= 0.048;
+            tray_l || tray_r || tray_b || stem || head_l || head_r
         }
     }
 }
@@ -551,14 +626,25 @@ impl Cache {
         }
         made
     }
-    fn corner(&mut self, atlas: &HudAtlas, r: u16, ring: bool) -> Option<Rect> {
-        let key = Key::Corner(r, ring);
+    fn corner(&mut self, atlas: &HudAtlas, r: u16, thickness: u16) -> Option<Rect> {
+        // Cap rasterized corner resolution to 56px so large circles (e.g. joysticks)
+        // never overflow the 1024x512 UI text atlas shelf.
+        let capped_r = r.clamp(1, 56);
+        let scaled_t = if thickness == 0 {
+            0
+        } else {
+            ((u32::from(thickness) * u32::from(capped_r))
+                .div_ceil(u32::from(r.max(1)))
+                .max(1)) as u16
+        };
+        let key = Key::Corner(capped_r, scaled_t);
         if let Some(c) = self.entries.get(&key) {
             return c.rect;
         }
         // The top-left quadrant of a circle centred at (r, r), 4x4 supersampled.
-        let n = u32::from(r);
-        let rf = f32::from(r);
+        let n = u32::from(capped_r);
+        let rf = f32::from(capped_r);
+        let tf = f32::from(scaled_t);
         let mut alpha = vec![0.0; (n * n) as usize];
         for y in 0..n {
             for x in 0..n {
@@ -568,7 +654,7 @@ impl Cache {
                         let px = x as f32 + (sx as f32 + 0.5) / 4.0;
                         let py = y as f32 + (sy as f32 + 0.5) / 4.0;
                         let d = ((px - rf).powi(2) + (py - rf).powi(2)).sqrt();
-                        if d <= rf && (!ring || d >= rf - 1.0) {
+                        if d <= rf && (scaled_t == 0 || d >= (rf - tf).max(0.0)) {
                             hits += 1;
                         }
                     }
@@ -719,23 +805,22 @@ impl<'a> Ui<'a> {
                 target_dpi.clamp(1.0, 4.5)
             }
         } else {
-            // Landscape phone/tablet screen: target ~425dp height (and ~840dp width) so the
-            // left navigation rail, header, and 2-column cards match phone DPI instead of
-            // shrinking to a 700dp desktop monitor layout.
-            let fit_phone = (pw / 840.0).min(ph / 425.0);
+            // Landscape phone/tablet screen: target ~440dp height (and ~880dp width) so the
+            // left navigation rail, header, and 2-column cards match phone DPI with breathing room.
+            let fit_phone = (pw / 880.0).min(ph / 440.0);
             let dpi = if hw_dpi >= 1.0 {
-                // Blend hardware DisplayMetrics density with viewport fit so small screens never clip.
-                (hw_dpi * 0.88).min(ph / 385.0).max(fit_phone)
+                (hw_dpi * 0.78).min(ph / 435.0).max(fit_phone)
             } else {
                 fit_phone
             };
             dpi.clamp(0.65, 4.5)
         };
-        // Ensure user_scale still keeps at least 365dp height in landscape so all 6 rail items fit.
+        // Ensure landscape viewports always have at least 410-440dp of vertical breathing room
+        // and 760-880dp of horizontal width even on high-density (3.0-3.5x) screens.
         let max_safe_density = if ph > pw {
             (pw / 340.0).max(1.0)
         } else {
-            (ph / 365.0).min(pw / 660.0).max(0.65)
+            (ph / 410.0).min(pw / 760.0).max(1.0)
         };
         ui.density = (base_density * user_scale)
             .min(max_safe_density)
@@ -750,14 +835,28 @@ impl<'a> Ui<'a> {
     }
 
     pub fn fit_text(&self, face: Face, size: f32, text: &str, width: f32) -> String {
-        if self.measure(face, size, text) <= width {
-            return text.to_owned();
+        if text.is_empty() || width <= 0.0 {
+            return String::new();
         }
         let px = (size * self.density * 4.0).round() / 4.0;
+        let max_px = width * self.density;
         with_cache(self.atlas, |cache| {
             let font = cache.fonts.face(face);
             let scaled = font.as_scaled(cache.fonts.scale(face, px));
-            crate::ui_text::fit(text, width * self.density, |previous, ch| {
+            let mut total = 0.0;
+            let mut prev = None;
+            for ch in text.chars() {
+                let id = font.glyph_id(ch);
+                if let Some(p) = prev {
+                    total += scaled.kern(p, id);
+                }
+                total += scaled.h_advance(id);
+                prev = Some(id);
+            }
+            if total <= max_px {
+                return text.to_owned();
+            }
+            crate::ui_text::fit(text, max_px, |previous, ch| {
                 let id = font.glyph_id(ch);
                 previous.map_or(0.0, |p| scaled.kern(font.glyph_id(p), id)) + scaled.h_advance(id)
             })
@@ -779,6 +878,16 @@ impl<'a> Ui<'a> {
                 self.px_y(y + h.max(0.0)),
             ]
         });
+    }
+
+    /// Runs `draw` with the clip narrowed to `rect` (dp), restoring the outer clip afterwards.
+    pub fn clipped(&mut self, rect: [f32; 4], draw: impl FnOnce(&mut Self)) {
+        let previous = self.clip;
+        if let Some(narrowed) = self.clip_rect(rect) {
+            self.set_clip(Some(narrowed));
+        }
+        draw(self);
+        self.clip = previous;
     }
 
     pub fn clip_rect(&self, rect: [f32; 4]) -> Option<[f32; 4]> {
@@ -877,12 +986,12 @@ impl<'a> Ui<'a> {
         };
         self.emit_clipped_uv(x, y, x + r, y + r, u0, v0, u1, v1, color);
     }
-    fn corners(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, ring: bool, color: u32) {
+    fn corners(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, thickness: u16, color: u32) {
         if r < 1.0 {
             return;
         }
         let atlas = self.atlas;
-        if let Some(rect) = with_cache(atlas, |c| c.corner(atlas, r as u16, ring)) {
+        if let Some(rect) = with_cache(atlas, |c| c.corner(atlas, r as u16, thickness)) {
             self.corner_quad(rect, x0, y0, r, (false, false), color);
             self.corner_quad(rect, x1 - r, y0, r, (true, false), color);
             self.corner_quad(rect, x1 - r, y1 - r, r, (true, true), color);
@@ -912,7 +1021,7 @@ impl<'a> Ui<'a> {
         self.raw_fill(x0 + r, y0, x1 - r, y1, color);
         self.raw_fill(x0, y0 + r, x0 + r, y1 - r, color);
         self.raw_fill(x1 - r, y0 + r, x1, y1 - r, color);
-        self.corners(x0, y0, x1, y1, r, false, color);
+        self.corners(x0, y0, x1, y1, r, 0, color);
     }
     /// A 1px rounded border.
     pub fn border(&mut self, x: f32, y: f32, w: f32, h: f32, radius: f32, color: u32) {
@@ -934,7 +1043,7 @@ impl<'a> Ui<'a> {
         self.raw_fill(x0 + r, y1 - 1.0, x1 - r, y1, color);
         self.raw_fill(x0, y0 + r, x0 + 1.0, y1 - r, color);
         self.raw_fill(x1 - 1.0, y0 + r, x1, y1 - r, color);
-        self.corners(x0, y0, x1, y1, r, true, color);
+        self.corners(x0, y0, x1, y1, r, 1, color);
     }
 
     /// Draw a supersampled vector icon in `size x size` dp.
@@ -961,241 +1070,120 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Draw the stylized two-tone purple Horizon `H` mark at `(x, y)` in `size x size` dp.
+    /// Draw the stylized two-tone Horizon `H` mark at `(x, y)` in `size x size` dp.
     pub fn horizon_logo(&mut self, x: f32, y: f32, size: f32) {
-        // Subtle glow/shadow plate behind the mark, then the crisp supersampled H mark.
-        let primary = color::hex(0x9A7BFF, 255);
-        let accent = color::hex(0x7C5CE6, 255);
-        self.icon(Icon::HorizonLogo, x, y + 0.5, size, accent);
+        let theme = active_theme();
+        let primary = theme.accent;
+        let shadow = color::with_alpha(theme.surface_selected, 0.92);
+        self.icon(Icon::HorizonLogo, x, y + 0.5, size, shadow);
         self.icon(Icon::HorizonLogo, x, y, size, primary);
     }
 
-    /// Draw a 3D isometric Minecraft player head with top crown, front face (eyes, hair, skin),
-    /// shaded side face, and 3D hat overlay layer.
-    pub fn avatar_head_3d(&mut self, x: f32, y: f32, size: f32, player_name: &str) {
-        // Deterministic palette variation from player name so different accounts look distinct
-        let hash = player_name.bytes().fold(0x811C_9DC5u32, |acc, b| {
-            (acc ^ u32::from(b)).wrapping_mul(0x0100_0193)
-        });
-        let palettes: [(u32, u32, u32, u32, u32); 4] = [
-            // (hair_top, hair_front, skin_front, skin_side, eye_iris)
-            (0x4E387E, 0x3A2863, 0xE6B998, 0xC49474, 0x6A4CFF),
-            (0x2F4858, 0x223542, 0xF0C6A8, 0xCE9F80, 0x38B6FF),
-            (0x5A3A28, 0x42291B, 0xD9A482, 0xB58262, 0x45C486),
-            (0x3E2F5B, 0x2B2042, 0xEBC1A3, 0xC89C7D, 0x9A7BFF),
-        ];
-        let (hair_top_hex, hair_front_hex, skin_front_hex, skin_side_hex, iris_hex) =
-            palettes[(hash as usize) % palettes.len()];
-
-        // 1. Ambient M3 pedestal glow behind the 3D head
-        self.rounded(x, y, size, size, size * 0.28, color::hex(0x231E38, 255));
-        self.border(x, y, size, size, size * 0.28, color::hex(0x4E4275, 255));
-        // Drop shadow under the 3D cube
-        self.rounded(
-            x + size * 0.18,
-            y + size * 0.78,
-            size * 0.64,
-            size * 0.12,
-            size * 0.06,
-            color::hex(0x08060E, 175),
-        );
-
-        // Cube metrics inside pedestal
-        let cx = x + size * 0.14;
-        let cy = y + size * 0.14;
-        let cw = size * 0.72;
-        let ch = size * 0.70;
-
-        let front_x = cx + cw * 0.04;
-        let front_y = cy + ch * 0.22;
-        let front_w = cw * 0.62;
-        let front_h = ch * 0.72;
-
-        let side_x = front_x + front_w;
-        let side_w = cw * 0.30;
-
-        // 2. Isometric Top Crown Face (stepped angled parallelogram strips)
-        let top_steps = 6;
-        for i in 0..top_steps {
-            let t = i as f32 / top_steps as f32;
-            let strip_x = front_x + (1.0 - t) * (side_w * 0.72);
-            let strip_y = cy + t * (front_y - cy);
-            let strip_w = front_w + t * (side_w * 0.28);
-            let strip_h = ((front_y - cy) / top_steps as f32) + 1.2;
-            self.fill(
-                strip_x,
-                strip_y,
-                strip_w,
-                strip_h,
-                color::hex(hair_top_hex, 255),
-            );
+    /// The account's real head as a flat 8x8 skin face (no 3D build), so the
+    /// header paints it in the same frame: prepared skin, cached skin, Steve.
+    pub fn avatar_head_2d(&mut self, x: f32, y: f32, size: f32, player_name: &str) {
+        let theme = active_theme();
+        let radius = size * 0.30;
+        self.rounded(x, y, size, size, radius, theme.surface_dim);
+        let inset = (size * 0.07).max(1.0);
+        let face = (size - inset * 2.0).max(8.0);
+        let pw = face / 8.0;
+        if let Some(skin) = crate::skin_head::head(player_name) {
+            for row in 0..8 {
+                for col in 0..8 {
+                    let px = x + inset + col as f32 * pw;
+                    let py = y + inset + row as f32 * pw;
+                    self.fill(
+                        px,
+                        py,
+                        pw + 0.4,
+                        pw + 0.4,
+                        color::hex(skin.front[row][col], 255),
+                    );
+                    let hat = skin.hat[row][col];
+                    if hat >> 24 != 0 {
+                        self.fill(
+                            px,
+                            py,
+                            pw + 0.4,
+                            pw + 0.4,
+                            color::hex(hat & 0xFFFFFF, (hat >> 24) as u8),
+                        );
+                    }
+                }
+            }
+        } else {
+            const HAIR: u32 = 0x3B2A1B;
+            const SKIN: u32 = 0xC68E5E;
+            const EYE: u32 = 0xF4F4F4;
+            const IRIS: u32 = 0x4E6E9E;
+            const NOSE: u32 = 0xA87548;
+            const MOUTH: u32 = 0x6B4A32;
+            const BEARD: u32 = 0x2E2117;
+            const FACE: [[u32; 8]; 8] = [
+                [HAIR, HAIR, HAIR, HAIR, HAIR, HAIR, HAIR, HAIR],
+                [HAIR, HAIR, HAIR, HAIR, HAIR, HAIR, HAIR, HAIR],
+                [HAIR, HAIR, HAIR, HAIR, HAIR, HAIR, HAIR, HAIR],
+                [HAIR, SKIN, SKIN, SKIN, SKIN, SKIN, SKIN, HAIR],
+                [SKIN, EYE, IRIS, SKIN, SKIN, IRIS, EYE, SKIN],
+                [SKIN, SKIN, SKIN, NOSE, NOSE, SKIN, SKIN, SKIN],
+                [SKIN, MOUTH, MOUTH, MOUTH, MOUTH, MOUTH, MOUTH, SKIN],
+                [SKIN, BEARD, BEARD, BEARD, BEARD, BEARD, BEARD, SKIN],
+            ];
+            for (row, pixels) in FACE.iter().enumerate() {
+                for (col, tone) in pixels.iter().enumerate() {
+                    self.fill(
+                        x + inset + col as f32 * pw,
+                        y + inset + row as f32 * pw,
+                        pw + 0.4,
+                        pw + 0.4,
+                        color::hex(*tone, 255),
+                    );
+                }
+            }
         }
-
-        // 3. Front Face (Minecraft 8x8 pixel grid layout: skin + hair bangs + eyes + nose/mouth)
-        self.rounded(
-            front_x,
-            front_y,
-            front_w,
-            front_h,
-            2.5,
-            color::hex(skin_front_hex, 255),
-        );
-        // Top hair layer & bangs on front face
-        self.fill(
-            front_x,
-            front_y,
-            front_w,
-            front_h * 0.28,
-            color::hex(hair_front_hex, 255),
-        );
-        // Left & right temple hair pixels
-        self.fill(
-            front_x,
-            front_y + front_h * 0.26,
-            front_w * 0.16,
-            front_h * 0.18,
-            color::hex(hair_front_hex, 255),
-        );
-        self.fill(
-            front_x + front_w * 0.82,
-            front_y + front_h * 0.26,
-            front_w * 0.18,
-            front_h * 0.14,
-            color::hex(hair_front_hex, 255),
-        );
-        // 3D Hat / Helm outer layer overhang on brow
-        self.rounded(
-            front_x - 1.5,
-            front_y - 1.5,
-            front_w + 3.0,
-            front_h * 0.22,
-            2.5,
-            color::hex(hair_top_hex, 255),
-        );
-
-        // Eyes (white sclera + vibrant iris)
-        let eye_y = front_y + front_h * 0.48;
-        let eye_w = (front_w * 0.24).max(3.0);
-        let eye_h = (front_h * 0.15).max(2.5);
-        // Left eye
-        self.fill(
-            front_x + front_w * 0.13,
-            eye_y,
-            eye_w,
-            eye_h,
-            color::hex(0xFAF8FF, 255),
-        );
-        self.fill(
-            front_x + front_w * 0.25,
-            eye_y,
-            eye_w * 0.52,
-            eye_h,
-            color::hex(iris_hex, 255),
-        );
-        // Right eye
-        self.fill(
-            front_x + front_w * 0.63,
-            eye_y,
-            eye_w,
-            eye_h,
-            color::hex(0xFAF8FF, 255),
-        );
-        self.fill(
-            front_x + front_w * 0.63,
-            eye_y,
-            eye_w * 0.52,
-            eye_h,
-            color::hex(iris_hex, 255),
-        );
-        // Nose & mouth pixel bar
-        self.fill(
-            front_x + front_w * 0.38,
-            front_y + front_h * 0.68,
-            front_w * 0.24,
-            (front_h * 0.10).max(2.0),
-            color::hex(0xB88264, 255),
-        );
-        self.fill(
-            front_x + front_w * 0.32,
-            front_y + front_h * 0.80,
-            front_w * 0.36,
-            (front_h * 0.08).max(1.5),
-            color::hex(0x8C5840, 255),
-        );
-
-        // 4. Shaded Right 3D Side Face (angled upward toward back-right)
-        let side_cols = 5;
-        for i in 0..side_cols {
-            let t = i as f32 / side_cols as f32;
-            let col_x = side_x + t * side_w;
-            let col_w = (side_w / side_cols as f32) + 0.8;
-            let y_shift = (t + 0.15) * (front_y - cy) * 0.85;
-            let col_y = front_y - y_shift;
-            self.fill(col_x, col_y, col_w, front_h, color::hex(skin_side_hex, 255));
-            // Side hair wrap (top 38% of side face)
-            self.fill(
-                col_x,
-                col_y,
-                col_w,
-                front_h * 0.38,
-                color::hex(hair_front_hex, 255),
-            );
-        }
-
-        // 5. Crisp 3D Isometric Ridge Highlights
-        self.fill(front_x, front_y, front_w, 1.2, color::hex(0xFFFFFF, 72));
-        self.fill(
-            side_x - 0.8,
-            front_y,
-            1.4,
-            front_h,
-            color::hex(0x120E1E, 140),
-        );
+        self.border(x, y, size, size, radius, theme.border_strong);
     }
 
     /// Draw an authentic Material You 3 Switch (`52x28dp` pill track with sliding thumb and checkmark).
     pub fn m3_switch(&mut self, x: f32, y: f32, on: bool) {
+        let theme = active_theme();
         let track_w = 52.0;
         let track_h = 28.0;
         if on {
-            self.rounded(x, y, track_w, track_h, 14.0, color::hex(0x9A7BFF, 255));
+            self.rounded(x, y, track_w, track_h, 14.0, theme.accent);
             let thumb_d = 22.0;
             let tx = x + track_w - thumb_d - 3.0;
             let ty = y + (track_h - thumb_d) * 0.5;
-            self.rounded(tx, ty, thumb_d, thumb_d, 11.0, color::hex(0x17112E, 255));
-            self.icon(
-                Icon::Check,
-                tx + 4.0,
-                ty + 4.0,
-                14.0,
-                color::hex(0x9A7BFF, 255),
-            );
+            self.rounded(tx, ty, thumb_d, thumb_d, 11.0, theme.on_accent);
+            self.icon(Icon::Check, tx + 4.0, ty + 4.0, 14.0, theme.accent);
         } else {
-            self.rounded(x, y, track_w, track_h, 14.0, color::hex(0x262336, 255));
-            self.stroke_rounded(x, y, track_w, track_h, 14.0, 1.6, color::hex(0x7A7394, 255));
+            self.rounded(x, y, track_w, track_h, 14.0, theme.surface_dim);
+            self.stroke_rounded(x, y, track_w, track_h, 14.0, 1.6, theme.border_strong);
             let thumb_d = 16.0;
             let tx = x + 6.0;
             let ty = y + (track_h - thumb_d) * 0.5;
-            self.rounded(tx, ty, thumb_d, thumb_d, 8.0, color::hex(0x9C96B0, 255));
+            self.rounded(tx, ty, thumb_d, thumb_d, 8.0, theme.text_muted);
         }
     }
 
     /// Draw an authentic Material You 3 Checkbox with label (`[✓] Label`) and return total width.
     pub fn m3_checkbox(&mut self, x: f32, y: f32, size: f32, checked: bool, label: &str) -> f32 {
+        let theme = active_theme();
         let r = (size * 0.28).clamp(4.0, 7.0);
         if checked {
-            self.rounded(x, y, size, size, r, color::hex(0x9A7BFF, 255));
+            self.rounded(x, y, size, size, r, theme.accent);
             let icon_s = (size - 4.0).max(10.0);
             self.icon(
                 Icon::Check,
                 x + (size - icon_s) * 0.5,
                 y + (size - icon_s) * 0.5,
                 icon_s,
-                color::hex(0x17112E, 255),
+                theme.on_accent,
             );
         } else {
-            self.rounded(x, y, size, size, r, color::hex(0x1C192B, 255));
-            self.stroke_rounded(x, y, size, size, r, 1.6, color::hex(0x7A7394, 255));
+            self.rounded(x, y, size, size, r, theme.surface_dim);
+            self.stroke_rounded(x, y, size, size, r, 1.6, theme.border_strong);
         }
         if !label.is_empty() {
             let tw = self.text(
@@ -1204,9 +1192,9 @@ impl<'a> Ui<'a> {
                 x + size + 8.0,
                 y + (size - 18.0) * 0.5,
                 if checked {
-                    color::hex(0xF4F0FC, 255)
+                    theme.text_primary
                 } else {
-                    color::hex(0xB8B1CC, 255)
+                    theme.text_muted
                 },
                 label,
             );
@@ -1214,50 +1202,6 @@ impl<'a> Ui<'a> {
         } else {
             size
         }
-    }
-
-    /// Draw the circular player head avatar badge inside the top-right account pill.
-    pub fn avatar_head(&mut self, x: f32, y: f32, size: f32) {
-        let r = size / 2.0;
-        self.rounded(x, y, size, size, r, color::hex(0x6E56C4, 255));
-        // Hair/top cap and face details inside the circular badge.
-        let inset = size * 0.18;
-        let face_w = size - inset * 2.0;
-        self.rounded(
-            x + inset,
-            y + inset,
-            face_w,
-            face_w,
-            face_w * 0.28,
-            color::hex(0xB89EFF, 255),
-        );
-        self.rounded(
-            x + inset,
-            y + inset,
-            face_w,
-            face_w * 0.36,
-            face_w * 0.2,
-            color::hex(0x41307A, 255),
-        );
-        let eye_w = (size * 0.11).max(2.0);
-        let eye_h = (size * 0.13).max(2.0);
-        let eye_y = y + size * 0.48;
-        self.rounded(
-            x + size * 0.31,
-            eye_y,
-            eye_w,
-            eye_h,
-            1.0,
-            color::hex(0x231942, 255),
-        );
-        self.rounded(
-            x + size * 0.58,
-            eye_y,
-            eye_w,
-            eye_h,
-            1.0,
-            color::hex(0x231942, 255),
-        );
     }
 
     /// Draw a cached RGBA project icon (`w x h`) into `(x, y, dw, dh)` dp.
@@ -1285,6 +1229,178 @@ impl<'a> Ui<'a> {
         );
         self.emit_clipped_uv(x0, y0, x1, y1, rect.u0, rect.v0, rect.u1, rect.v1, u32::MAX);
         true
+    }
+
+    /// Draw a single line of text elided to fit within `max_w` dp, inside a `(size * 1.45).round()`
+    /// tall line box whose top is `y`; returns the rendered advance in dp.
+    pub fn text_clipped(
+        &mut self,
+        face: Face,
+        size: f32,
+        x: f32,
+        y: f32,
+        max_w: f32,
+        color: Color,
+        text: &str,
+    ) -> f32 {
+        if max_w <= 2.0 || text.is_empty() {
+            return 0.0;
+        }
+        let single_line: std::borrow::Cow<'_, str> = if text.contains(['\n', '\r']) {
+            std::borrow::Cow::Owned(
+                text.chars()
+                    .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+                    .collect(),
+            )
+        } else {
+            std::borrow::Cow::Borrowed(text)
+        };
+        let fitted = self.fit_text(face, size, &single_line, max_w);
+        self.text(face, size, x, y, color, &fitted)
+    }
+
+    /// Renders a single-line helper/hint string at `(x, y)` within `w` dp, auto-scaling
+    /// font size from `10.5` down to `9.0` if needed so it clips cleanly on a single line.
+    pub fn hint_line(&mut self, x: f32, y: f32, w: f32, text: &str, color: Color) {
+        if w <= 4.0 || text.is_empty() {
+            return;
+        }
+        let single_line: String = text
+            .chars()
+            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+            .collect();
+        let mut size = 10.5f32;
+        while size > 9.0 && self.measure(Face::Regular, size, &single_line) > w {
+            size = (size - 0.5).max(9.0);
+        }
+        self.text_clipped(Face::Regular, size, x, y, w, color, &single_line);
+    }
+
+    /// Material 3 filled/outlined text field: supports compact single-line mode (`label.is_empty()` or `h < 40.0`)
+    /// and top-labeled mode (`!label.is_empty() && h >= 40.0`), single-line elided hints, and automatic
+    /// tail-scrolling when `active` so newly typed characters and the blinking caret stay visible.
+    #[allow(clippy::too_many_arguments)]
+    pub fn text_field(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        label: &str,
+        value: &str,
+        hint: &str,
+        active: bool,
+    ) -> [f32; 4] {
+        let theme = active_theme();
+        let accent = theme.accent;
+        let radius = (h * 0.24).clamp(8.0, 14.0);
+        self.rounded(
+            x,
+            y,
+            w,
+            h,
+            radius,
+            if active {
+                theme.surface_bright
+            } else {
+                theme.surface_dim
+            },
+        );
+        self.stroke_rounded(
+            x,
+            y,
+            w,
+            h,
+            radius,
+            if active { 1.6 } else { 1.0 },
+            if active { accent } else { theme.border },
+        );
+        let pad = (w * 0.035).clamp(10.0, 14.0);
+        let compact = label.is_empty() || h < 40.0;
+        let size = if compact {
+            (h * 0.36).clamp(11.5, 14.0)
+        } else {
+            (h * 0.28).clamp(12.0, 14.5)
+        };
+        let box_h = (size * 1.45).round();
+        let text_y = if compact {
+            y + (h - box_h) * 0.5
+        } else {
+            let label_max_w = (w - pad * 2.0).max(8.0);
+            self.text_clipped(
+                Face::SemiBold,
+                8.5,
+                x + pad,
+                y + 5.0,
+                label_max_w,
+                if active { accent } else { theme.text_muted },
+                label,
+            );
+            y + 18.0 + ((h - 20.0) - box_h).max(0.0) * 0.5
+        };
+        let text_max_w = (w - pad * 2.0 - if active { 6.0 } else { 0.0 }).max(8.0);
+        let clean_value: String = value
+            .chars()
+            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+            .collect();
+        let tw = if clean_value.is_empty() {
+            let _ = self.text_clipped(
+                Face::Regular,
+                size,
+                x + pad,
+                text_y,
+                text_max_w,
+                color::with_alpha(theme.text_muted, 0.72),
+                hint,
+            );
+            0.0
+        } else if active {
+            let limit = (text_max_w - 4.0).max(4.0);
+            let mut start_byte = 0;
+            if self.measure(Face::Medium, size, &clean_value) > limit {
+                for (idx, _) in clean_value.char_indices() {
+                    start_byte = idx;
+                    if self.measure(Face::Medium, size, &clean_value[start_byte..]) <= limit {
+                        break;
+                    }
+                }
+            }
+            let suffix = &clean_value[start_byte..];
+            self.text(
+                Face::Medium,
+                size,
+                x + pad,
+                text_y,
+                theme.text_primary,
+                suffix,
+            )
+        } else {
+            self.text_clipped(
+                Face::Medium,
+                size,
+                x + pad,
+                text_y,
+                text_max_w,
+                theme.text_primary,
+                &clean_value,
+            )
+        };
+        if active {
+            let blink_on = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.as_millis() / 500).is_multiple_of(2))
+                .unwrap_or(true);
+            let caret_col = if blink_on {
+                accent
+            } else {
+                color::with_alpha(accent, 0.32)
+            };
+            let cx = (x + pad + tw + 1.5).min(x + w - pad);
+            let ch = (size * 1.15).round();
+            let cy = text_y + (box_h - ch) * 0.5;
+            self.rounded(cx, cy, 1.8, ch, 0.9, caret_col);
+        }
+        [x, y, w, h]
     }
 
     // ---- text ----
@@ -1326,7 +1442,11 @@ impl<'a> Ui<'a> {
         let box_px = line * self.density;
         let atlas = self.atlas;
         let density = self.density;
-        let mut quads = Vec::new();
+        if text.is_empty() {
+            return 0.0;
+        }
+        let mut quads = with_cache(atlas, |c| std::mem::take(&mut c.glyph_scratch));
+        quads.clear();
         let width = with_cache(atlas, |c| {
             let scale = c.fonts.scale(face, px);
             let (ascent, descent) = {
@@ -1355,7 +1475,7 @@ impl<'a> Ui<'a> {
             }
             (pen - x0) / density
         });
-        for (gx, gy, rect) in quads {
+        for &(gx, gy, rect) in &quads {
             self.emit_clipped_uv(
                 gx,
                 gy,
@@ -1368,6 +1488,8 @@ impl<'a> Ui<'a> {
                 color,
             );
         }
+        quads.clear();
+        with_cache(atlas, |c| c.glyph_scratch = quads);
         width
     }
     /// Text in a `1.45 × size` line box whose top is `y`.
@@ -1401,7 +1523,7 @@ impl<'a> Ui<'a> {
         );
     }
 
-    /// Multi-pixel rounded border in dp (`stroke_w` dp thick).
+    /// Multi-pixel rounded border in dp (`stroke_w` dp thick) rendered in a single pass.
     pub fn stroke_rounded(
         &mut self,
         x: f32,
@@ -1415,23 +1537,54 @@ impl<'a> Ui<'a> {
         if color >> 24 == 0 || stroke_w <= 0.0 || w <= 0.0 || h <= 0.0 {
             return;
         }
-        let steps = (stroke_w * self.density).round().clamp(1.0, 14.0) as i32;
-        let step_dp = 1.0 / self.density.max(0.5);
-        for i in 0..steps {
-            let inset = i as f32 * step_dp;
-            let rw = w - inset * 2.0;
-            let rh = h - inset * 2.0;
-            if rw <= 1.0 || rh <= 1.0 {
-                break;
-            }
-            self.border(
-                x + inset,
-                y + inset,
-                rw,
-                rh,
-                (radius - inset).max(0.0),
+        let (x0, y0, x1, y1) = (
+            self.px_x(x),
+            self.px_y(y),
+            self.px_x(x + w),
+            self.px_y(y + h),
+        );
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        let t = (stroke_w * self.density).round().clamp(1.0, 24.0);
+        let r = (radius * self.density)
+            .round()
+            .min(((x1 - x0) / 2.0).floor())
+            .min(((y1 - y0) / 2.0).floor())
+            .max(0.0);
+        if r < 1.0 {
+            self.raw_fill(x0, y0, x1, (y0 + t).min(y1), color);
+            self.raw_fill(x0, (y1 - t).max(y0), x1, y1, color);
+            self.raw_fill(
+                x0,
+                (y0 + t).min(y1),
+                (x0 + t).min(x1),
+                (y1 - t).max(y0),
                 color,
             );
+            self.raw_fill(
+                (x1 - t).max(x0),
+                (y0 + t).min(y1),
+                x1,
+                (y1 - t).max(y0),
+                color,
+            );
+            return;
+        }
+        self.raw_fill(x0 + r, y0, x1 - r, (y0 + t).min(y1), color);
+        self.raw_fill(x0 + r, (y1 - t).max(y0), x1 - r, y1, color);
+        self.raw_fill(x0, y0 + r, (x0 + t).min(x1), y1 - r, color);
+        self.raw_fill((x1 - t).max(x0), y0 + r, x1, y1 - r, color);
+        if t < r {
+            let atlas = self.atlas;
+            if let Some(rect) = with_cache(atlas, |c| c.corner(atlas, r as u16, t as u16)) {
+                self.corner_quad(rect, x0, y0, r, (false, false), color);
+                self.corner_quad(rect, x1 - r, y0, r, (true, false), color);
+                self.corner_quad(rect, x1 - r, y1 - r, r, (true, true), color);
+                self.corner_quad(rect, x0, y1 - r, r, (false, true), color);
+            }
+        } else {
+            self.corners(x0, y0, x1, y1, r, 0, color);
         }
     }
 
@@ -1547,7 +1700,307 @@ impl<'a> Ui<'a> {
         }
     }
 
-    // ---- the launcher's components ----
+    /// Renders a multi-stop linear gradient inside `[x, y, w, h]` dp using the resolved theme configuration.
+    pub fn fill_gradient(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        direction: GradientDirection,
+        c0: u32,
+        c1: u32,
+        c2: Option<(f32, u32)>,
+        steps: usize,
+    ) {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let bands = steps.clamp(8, 32);
+        let sample = |t: f32| -> u32 {
+            let t = t.clamp(0.0, 1.0);
+            if let Some((mid_pos, cm)) = c2 {
+                let mp = mid_pos.clamp(0.10, 0.90);
+                if t <= mp {
+                    lerp_color(c0, cm, (t / mp).clamp(0.0, 1.0))
+                } else {
+                    lerp_color(cm, c1, ((t - mp) / (1.0 - mp)).clamp(0.0, 1.0))
+                }
+            } else {
+                lerp_color(c0, c1, t)
+            }
+        };
+        match direction {
+            GradientDirection::Vertical => {
+                let bh = h / bands as f32;
+                for i in 0..bands {
+                    let t = (i as f32 + 0.5) / bands as f32;
+                    self.fill(x, y + i as f32 * bh, w, bh + 0.6, sample(t));
+                }
+            }
+            GradientDirection::Horizontal => {
+                let bw = w / bands as f32;
+                for i in 0..bands {
+                    let t = (i as f32 + 0.5) / bands as f32;
+                    self.fill(x + i as f32 * bw, y, bw + 0.6, h, sample(t));
+                }
+            }
+            GradientDirection::DiagonalDown | GradientDirection::DiagonalUp => {
+                // Render smooth 2D grid cells for diagonal gradients without heavy shader switches
+                let gx = (bands / 2).clamp(6, 14);
+                let gy = (bands / 2).clamp(6, 14);
+                let cw = w / gx as f32;
+                let ch = h / gy as f32;
+                for iy in 0..gy {
+                    let ty = (iy as f32 + 0.5) / gy as f32;
+                    for ix in 0..gx {
+                        let tx = (ix as f32 + 0.5) / gx as f32;
+                        let t = if direction == GradientDirection::DiagonalDown {
+                            (tx + ty) * 0.5
+                        } else {
+                            (tx + (1.0 - ty)) * 0.5
+                        };
+                        self.fill(
+                            x + ix as f32 * cw,
+                            y + iy as f32 * ch,
+                            cw + 0.6,
+                            ch + 0.6,
+                            sample(t),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Paints the active theme background (solid or multi-stop gradient) over `[x, y, w, h]` dp.
+    pub fn draw_theme_background(&mut self, x: f32, y: f32, w: f32, h: f32, theme: &ResolvedTheme) {
+        if theme.is_gradient {
+            let mid = theme
+                .use_three_stops
+                .then_some((theme.gradient_mid_pos, theme.gradient_mid));
+            self.fill_gradient(
+                x,
+                y,
+                w,
+                h,
+                theme.gradient_direction,
+                theme.gradient_start,
+                theme.gradient_end,
+                mid,
+                20,
+            );
+        } else {
+            self.fill(x, y, w, h, theme.bg_solid);
+        }
+    }
+
+    // ---- the launcher's components & animated Horizon intro ----
+
+    /// Draws the procedural crisp vector Horizon `H` mark centered at `(cx, cy)` in `size x size` dp:
+    /// left pillar sliding up, right pillar sliding down, and tilted horizon bridge sweeping across
+    /// with a subtle accent glow ring.
+    pub fn draw_animated_horizon_mark(
+        &mut self,
+        cx: f32,
+        cy: f32,
+        size: f32,
+        elapsed: f32,
+        alpha: f32,
+    ) {
+        let a = alpha.clamp(0.0, 1.0);
+        if a <= 0.01 || size <= 4.0 {
+            return;
+        }
+        let theme = active_theme();
+        let ring_t = motion::ease_out_cubic((elapsed / 0.55).clamp(0.0, 1.0));
+        let ring_r = size * (0.56 + 0.08 * ring_t);
+        self.rounded(
+            cx - ring_r,
+            cy - ring_r,
+            ring_r * 2.0,
+            ring_r * 2.0,
+            ring_r * 0.36,
+            color::with_alpha(theme.accent, 0.14 * ring_t * a),
+        );
+        self.stroke_rounded(
+            cx - ring_r,
+            cy - ring_r,
+            ring_r * 2.0,
+            ring_r * 2.0,
+            ring_r * 0.36,
+            1.5,
+            color::with_alpha(theme.accent, 0.38 * ring_t * a),
+        );
+
+        let plate_r = size * 0.46;
+        self.rounded(
+            cx - plate_r,
+            cy - plate_r,
+            plate_r * 2.0,
+            plate_r * 2.0,
+            plate_r * 0.32,
+            color::with_alpha(theme.surface, 0.94 * a),
+        );
+        self.stroke_rounded(
+            cx - plate_r,
+            cy - plate_r,
+            plate_r * 2.0,
+            plate_r * 2.0,
+            plate_r * 0.32,
+            1.4,
+            color::with_alpha(theme.border_strong, 0.85 * a),
+        );
+
+        let t_left = motion::ease_out_quint((elapsed / 0.42).clamp(0.0, 1.0));
+        let t_right = motion::ease_out_quint(((elapsed - 0.08).max(0.0) / 0.42).clamp(0.0, 1.0));
+        let t_bridge = motion::spring_spatial(((elapsed - 0.16).max(0.0) / 0.48).clamp(0.0, 1.0));
+
+        let bar_w = (size * 0.135).max(3.0);
+        let bar_h = (size * 0.56).max(10.0);
+        let bar_r = bar_w * 0.5;
+        let offset_x = size * 0.185;
+
+        // Left pillar sliding up into place
+        let left_slide = (1.0 - t_left) * (size * 0.24);
+        self.rounded(
+            cx - offset_x - bar_w * 0.5,
+            cy - bar_h * 0.5 + left_slide,
+            bar_w,
+            bar_h,
+            bar_r,
+            color::with_alpha(theme.text_primary, t_left * a),
+        );
+
+        // Right pillar sliding down into place
+        let right_slide = -(1.0 - t_right) * (size * 0.24);
+        self.rounded(
+            cx + offset_x - bar_w * 0.5,
+            cy - bar_h * 0.5 + right_slide,
+            bar_w,
+            bar_h,
+            bar_r,
+            color::with_alpha(theme.accent, t_right * a),
+        );
+
+        // Tilted horizon bridge sweeping across from left pillar to right pillar
+        if t_bridge > 0.02 {
+            let x0 = cx - offset_x;
+            let y0 = cy + size * 0.065;
+            let x1 = cx + offset_x;
+            let y1 = cy - size * 0.065;
+            let steps = 15usize;
+            let active_steps = ((steps as f32 * t_bridge).ceil() as usize).clamp(1, steps);
+            let dot_d = (bar_w * 0.92).max(2.5);
+            for i in 0..active_steps {
+                let f = i as f32 / (steps.saturating_sub(1).max(1) as f32);
+                let px = x0 + (x1 - x0) * f;
+                let py = y0 + (y1 - y0) * f;
+                self.rounded(
+                    px - dot_d * 0.5,
+                    py - dot_d * 0.5,
+                    dot_d,
+                    dot_d,
+                    dot_d * 0.5,
+                    color::with_alpha(theme.accent, t_bridge * a),
+                );
+            }
+        }
+    }
+
+    /// Renders a clean, modern, minimal animated Horizon intro screen centered on the
+    /// procedural Horizon `H` logo with real initialization progress and smooth cross-dissolve.
+    pub fn draw_horizon_intro(&mut self, elapsed: f32, loading_progress: f32, status_text: &str) {
+        let real_prog = loading_progress.clamp(0.0, 1.0);
+        let dissolve = if real_prog >= 0.999 && elapsed > 1.15 {
+            1.0 - motion::ease_out_cubic(((elapsed - 1.15) / 0.40).clamp(0.0, 1.0))
+        } else {
+            1.0
+        };
+        if dissolve <= 0.01 {
+            return;
+        }
+        let theme = active_theme();
+        let (w, h) = (self.w, self.h);
+        self.fill(
+            0.0,
+            0.0,
+            w,
+            h,
+            color::with_alpha(theme.bg_solid, 0.97 * dissolve),
+        );
+
+        let cx = w * 0.5;
+        let cy = (h * 0.37).clamp(110.0, h - 150.0);
+        let mark_size = (h * 0.19).clamp(64.0, 88.0);
+        self.draw_animated_horizon_mark(cx, cy, mark_size, elapsed, dissolve);
+
+        let title_t =
+            motion::ease_out_cubic(((elapsed - 0.18).max(0.0) / 0.42).clamp(0.0, 1.0)) * dissolve;
+        if title_t > 0.02 {
+            let slide = (1.0 - title_t) * 8.0;
+            let title_y = cy + mark_size * 0.68 + slide;
+            self.text_centered(
+                Face::SemiBold,
+                24.0,
+                cx,
+                title_y,
+                color::with_alpha(theme.text_primary, title_t),
+                "HORIZON",
+            );
+            let sub_y = title_y + 32.0;
+            self.text_centered(
+                Face::Medium,
+                11.5,
+                cx,
+                sub_y,
+                color::with_alpha(theme.text_muted, title_t * 0.9),
+                "RUST EDITION  •  ANDROID LAUNCHER",
+            );
+
+            // Real initialization progress indicator
+            let bar_w = (w * 0.34).clamp(180.0, 260.0);
+            let bar_h = 6.0;
+            let bar_x = cx - bar_w * 0.5;
+            let bar_y = sub_y + 28.0;
+            self.rounded(
+                bar_x,
+                bar_y,
+                bar_w,
+                bar_h,
+                3.0,
+                color::with_alpha(theme.surface_bright, title_t),
+            );
+            let fill_w = (bar_w * real_prog.max(0.05)).clamp(bar_h, bar_w);
+            self.rounded(
+                bar_x,
+                bar_y,
+                fill_w,
+                bar_h,
+                3.0,
+                color::with_alpha(theme.accent, title_t),
+            );
+
+            let msg = if status_text.trim().is_empty() {
+                if real_prog >= 0.999 {
+                    "Ready • Tap anywhere to continue".to_owned()
+                } else {
+                    format!("Initializing workspace... {:.0}%", real_prog * 100.0)
+                }
+            } else {
+                format!("{status_text} ({:.0}%)", real_prog * 100.0)
+            };
+            let fitted_msg = self.fit_text(Face::Regular, 11.0, &msg, (w - 48.0).max(120.0));
+            self.text_centered(
+                Face::Regular,
+                11.0,
+                cx,
+                bar_y + 12.0,
+                color::with_alpha(theme.text_muted, title_t * 0.88),
+                &fitted_msg,
+            );
+        }
+    }
 }
 
 // ---- the boot screen ----
@@ -1575,22 +2028,71 @@ pub fn draw_boot(atlas: &HudAtlas, batch: &mut HudBatch, logs: &[String]) {
     draw_boot_log(atlas, batch, logs);
 }
 
-/// The wordmark with its tagline, centred.
+/// The wordmark with its tagline, crisp vector H mark, and progress bar, centred.
 fn wordmark(atlas: &HudAtlas, batch: &mut HudBatch) {
     let mut ui = Ui::new(atlas, batch, (0.0, 0.0));
     let size = (ui.w / 16.0).clamp(DISPLAY, 96.0);
     let small = (size * 0.25).clamp(MICRO, 18.0);
     let block = size * 1.45 + small * 0.6 + small * 1.5;
     let top = (ui.h - block) / 2.0;
-    ui.text_centered(Face::SemiBold, size, ui.w / 2.0, top, BOOT_TEXT, "Horizon");
+    let cx = ui.w / 2.0;
+
+    // Crisp vector H mark centered symmetrically above the wordmark
+    let mark_s = (size * 0.62).clamp(28.0, 52.0);
+    let mark_cy = (top - mark_s * 0.72).max(mark_s * 0.6);
+    let bar_w = (mark_s * 0.14).max(3.0);
+    let bar_h = (mark_s * 0.56).max(10.0);
+    let off_x = mark_s * 0.18;
+    let accent = active_theme().accent;
+    ui.rounded(
+        cx - off_x - bar_w * 0.5,
+        mark_cy - bar_h * 0.5,
+        bar_w,
+        bar_h,
+        bar_w * 0.5,
+        BOOT_TEXT,
+    );
+    ui.rounded(
+        cx + off_x - bar_w * 0.5,
+        mark_cy - bar_h * 0.5,
+        bar_w,
+        bar_h,
+        bar_w * 0.5,
+        accent,
+    );
+    ui.rounded(
+        cx - off_x,
+        mark_cy - bar_w * 0.45,
+        off_x * 2.0,
+        bar_w * 0.9,
+        bar_w * 0.45,
+        accent,
+    );
+
+    ui.text_centered(Face::SemiBold, size, cx, top, BOOT_TEXT, "Horizon");
+    let sub_y = top + size * 1.45 + small * 0.6;
     ui.text_centered(
         Face::Mono,
         small,
-        ui.w / 2.0,
-        top + size * 1.45 + small * 0.6,
+        cx,
+        sub_y,
         BOOT_LOG,
         "Rust based minecraft client",
     );
+
+    // Symmetrical centered startup progress bar below the tagline
+    let prog_w = (size * 1.8).clamp(80.0, 140.0);
+    let prog_y = sub_y + small * 1.7;
+    ui.rounded(
+        cx - prog_w * 0.5,
+        prog_y,
+        prog_w,
+        4.0,
+        2.0,
+        color::with_alpha(BOOT_LOG, 0.28),
+    );
+    let pulse_w = prog_w * 0.56;
+    ui.rounded(cx - pulse_w * 0.5, prog_y, pulse_w, 4.0, 2.0, accent);
     ui.finish();
 }
 
@@ -1659,6 +2161,602 @@ fn wrapping_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec
     lines
 }
 
+// ---- Centralized Launcher Theme System & Motion Utilities ----
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemePreset {
+    #[default]
+    ObsidianViolet,
+    CyberCyan,
+    EmeraldForest,
+    CrimsonEmber,
+    SolarGold,
+    SakuraRose,
+    DaylightFrost,
+    Custom,
+}
+
+impl ThemePreset {
+    pub const ALL: [Self; 8] = [
+        Self::ObsidianViolet,
+        Self::CyberCyan,
+        Self::EmeraldForest,
+        Self::CrimsonEmber,
+        Self::SolarGold,
+        Self::SakuraRose,
+        Self::DaylightFrost,
+        Self::Custom,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ObsidianViolet => "Obsidian Violet",
+            Self::CyberCyan => "Cyber Cyan",
+            Self::EmeraldForest => "Emerald Forest",
+            Self::CrimsonEmber => "Crimson Ember",
+            Self::SolarGold => "Solar Gold",
+            Self::SakuraRose => "Sakura Rose",
+            Self::DaylightFrost => "Daylight Frost",
+            Self::Custom => "Custom Theme",
+        }
+    }
+
+    pub fn subtitle(self) -> &'static str {
+        match self {
+            Self::ObsidianViolet => "Signature Horizon dark violet",
+            Self::CyberCyan => "Deep slate with electric cyan",
+            Self::EmeraldForest => "Woodland moss with emerald mint",
+            Self::CrimsonEmber => "Obsidian ruby with warm coral",
+            Self::SolarGold => "Dark bronze with radiant amber",
+            Self::SakuraRose => "Twilight plum with blossom pink",
+            Self::DaylightFrost => "High-contrast Material 3 light",
+            Self::Custom => "Personalized colors & gradients",
+        }
+    }
+
+    /// Returns `(bg_rgb, surface_rgb, accent_rgb, grad_start_rgb, grad_mid_rgb, grad_end_rgb, is_light)`
+    pub fn palette_rgb(self) -> (u32, u32, u32, u32, u32, u32, bool) {
+        match self {
+            Self::ObsidianViolet | Self::Custom => (
+                0x13111C, 0x1D192B, 0x9A7BFF, 0x161129, 0x1E1638, 0x0E0C16, false,
+            ),
+            Self::CyberCyan => (
+                0x0C131F, 0x152033, 0x38BDF8, 0x0D1B2E, 0x102942, 0x09101B, false,
+            ),
+            Self::EmeraldForest => (
+                0x0D1714, 0x152620, 0x34D399, 0x0F231C, 0x163329, 0x0A120F, false,
+            ),
+            Self::CrimsonEmber => (
+                0x191013, 0x26181D, 0xF87171, 0x261219, 0x361922, 0x120B0E, false,
+            ),
+            Self::SolarGold => (
+                0x18140D, 0x251F15, 0xFBBF24, 0x241C0F, 0x332714, 0x120F0A, false,
+            ),
+            Self::SakuraRose => (
+                0x18111A, 0x261A29, 0xF472B6, 0x251429, 0x341C3A, 0x110C13, false,
+            ),
+            Self::DaylightFrost => (
+                0xF3F1FA, 0xFFFFFF, 0x6750A4, 0xEDE8FA, 0xF5F2FC, 0xE4DDF8, true,
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ThemeAppearance {
+    #[default]
+    Dark,
+    Light,
+}
+
+impl ThemeAppearance {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Dark Mode",
+            Self::Light => "Light Mode",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BackgroundMode {
+    #[default]
+    Solid,
+    Gradient,
+}
+
+impl BackgroundMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Solid => "Solid Color",
+            Self::Gradient => "Multi-Stop Gradient",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GradientDirection {
+    #[default]
+    Vertical,
+    Horizontal,
+    DiagonalDown,
+    DiagonalUp,
+}
+
+impl GradientDirection {
+    pub const ALL: [Self; 4] = [
+        Self::Vertical,
+        Self::Horizontal,
+        Self::DiagonalDown,
+        Self::DiagonalUp,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Vertical => "Top → Bottom",
+            Self::Horizontal => "Left → Right",
+            Self::DiagonalDown => "Diagonal ↘",
+            Self::DiagonalUp => "Diagonal ↗",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Vertical => Self::Horizontal,
+            Self::Horizontal => Self::DiagonalDown,
+            Self::DiagonalDown => Self::DiagonalUp,
+            Self::DiagonalUp => Self::Vertical,
+        }
+    }
+}
+
+/// Curated palette swatches for quick one-tap selection in Launcher Settings -> Theme.
+pub const THEME_ACCENT_SWATCHES: [(u32, &str, &str); 8] = [
+    (0x9A7BFF, "#9A7BFF", "Violet"),
+    (0x38BDF8, "#38BDF8", "Cyan"),
+    (0x34D399, "#34D399", "Emerald"),
+    (0xF87171, "#F87171", "Crimson"),
+    (0xFBBF24, "#FBBF24", "Amber"),
+    (0xF472B6, "#F472B6", "Sakura"),
+    (0x60A5FA, "#60A5FA", "Cobalt"),
+    (0xA78BFA, "#A78BFA", "Iris"),
+];
+
+pub const THEME_BG_SWATCHES_DARK: [(u32, &str, &str); 6] = [
+    (0x13111C, "#13111C", "Obsidian"),
+    (0x0C131F, "#0C131F", "Abyss Blue"),
+    (0x0D1714, "#0D1714", "Deep Pine"),
+    (0x191013, "#191013", "Dark Ruby"),
+    (0x141418, "#141418", "Carbon"),
+    (0x0A0A0E, "#0A0A0E", "OLED Pitch"),
+];
+
+pub const THEME_BG_SWATCHES_LIGHT: [(u32, &str, &str); 6] = [
+    (0xF3F1FA, "#F3F1FA", "Frost Lavender"),
+    (0xEEF4FA, "#EEF4FA", "Ice Sky"),
+    (0xEFF7F3, "#EFF7F3", "Mint Cream"),
+    (0xFAF1F2, "#FAF1F2", "Rose Quartz"),
+    (0xF9F6EE, "#F9F6EE", "Warm Ivory"),
+    (0xF4F5F7, "#F4F5F7", "Pure Alabaster"),
+];
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct LauncherThemeConfig {
+    pub preset: ThemePreset,
+    pub appearance: ThemeAppearance,
+    pub background_mode: BackgroundMode,
+    pub custom_bg_hex: String,
+    pub custom_surface_hex: String,
+    pub custom_accent_hex: String,
+    pub gradient_direction: GradientDirection,
+    pub gradient_start_hex: String,
+    pub gradient_mid_hex: String,
+    pub gradient_end_hex: String,
+    pub gradient_mid_pos: f32,
+    pub use_three_stops: bool,
+}
+
+impl Default for LauncherThemeConfig {
+    fn default() -> Self {
+        Self {
+            preset: ThemePreset::ObsidianViolet,
+            appearance: ThemeAppearance::Dark,
+            background_mode: BackgroundMode::Solid,
+            custom_bg_hex: "#13111C".into(),
+            custom_surface_hex: "#1D192B".into(),
+            custom_accent_hex: "#9A7BFF".into(),
+            gradient_direction: GradientDirection::DiagonalDown,
+            gradient_start_hex: "#1A1333".into(),
+            gradient_mid_hex: "#131A2E".into(),
+            gradient_end_hex: "#0D0B14".into(),
+            gradient_mid_pos: 0.50,
+            use_three_stops: true,
+        }
+    }
+}
+
+/// Safely parses a hex color string (`#RRGGBB`, `RRGGBB`, `#RGB`, `0xRRGGBB`) into `0xRRGGBB`.
+/// Returns `None` on invalid input so callers can provide sensible fallbacks.
+pub fn parse_hex_color(input: &str) -> Option<u32> {
+    let clean = input
+        .trim()
+        .trim_start_matches('#')
+        .trim_start_matches("0x")
+        .trim_start_matches("0X");
+    if clean.len() == 6 && clean.chars().all(|c| c.is_ascii_hexdigit()) {
+        u32::from_str_radix(clean, 16).ok()
+    } else if clean.len() == 3 && clean.chars().all(|c| c.is_ascii_hexdigit()) {
+        let mut expanded = String::with_capacity(6);
+        for ch in clean.chars() {
+            expanded.push(ch);
+            expanded.push(ch);
+        }
+        u32::from_str_radix(&expanded, 16).ok()
+    } else {
+        None
+    }
+}
+
+pub fn format_hex_color(rgb: u32) -> String {
+    format!("#{:06X}", rgb & 0xFFFFFF)
+}
+
+fn rgb_luminance(rgb: u32) -> f32 {
+    let r = ((rgb >> 16) & 0xFF) as f32 / 255.0;
+    let g = ((rgb >> 8) & 0xFF) as f32 / 255.0;
+    let b = (rgb & 0xFF) as f32 / 255.0;
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+fn blend_rgb(a: u32, b: u32, t: f32) -> u32 {
+    let t = t.clamp(0.0, 1.0);
+    let ar = ((a >> 16) & 0xFF) as f32;
+    let ag = ((a >> 8) & 0xFF) as f32;
+    let ab = (a & 0xFF) as f32;
+    let br = ((b >> 16) & 0xFF) as f32;
+    let bg = ((b >> 8) & 0xFF) as f32;
+    let bb = (b & 0xFF) as f32;
+    let r = (ar + (br - ar) * t).round().clamp(0.0, 255.0) as u32;
+    let g = (ag + (bg - ag) * t).round().clamp(0.0, 255.0) as u32;
+    let bl = (ab + (bb - ab) * t).round().clamp(0.0, 255.0) as u32;
+    (r << 16) | (g << 8) | bl
+}
+
+/// Linearly interpolates two HUD ABGR colors (`color::hex` format).
+pub fn lerp_color(c0: u32, c1: u32, t: f32) -> u32 {
+    let t = t.clamp(0.0, 1.0);
+    let mut out = 0u32;
+    for shift in [0, 8, 16, 24] {
+        let v0 = ((c0 >> shift) & 0xFF) as f32;
+        let v1 = ((c1 >> shift) & 0xFF) as f32;
+        let v = (v0 + (v1 - v0) * t).round().clamp(0.0, 255.0) as u32;
+        out |= v << shift;
+    }
+    out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ResolvedTheme {
+    pub is_light: bool,
+    pub is_gradient: bool,
+    pub gradient_direction: GradientDirection,
+    pub use_three_stops: bool,
+    pub gradient_mid_pos: f32,
+    /// Solid fallback background color (always valid even when gradient is enabled).
+    pub bg_solid: u32,
+    pub gradient_start: u32,
+    pub gradient_mid: u32,
+    pub gradient_end: u32,
+    pub sidebar_bg: u32,
+    pub header_bg: u32,
+    pub surface: u32,
+    pub surface_dim: u32,
+    pub surface_bright: u32,
+    pub surface_selected: u32,
+    pub border: u32,
+    pub border_strong: u32,
+    pub accent: u32,
+    pub accent_soft: u32,
+    pub on_accent: u32,
+    pub accent_text: u32,
+    pub text_primary: u32,
+    pub text_muted: u32,
+    pub success: u32,
+    pub danger: u32,
+}
+
+impl Default for ResolvedTheme {
+    fn default() -> Self {
+        LauncherThemeConfig::default().resolve()
+    }
+}
+
+impl LauncherThemeConfig {
+    pub fn sanitize(&mut self) {
+        if !self.gradient_mid_pos.is_finite() {
+            self.gradient_mid_pos = 0.50;
+        }
+        self.gradient_mid_pos = self.gradient_mid_pos.clamp(0.15, 0.85);
+        if parse_hex_color(&self.custom_bg_hex).is_none() {
+            self.custom_bg_hex = "#13111C".into();
+        }
+        if parse_hex_color(&self.custom_surface_hex).is_none() {
+            self.custom_surface_hex = "#1D192B".into();
+        }
+        if parse_hex_color(&self.custom_accent_hex).is_none() {
+            self.custom_accent_hex = "#9A7BFF".into();
+        }
+        if parse_hex_color(&self.gradient_start_hex).is_none() {
+            self.gradient_start_hex = "#1A1333".into();
+        }
+        if parse_hex_color(&self.gradient_mid_hex).is_none() {
+            self.gradient_mid_hex = "#131A2E".into();
+        }
+        if parse_hex_color(&self.gradient_end_hex).is_none() {
+            self.gradient_end_hex = "#0D0B14".into();
+        }
+    }
+
+    pub fn apply_preset(&mut self, preset: ThemePreset) {
+        self.preset = preset;
+        if preset != ThemePreset::Custom {
+            let (bg, surf, acc, gs, gm, ge, is_light) = preset.palette_rgb();
+            self.appearance = if is_light {
+                ThemeAppearance::Light
+            } else {
+                ThemeAppearance::Dark
+            };
+            self.custom_bg_hex = format_hex_color(bg);
+            self.custom_surface_hex = format_hex_color(surf);
+            self.custom_accent_hex = format_hex_color(acc);
+            self.gradient_start_hex = format_hex_color(gs);
+            self.gradient_mid_hex = format_hex_color(gm);
+            self.gradient_end_hex = format_hex_color(ge);
+        }
+    }
+
+    pub fn resolve(&self) -> ResolvedTheme {
+        let (def_bg, def_surf, def_acc, def_gs, def_gm, def_ge, preset_light) =
+            self.preset.palette_rgb();
+        let is_light = if self.preset == ThemePreset::DaylightFrost {
+            true
+        } else {
+            self.appearance == ThemeAppearance::Light || preset_light
+        };
+
+        let mut bg_rgb = if self.preset == ThemePreset::Custom {
+            parse_hex_color(&self.custom_bg_hex).unwrap_or(def_bg)
+        } else if is_light && self.preset != ThemePreset::DaylightFrost {
+            blend_rgb(0xF4F2FA, def_acc, 0.06)
+        } else {
+            parse_hex_color(&self.custom_bg_hex).unwrap_or(def_bg)
+        };
+
+        // Ensure background matches light/dark appearance mode if user toggled appearance
+        if is_light && rgb_luminance(bg_rgb) < 0.45 {
+            bg_rgb = blend_rgb(0xF3F1FA, def_acc, 0.06);
+        } else if !is_light && rgb_luminance(bg_rgb) > 0.65 {
+            bg_rgb = 0x13111C;
+        }
+
+        let mut accent_rgb = parse_hex_color(&self.custom_accent_hex).unwrap_or(def_acc);
+        // Protect accent legibility against background
+        if is_light && rgb_luminance(accent_rgb) > 0.72 {
+            accent_rgb = blend_rgb(accent_rgb, 0x1E1638, 0.45);
+        } else if !is_light && rgb_luminance(accent_rgb) < 0.15 {
+            accent_rgb = blend_rgb(accent_rgb, 0xFFFFFF, 0.45);
+        }
+
+        let surf_rgb = if is_light {
+            blend_rgb(bg_rgb, 0xFFFFFF, 0.72)
+        } else {
+            let candidate = parse_hex_color(&self.custom_surface_hex).unwrap_or(def_surf);
+            if rgb_luminance(candidate) > 0.55 {
+                blend_rgb(bg_rgb, 0xFFFFFF, 0.07)
+            } else {
+                blend_rgb(bg_rgb, candidate, 0.75)
+            }
+        };
+
+        let gs_rgb = parse_hex_color(&self.gradient_start_hex).unwrap_or(def_gs);
+        let gm_rgb = parse_hex_color(&self.gradient_mid_hex).unwrap_or(def_gm);
+        let ge_rgb = parse_hex_color(&self.gradient_end_hex).unwrap_or(def_ge);
+        let (gs_adj, gm_adj, ge_adj) = if is_light {
+            (
+                if rgb_luminance(gs_rgb) < 0.45 {
+                    blend_rgb(0xEDE8FA, accent_rgb, 0.14)
+                } else {
+                    gs_rgb
+                },
+                if rgb_luminance(gm_rgb) < 0.45 {
+                    blend_rgb(0xF6F4FC, accent_rgb, 0.06)
+                } else {
+                    gm_rgb
+                },
+                if rgb_luminance(ge_rgb) < 0.45 {
+                    blend_rgb(0xE3DCF7, accent_rgb, 0.18)
+                } else {
+                    ge_rgb
+                },
+            )
+        } else {
+            (gs_rgb, gm_rgb, ge_rgb)
+        };
+
+        let sidebar_rgb = if is_light {
+            blend_rgb(bg_rgb, accent_rgb, 0.07)
+        } else {
+            blend_rgb(bg_rgb, 0x07060C, 0.35)
+        };
+        let header_rgb = if is_light {
+            blend_rgb(bg_rgb, 0xFFFFFF, 0.50)
+        } else {
+            blend_rgb(bg_rgb, surf_rgb, 0.50)
+        };
+        let surf_dim_rgb = if is_light {
+            blend_rgb(bg_rgb, 0x000000, 0.04)
+        } else {
+            blend_rgb(bg_rgb, 0x000000, 0.22)
+        };
+        let surf_bright_rgb = if is_light {
+            blend_rgb(surf_rgb, accent_rgb, 0.10)
+        } else {
+            blend_rgb(surf_rgb, 0xFFFFFF, 0.07)
+        };
+        let surf_sel_rgb = if is_light {
+            blend_rgb(surf_rgb, accent_rgb, 0.18)
+        } else {
+            blend_rgb(surf_rgb, accent_rgb, 0.24)
+        };
+        let border_rgb = if is_light {
+            blend_rgb(bg_rgb, 0x1D192B, 0.16)
+        } else {
+            blend_rgb(surf_rgb, 0xFFFFFF, 0.11)
+        };
+        let border_strong_rgb = if is_light {
+            blend_rgb(bg_rgb, 0x1D192B, 0.34)
+        } else {
+            blend_rgb(surf_rgb, 0xFFFFFF, 0.28)
+        };
+        let on_accent_rgb = if rgb_luminance(accent_rgb) > 0.48 {
+            0x140E26
+        } else {
+            0xFFFFFF
+        };
+        let text_primary_rgb = if is_light { 0x1A1626 } else { 0xF5F2FC };
+        let text_muted_rgb = if is_light { 0x5E5675 } else { 0xA39BBF };
+
+        // Solid fallback even if gradient mode is active
+        let solid_fallback_rgb = if self.background_mode == BackgroundMode::Gradient {
+            blend_rgb(gs_adj, ge_adj, 0.5)
+        } else {
+            bg_rgb
+        };
+
+        ResolvedTheme {
+            is_light,
+            is_gradient: self.background_mode == BackgroundMode::Gradient,
+            gradient_direction: self.gradient_direction,
+            use_three_stops: self.use_three_stops,
+            gradient_mid_pos: self.gradient_mid_pos.clamp(0.15, 0.85),
+            bg_solid: color::hex(solid_fallback_rgb, 255),
+            gradient_start: color::hex(gs_adj, 255),
+            gradient_mid: color::hex(gm_adj, 255),
+            gradient_end: color::hex(ge_adj, 255),
+            sidebar_bg: color::hex(sidebar_rgb, 246),
+            header_bg: color::hex(header_rgb, 246),
+            surface: color::hex(surf_rgb, 245),
+            surface_dim: color::hex(surf_dim_rgb, 248),
+            surface_bright: color::hex(surf_bright_rgb, 250),
+            surface_selected: color::hex(surf_sel_rgb, 252),
+            border: color::hex(border_rgb, 255),
+            border_strong: color::hex(border_strong_rgb, 255),
+            accent: color::hex(accent_rgb, 255),
+            accent_soft: color::with_alpha(color::hex(accent_rgb, 255), 0.22),
+            on_accent: color::hex(on_accent_rgb, 255),
+            accent_text: color::hex(on_accent_rgb, 255),
+            text_primary: color::hex(text_primary_rgb, 255),
+            text_muted: color::hex(text_muted_rgb, 255),
+            success: color::hex(if is_light { 0x15803D } else { 0x4ADE80 }, 255),
+            danger: color::hex(if is_light { 0xDC2626 } else { 0xF87171 }, 255),
+        }
+    }
+}
+
+static ACTIVE_THEME: std::sync::Mutex<Option<ResolvedTheme>> = std::sync::Mutex::new(None);
+
+pub fn active_theme() -> ResolvedTheme {
+    if let Ok(guard) = ACTIVE_THEME.lock()
+        && let Some(theme) = *guard
+    {
+        return theme;
+    }
+    ResolvedTheme::default()
+}
+
+pub fn set_active_theme(theme: ResolvedTheme) {
+    if let Ok(mut guard) = ACTIVE_THEME.lock() {
+        *guard = Some(theme);
+    }
+}
+
+/// Performant, hardware-conscious motion utilities following Material 3 Expressive
+/// and Disney choreography principles. Automatically respects low-power / reduced-motion modes.
+pub mod motion {
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::Instant,
+    };
+
+    static REDUCED_MOTION: AtomicBool = AtomicBool::new(false);
+    static DISABLE_LAUNCHER_ANIMATIONS: AtomicBool = AtomicBool::new(false);
+    static DISABLE_GAME_ANIMATIONS: AtomicBool = AtomicBool::new(false);
+
+    pub fn set_reduced_motion(reduced: bool) {
+        REDUCED_MOTION.store(reduced, Ordering::Relaxed);
+    }
+
+    pub fn reduced_motion() -> bool {
+        REDUCED_MOTION.load(Ordering::Relaxed)
+            || DISABLE_LAUNCHER_ANIMATIONS.load(Ordering::Relaxed)
+    }
+
+    pub fn set_launcher_animations_disabled(disabled: bool) {
+        DISABLE_LAUNCHER_ANIMATIONS.store(disabled, Ordering::Relaxed);
+    }
+
+    pub fn launcher_animations_disabled() -> bool {
+        DISABLE_LAUNCHER_ANIMATIONS.load(Ordering::Relaxed)
+    }
+
+    pub fn set_game_animations_disabled(disabled: bool) {
+        DISABLE_GAME_ANIMATIONS.store(disabled, Ordering::Relaxed);
+    }
+
+    pub fn game_animations_disabled() -> bool {
+        DISABLE_GAME_ANIMATIONS.load(Ordering::Relaxed)
+    }
+
+    /// Standard Material 3 decelerate cubic-bezier approximation (`1 - (1 - t)^3`).
+    pub fn ease_out_cubic(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0);
+        1.0 - (1.0 - x).powi(3)
+    }
+
+    /// Snappy quintic ease-out (`1 - (1 - t)^5`) for quick page/tab entrances.
+    pub fn ease_out_quint(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0);
+        1.0 - (1.0 - x).powi(5)
+    }
+
+    /// Critically damped Material 3 spatial spring response (smooth settle, zero distracting bounce).
+    pub fn spring_spatial(t: f32) -> f32 {
+        let x = t.clamp(0.0, 1.0);
+        if x >= 1.0 {
+            return 1.0;
+        }
+        1.0 - (-6.5 * x).exp() * (1.0 + 6.5 * x * 0.45)
+    }
+
+    /// Evaluates elapsed progress `(0.0..=1.0)` since `since` over `duration_secs`.
+    /// Returns `1.0` immediately when `reduced_motion()` is enabled.
+    pub fn progress(since: Option<Instant>, now: Instant, duration_secs: f32) -> f32 {
+        if reduced_motion() || duration_secs <= 0.001 {
+            return 1.0;
+        }
+        let Some(start) = since else {
+            return 1.0;
+        };
+        let dt = now.duration_since(start).as_secs_f32();
+        (dt / duration_secs).clamp(0.0, 1.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1675,7 +2773,7 @@ mod tests {
                     .rect
                     .is_some()
             );
-            assert!(cache.corner(&atlas, 8, false).is_some());
+            assert!(cache.corner(&atlas, 8, 0).is_some());
             std::mem::take(&mut cache.pending)
         };
         let before = with_cache(&atlas, draw);
@@ -1778,5 +2876,31 @@ mod tests {
         draw_boot_log(&atlas, &mut batch, &[]);
         assert!(batch.vertices.is_empty() && batch.patches.is_empty());
         reset_atlas();
+    }
+
+    #[test]
+    fn theme_config_parses_hex_safely_and_resolves_presets_and_gradients() {
+        assert_eq!(parse_hex_color("#9A7BFF"), Some(0x9A7BFF));
+        assert_eq!(parse_hex_color("38bdf8"), Some(0x38BDF8));
+        assert_eq!(parse_hex_color("#F0A"), Some(0xFF00AA));
+        assert_eq!(parse_hex_color("not-a-color"), None);
+
+        let mut cfg = LauncherThemeConfig::default();
+        cfg.custom_bg_hex = "invalid".into();
+        cfg.gradient_mid_pos = 99.0;
+        cfg.sanitize();
+        assert_eq!(cfg.custom_bg_hex, "#13111C");
+        assert_eq!(cfg.gradient_mid_pos, 0.85);
+
+        cfg.apply_preset(ThemePreset::DaylightFrost);
+        let light = cfg.resolve();
+        assert!(light.is_light);
+        assert_ne!(light.bg_solid, light.text_primary);
+
+        cfg.background_mode = BackgroundMode::Gradient;
+        cfg.gradient_direction = GradientDirection::DiagonalDown;
+        let grad = cfg.resolve();
+        assert!(grad.is_gradient);
+        assert_ne!(grad.bg_solid >> 24, 0, "solid fallback is always opaque");
     }
 }
