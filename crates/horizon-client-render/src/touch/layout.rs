@@ -463,6 +463,8 @@ pub struct Settings {
     pub virtual_mouse_enabled: bool,
     #[serde(default)]
     pub disable_game_animations: bool,
+    #[serde(default = "default_svc_enabled")]
+    pub svc_enabled: bool,
     #[serde(default = "default_res_scale")]
     pub resolution_scale_percent: u32,
     pub virtual_mouse_sensitivity: f32,
@@ -534,6 +536,9 @@ fn default_pointer_scale() -> f32 {
 }
 fn default_res_scale() -> u32 {
     100
+}
+fn default_svc_enabled() -> bool {
+    true
 }
 // Append new buttons without resetting a player's existing ten-button layout.
 fn deserialize_layouts<'de, D: serde::Deserializer<'de>>(
@@ -613,6 +618,7 @@ impl Default for Settings {
             inventory_controls: false,
             virtual_mouse_enabled: false,
             disable_game_animations: false,
+            svc_enabled: true,
             resolution_scale_percent: default_res_scale(),
             virtual_mouse_sensitivity: 1.0,
             virtual_mouse_pointer_scale: default_pointer_scale(),

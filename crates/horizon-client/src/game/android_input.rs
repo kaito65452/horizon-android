@@ -997,6 +997,16 @@ impl Game<'_> {
                         r.invalidate_menu_blur();
                     }
                 }
+                InGameMenuAction::ToggleSvcFeature => {
+                    let next = !self.pad.touch.settings.svc_enabled;
+                    self.pad.touch.settings.svc_enabled = next;
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                    self.voice.set_feature_enabled(next);
+                    if next && self.remote.is_some() {
+                        self.initiate_voice_handshake();
+                    }
+                }
                 InGameMenuAction::SendCustomInput(token) => {
                     self.android_sync_pointer();
                     self.android_custom_token_tap(&token);

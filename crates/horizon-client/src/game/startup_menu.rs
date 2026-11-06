@@ -1883,6 +1883,18 @@ impl Loading {
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
                     }
+                    InGameMenuAction::ToggleSvcFeature => {
+                        let next = !self.menu.controls.settings.svc_enabled;
+                        self.menu.controls.settings.svc_enabled = next;
+                        let _ = self.menu.controls.settings.save();
+                        self.settings.touch = self.menu.controls.settings.clone();
+                        let dir = std::env::current_dir()
+                            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                        let mut svc_cfg =
+                            horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&dir);
+                        svc_cfg.enabled = next;
+                        let _ = svc_cfg.save_to_dir(&dir);
+                    }
                     InGameMenuAction::SendCustomInput(token) => {
                         self.startup_dispatch_custom_token(event_loop, &token, true);
                         if token != "mouse.virtual.toggle"

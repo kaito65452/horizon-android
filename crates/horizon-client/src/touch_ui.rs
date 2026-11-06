@@ -160,6 +160,8 @@ pub enum InGameMenuAction {
     SetResolutionScale(u32),
     /// Toggle in-game animations (animated textures, view bobbing, chunk fade, UI transitions).
     ToggleGameAnimations,
+    /// Toggle built-in Simple Voice Chat (SVC) engine ON or OFF.
+    ToggleSvcFeature,
     /// Send a custom keyboard key, mouse button/scroll, or gameplay action token immediately.
     SendCustomInput(String),
 }
@@ -2182,6 +2184,10 @@ impl TouchUi {
                 if inside([cx, anim_y, cw, 46.0]) {
                     return Some(InGameMenuAction::ToggleGameAnimations);
                 }
+                let svc_y = body_y + 394.0;
+                if inside([cx, svc_y, cw, 46.0]) {
+                    return Some(InGameMenuAction::ToggleSvcFeature);
+                }
             }
             1 => {
                 // Tab 1: Controls
@@ -2607,7 +2613,7 @@ impl TouchUi {
         // Scrollable Right Content Panel with scissor clip and tab transition slide
         let tab_slide = (1.0 - tab_ease) * 14.0;
         let content_height = match self.hub_tab {
-            0 => 394.0,
+            0 => 448.0,
             1 => 368.0,
             2 => 410.0,
             3 => 242.0,
@@ -2878,6 +2884,15 @@ impl TouchUi {
                     "In-Game Animations",
                     "Animated block textures, view bobbing, FOV transitions & menu motion",
                     Some(!settings.disable_game_animations),
+                    None,
+                );
+
+                draw_toggle_row(
+                    &mut ui,
+                    body_y + 394.0,
+                    "Simple Voice Chat (SVC)",
+                    "Enable built-in proximity voice chat, HUD indicator & 3D spatial audio",
+                    Some(settings.svc_enabled),
                     None,
                 );
             }

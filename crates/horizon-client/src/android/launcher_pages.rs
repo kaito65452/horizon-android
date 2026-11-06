@@ -333,6 +333,8 @@ pub(super) enum Action {
     ToggleMaxFpsMode,
     ToggleZeroLatencyTouch,
     ToggleFastChunkUpload,
+    ToggleSvcFeature,
+    ToggleSvcRnnoise,
     // Controls & Control Editor actions
     OpenControlEditor,
     CloseControlEditor,
@@ -4042,7 +4044,9 @@ impl Launcher {
             }
             SettingsCategory::Launcher => {
                 let c = &self.catalog.config;
-                let count = 12;
+                let svc_cfg =
+                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
+                let count = 13;
                 let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
                 let max_scroll =
                     (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
@@ -4079,7 +4083,7 @@ impl Launcher {
                 };
                 let game_anim_off = c.disable_game_animations || touch_cfg.disable_game_animations;
 
-                let rows: [(&str, &str, SettingControl<'_>); 12] = [
+                let rows: [(&str, &str, SettingControl<'_>); 13] = [
                     (
                         "APPEARANCE, DPI SCALING & MOTION",
                         "Material 3 Expressive theme studio, adaptive phone DPI scaling & animation toggles",
@@ -4152,6 +4156,11 @@ impl Launcher {
                         "Open game & world folders",
                         "Manage saves, resource packs and mods in Android Files",
                         SettingControl::Button("Open Files", Action::GameFiles, false),
+                    ),
+                    (
+                        "Simple Voice Chat (SVC)",
+                        "Enable built-in proximity voice chat, HUD indicator & 3D spatial audio in multiplayer",
+                        SettingControl::Toggle(svc_cfg.enabled, Action::ToggleSvcFeature),
                     ),
                 ];
 
@@ -5132,7 +5141,9 @@ impl Launcher {
             }
             SettingsCategory::Experimental => {
                 let c = &self.catalog.config;
-                let count = 9;
+                let svc_cfg =
+                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
+                let count = 12;
                 let max_scroll = (count as f32 * step_y - (list_bottom - list_top)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
                 self.list_view = Some([list_top, list_bottom, max_scroll]);
@@ -5146,8 +5157,13 @@ impl Launcher {
                 } else {
                     "Balanced Default"
                 };
+                let svc_badge = if svc_cfg.enabled {
+                    "SVC Enabled"
+                } else {
+                    "SVC Disabled"
+                };
 
-                let rows: [(&str, &str, SettingControl<'_>); 9] = [
+                let rows: [(&str, &str, SettingControl<'_>); 12] = [
                     (
                         "PERFORMANCE PROFILES & GPU PIPELINE",
                         "Hardware-tuned presets for Mali-G52 / Adreno GPUs and high-refresh displays",
@@ -5198,6 +5214,21 @@ impl Launcher {
                         "Detailed GPU Pass Profiling",
                         "Records per-pass GPU timings in diagnostic reports (adds minor overhead)",
                         SettingControl::Toggle(c.device.gpu_profile, Action::GpuProfile),
+                    ),
+                    (
+                        "SIMPLE VOICE CHAT (SVC) ENGINE",
+                        "Built-in 48kHz Opus VOIP, RNNoise neural denoiser, Voice-Gated AGC & 3D spatial audio",
+                        SettingControl::SectionHeader(svc_badge, Icon::Flask),
+                    ),
+                    (
+                        "Simple Voice Chat (SVC)",
+                        "Enable built-in proximity voice chat, HUD indicator & UDP audio engine in multiplayer",
+                        SettingControl::Toggle(svc_cfg.enabled, Action::ToggleSvcFeature),
+                    ),
+                    (
+                        "SVC RNNoise Neural Denoiser",
+                        "Suppress background noise with dual 10ms RNNoise neural sub-frames & Voice-Gated AGC",
+                        SettingControl::Toggle(svc_cfg.rnnoise_enabled, Action::ToggleSvcRnnoise),
                     ),
                 ];
 
@@ -5596,6 +5627,36 @@ impl Launcher {
                     "Fast Chunk Mesh Upload Boost active."
                 } else {
                     "Standard chunk mesh upload active."
+                }
+                .into();
+            }
+            Some(Action::ToggleSvcFeature) => {
+                let game_home = self.catalog.config.game_home(&self.home);
+                let mut svc_cfg =
+                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
+                svc_cfg.enabled = !svc_cfg.enabled;
+                let _ = svc_cfg.save_to_dir(&game_home);
+                let _ = svc_cfg.save_to_dir(&self.home);
+                let enabled = svc_cfg.enabled;
+                self.modify_touch_settings(|t| t.svc_enabled = enabled);
+                self.catalog.status = if enabled {
+                    "Simple Voice Chat (SVC) enabled."
+                } else {
+                    "Simple Voice Chat (SVC) disabled."
+                }
+                .into();
+            }
+            Some(Action::ToggleSvcRnnoise) => {
+                let game_home = self.catalog.config.game_home(&self.home);
+                let mut svc_cfg =
+                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
+                svc_cfg.rnnoise_enabled = !svc_cfg.rnnoise_enabled;
+                let _ = svc_cfg.save_to_dir(&game_home);
+                let _ = svc_cfg.save_to_dir(&self.home);
+                self.catalog.status = if svc_cfg.rnnoise_enabled {
+                    "SVC RNNoise Neural Denoiser & Voice-Gated AGC enabled."
+                } else {
+                    "SVC RNNoise Neural Denoiser disabled."
                 }
                 .into();
             }
