@@ -294,7 +294,10 @@ impl EnvelopeEchoCanceler {
             self.coupling_floor = (self.coupling_floor * 0.92 + obs_ratio * 0.08).clamp(0.25, 1.25);
         }
 
-        let guaranteed_floor = peak_tap * self.coupling_floor;
+        // Use the recent 200 ms peak rather than the whole 400 ms window so an old loud remote
+        // word cannot keep inflating the echo estimate over the player's own speech.
+        let recent_peak = taps[..20].iter().copied().fold(0.0f32, f32::max);
+        let guaranteed_floor = recent_peak * self.coupling_floor;
         let effective_echo = echo_est.max(guaranteed_floor);
         let gain = if mic_rms > 1e-5 && effective_echo > 0.001 {
             (1.0 - (1.35 * effective_echo) / mic_rms).clamp(0.04, 1.0)
@@ -329,6 +332,8 @@ pub struct MicFilter {
     hp_prev_in: f32,
     hp_prev_out: f32,
     hangover_left: u32,
+    /// Consecutive frames the remote-voice gate wanted to duck while the player was mid-sentence.
+    duck_streak: u32,
 }
 
 impl Default for MicFilter {
@@ -347,6 +352,7 @@ impl MicFilter {
             hp_prev_in: 0.0,
             hp_prev_out: 0.0,
             hangover_left: 0,
+            duck_streak: 0,
         }
     }
 
@@ -413,7 +419,12 @@ impl MicFilter {
             .max(voice_ref_rms * hw_mult * 1.8)
             .max(0.042);
 
-        let voice_ducked = remote_talking && boosted_raw_rms < voice_breakout_rms;
+        let wants_duck = remote_talking && boosted_raw_rms < voice_breakout_rms;
+        // Mid-sentence, a brief remote blip must not chop the player's own words: only the echo
+        // suppression gain applies until the duck request persists for 10 frames (200 ms).
+        let was_speaking = self.hangover_left > 0;
+        self.duck_streak = if wants_duck { self.duck_streak + 1 } else { 0 };
+        let voice_ducked = wants_duck && (!was_speaking || self.duck_streak >= 10);
         if voice_ducked {
             let atten = DUCKING_ATTENUATION.min(voice_aec_gain);
             for s in &mut working {
@@ -442,6 +453,7 @@ impl MicFilter {
         }
 
         // Step 4: RNNoise neural denoising + human speech VAD probability.
+        let dry: Vec<f32> = working.clone();
         let mut vad_prob = 1.0f32;
         #[cfg(feature = "rnnoise")]
         if rnnoise_enabled && working.len() == FRAME {
@@ -465,6 +477,13 @@ impl MicFilter {
             }
 
             vad_prob = vad_0.max(vad_1);
+
+            // Dry/wet blend: keep a floor of the clean voice so RNNoise cannot fully erase a
+            // syllable it misreads as noise (45% dry at low VAD, 20% at high VAD).
+            let dry_share = 0.45 - 0.25 * vad_prob.clamp(0.0, 1.0);
+            for (w, &d) in working.iter_mut().zip(&dry) {
+                *w = *w * (1.0 - dry_share) + d * dry_share;
+            }
         }
         #[cfg(not(feature = "rnnoise"))]
         let _ = rnnoise_enabled;
@@ -473,7 +492,10 @@ impl MicFilter {
         // Only adapt the game bleed ratio on non-speech frames (`vad_prob < 0.35`) so the player's
         // own voice never inflates the game bleed estimate.
         let scaled_game_rms = game_rms * hw_mult;
-        if game_playing && (!rnnoise_enabled || vad_prob < 0.35) && raw_rms <= scaled_game_rms * 1.5
+        if game_playing
+            && self.hangover_left == 0
+            && (!rnnoise_enabled || vad_prob < 0.35)
+            && raw_rms <= scaled_game_rms * 1.5
         {
             let obs = (raw_rms / scaled_game_rms.max(1e-4)).clamp(0.10, 0.85);
             self.game_bleed_ratio = (self.game_bleed_ratio * 0.90 + obs * 0.10).clamp(0.15, 0.75);
