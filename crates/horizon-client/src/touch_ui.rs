@@ -7880,11 +7880,20 @@ mod tests {
     #[test]
     fn mcpe_extra_keys_leave_a_separate_slot_for_the_control_hub() {
         let mut ui = TouchUi::default();
-        assert!(matches!(ui.action(400.0, 240.0, [50.0, 10.0], false), Some(Action::More)));
+        assert!(matches!(
+            ui.action(400.0, 240.0, [50.0, 10.0], false),
+            Some(Action::More)
+        ));
         assert!(ui.action(400.0, 240.0, [10.0, 10.0], false).is_none());
         ui.expanded = true;
-        assert!(matches!(ui.action(400.0, 240.0, [80.0, 10.0], false), Some(Action::Key(KeyCode::F3))));
-        assert!(matches!(ui.action(400.0, 240.0, [160.0, 30.0], false), Some(Action::Key(KeyCode::F4))));
+        assert!(matches!(
+            ui.action(400.0, 240.0, [80.0, 10.0], false),
+            Some(Action::Key(KeyCode::F3))
+        ));
+        assert!(matches!(
+            ui.action(400.0, 240.0, [160.0, 30.0], false),
+            Some(Action::Key(KeyCode::F4))
+        ));
         ui.expanded = false;
         ui.goy_mode = true;
         assert!(ui.action(400.0, 240.0, [10.0, 10.0], false).is_none());

@@ -158,7 +158,7 @@ pub fn resolve_address_ip(text: &str) -> Option<std::net::IpAddr> {
     let (host, port) = parse_address(text)?;
     crate::resolver::resolve(&host, port)
         .ok()
-        .and_then(|v| v.into_iter().next())
+        .and_then(|v| v.addresses.into_iter().next())
         .map(|a| a.ip())
 }
 

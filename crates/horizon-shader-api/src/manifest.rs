@@ -537,10 +537,17 @@ impl Manifest {
             && raw.post.is_empty()
         {
             return Err(err(
-                "no stage: give it a [sky], a [vertex], a [material], a [weather] or a [[post]]".into(),
+                "no stage: give it a [sky], a [vertex], a [material], a [weather] or a [[post]]"
+                    .into(),
             ));
         }
-        if raw.sky.iter().chain(&raw.vertex).chain(&raw.post).any(|s| s.fog.is_some()) {
+        if raw
+            .sky
+            .iter()
+            .chain(&raw.vertex)
+            .chain(&raw.post)
+            .any(|s| s.fog.is_some())
+        {
             return Err(err("`fog` is a key of [material] only".into()));
         }
         if raw
@@ -576,7 +583,13 @@ impl Manifest {
             }
         }
         let sky_only = |s: &Stage| s.clouds.is_some() || s.sun.is_some() || s.stars.is_some();
-        if raw.vertex.iter().chain(&raw.material).chain(&raw.post).any(sky_only) {
+        if raw
+            .vertex
+            .iter()
+            .chain(&raw.material)
+            .chain(&raw.post)
+            .any(sky_only)
+        {
             return Err(err(
                 "`clouds`, `sun` and `stars` are keys of [sky] only".into()
             ));
@@ -598,7 +611,8 @@ impl Manifest {
         }
         if !raw.tags.is_empty() && raw.material.is_none() && raw.vertex.is_none() {
             return Err(err(
-                "tags are read by the vertex and material stages: give it a [vertex] or [material]".into(),
+                "tags are read by the vertex and material stages: give it a [vertex] or [material]"
+                    .into(),
             ));
         }
         if raw.tags.len() > MAX_TAGS {
@@ -623,7 +637,8 @@ impl Manifest {
             }
         }
         let solid_ids = raw.shadow.iter().any(|s| !s.solid_materials.is_empty());
-        if !raw.materials.is_empty() && raw.material.is_none() && raw.vertex.is_none() && !solid_ids {
+        if !raw.materials.is_empty() && raw.material.is_none() && raw.vertex.is_none() && !solid_ids
+        {
             return Err(err(
                 "materials are read by the material stage and shadow.solid_materials: \
                  give it a [material] or use them there"

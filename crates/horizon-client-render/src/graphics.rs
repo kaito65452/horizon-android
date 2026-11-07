@@ -723,7 +723,7 @@ impl Graphics {
         // and render threads are raised above four cores, where vanilla
         // raises its server thread). Leaving two idled a core of a 4-thread
         // laptop while a world loaded: a teleport there took ~15% longer.
-       let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
+        let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
         let auto = if cfg!(target_os = "android") {
             // Mobile big.LITTLE SoCs (e.g. 2x Cortex-A75 + 6x Cortex-A55 on Helio G85)
             // need 4 cores free for android_main, integrated Server, Audio, and Vulkan driver.
