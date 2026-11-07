@@ -735,14 +735,25 @@ pub(super) fn key(game: &mut crate::game::Game<'_>, key: &str, pressed: bool) {
     }
 }
 
+fn touch_hud_visible() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        return crate::touch_visible();
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        false
+    }
+}
+
 /// The on-screen status, in the corner and at the size picked in the V menu's
 /// Customize page.
 pub(super) fn hud(
     game: &mut crate::game::Game<'_>,
     batch: &mut horizon_client::hud::HudBatch,
-    corners: &mut crate::game::native_hooks::Corners,
+    corners: &mut horizon_client::extras_hud::Corners,
 ) {
-    use crate::game::native_hooks::Corner;
+    use horizon_client::extras::Corner;
     use voicechat_engine::State;
     with_state(|st| st.touch_buttons = [None; 3]);
     if !voicechat_enabled(game) || game.remote.is_none() {
@@ -852,7 +863,7 @@ pub(super) fn hud(
         batch.scale_since(start, x, y, scale, scale);
     }
 
-    if crate::touch_visible() && game.native_playing() {
+    if touch_hud_visible() && game.native_playing() {
         let btn_h = 18.0;
         let gap = 3.0;
         let show_ptt = s.state == State::Connected && !s.voice_activation;

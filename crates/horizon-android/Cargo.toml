@@ -16,6 +16,7 @@ horizon-narrator = { path = "../horizon-narrator" }
 horizon-client-input = { path = "../horizon-client-input" }
 horizon-anticheat = { path = "../horizon-anticheat" }
 horizon-client = { path = "../horizon-client", default-features = false }
+voicechat_engine = { path = "../voicechat-engine" }
 android_logger = "0.15"
 regex = "1"
 horizon-hdr = { path = "../horizon-hdr" }
@@ -78,6 +79,7 @@ default = ["mods", "audio"]
 audio = ["horizon-client/audio", "horizon-client-render/audio", "dep:cpal"]
 controllers = []
 mods = ["horizon-client/mods", "horizon-mods/runtime"]
+svc_legacy = ["horizon-client/svc_legacy"]
 
 [lints]
 workspace = true

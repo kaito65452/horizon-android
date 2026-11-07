@@ -110,7 +110,11 @@ pub(super) fn native_tick(game: &mut Game<'_>) {
     super::voicechat::tick(game);
 }
 
-pub(super) fn native_hud(game: &mut Game<'_>, batch: &mut HudBatch, corners: &mut Corners) {
+pub(super) fn native_hud(
+    game: &mut Game<'_>,
+    batch: &mut HudBatch,
+    corners: &mut horizon_client::extras_hud::Corners,
+) {
     let _ = (&game, &batch, &corners);
     #[cfg(not(feature = "svc_legacy"))]
     super::voicechat::hud(game, batch, corners);
