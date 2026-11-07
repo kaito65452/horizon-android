@@ -283,6 +283,7 @@ struct RuntimeState {
     /// Touch HUD button rectangles `[x, y, w, h]` in GUI-scaled coordinates: `[menu, mute, ptt]`.
     touch_buttons: [Option<[f32; 4]>; 3],
     /// Active touch ID holding the on-screen PTT button.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     ptt_touch_id: Option<u64>,
 }
 
@@ -923,6 +924,7 @@ pub(super) fn hud(
 }
 
 /// Handles touch input on the on-screen voice chat HUD buttons (`[V]`, `[Mute]`, `[PTT]`).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub(super) fn touch_hud(
     game: &mut crate::game::Game<'_>,
     id: u64,

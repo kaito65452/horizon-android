@@ -797,6 +797,7 @@ enum Screen {
     /// DebugOptionsScreen, F3+F6 (game/debug_options.rs).
     DebugOptions,
     /// Simple Voice Chat modal screen
+    #[cfg_attr(not(feature = "svc_legacy"), allow(dead_code))]
     VoiceChat,
 }
 impl Screen {
