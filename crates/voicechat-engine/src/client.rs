@@ -245,9 +245,10 @@ fn global() -> &'static Global {
                 version_idx: 0,
                 waiting_since: None,
             }),
-            mixer: Arc::new(Mutex::new(Mixer {
-                volume: settings.volume,
-                ..Mixer::default()
+            mixer: Arc::new(Mutex::new({
+                let mut m = Mixer::default();
+                m.volume = settings.volume;
+                m
             })),
             mic: Arc::new(Mic {
                 ptt: AtomicBool::new(false),
