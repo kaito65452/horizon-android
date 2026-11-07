@@ -221,7 +221,7 @@ impl Settings {
     pub fn engine(&self) -> voicechat_engine::Settings {
         voicechat_engine::Settings {
             voice_activation: self.voice_activation,
-            rnnoise: self.rnnoise,
+            rnnoise: self.rnnoise && horizon_client::android_runtime::experimental_svc_rnnoise(),
             volume: self.volume,
             mic_gain: self.mic_gain,
             threshold_db: self.threshold_db,
@@ -271,6 +271,7 @@ pub fn devices(refresh: bool) -> (Vec<String>, Vec<String>) {
 #[derive(Default)]
 struct RuntimeState {
     settings: Option<Settings>,
+    last_exp_rnnoise: Option<bool>,
     /// The server and profile voice chat joined, while on a server.
     joined: Option<(String, u128)>,
     /// The last problem said in chat.
@@ -315,11 +316,17 @@ fn with_state<T>(f: impl FnOnce(&mut RuntimeState) -> T) -> T {
 
 /// The settings, read once from the mod's data folder.
 pub fn settings(get: impl Fn(&str) -> Option<String>) -> Settings {
+    let exp_rnnoise = horizon_client::android_runtime::experimental_svc_rnnoise();
     let (s, fresh) = with_state(|st| match &st.settings {
-        Some(s) => (s.clone(), false),
+        Some(s) => {
+            let changed = st.last_exp_rnnoise != Some(exp_rnnoise);
+            st.last_exp_rnnoise = Some(exp_rnnoise);
+            (s.clone(), changed)
+        }
         None => {
             let s = Settings::read(get);
             st.settings = Some(s.clone());
+            st.last_exp_rnnoise = Some(exp_rnnoise);
             (s, true)
         }
     });
@@ -578,6 +585,10 @@ pub(super) fn sync_menu(game: &mut crate::game::Game<'_>) {
     });
 }
 
+fn voicechat_enabled(game: &crate::game::Game<'_>) -> bool {
+    game.native_on(ID) && horizon_client::android_runtime::experimental_svc_enabled()
+}
+
 /// Each tick: join or leave voice chat with the server, hand the server's
 /// voice chat messages to the engine and send its replies, tell the engine
 /// where the listener and the talking players are, and say news in chat.
@@ -586,7 +597,7 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
         return;
     }
     ensure_platform_hooks();
-    let on = game.native_on(ID);
+    let on = voicechat_enabled(game);
     let settings = {
         let game = &*game;
         settings(|k| game.native_setting(ID, k))
@@ -661,7 +672,7 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
 
 /// Push to talk (held), mute and voice chat off/on.
 pub(super) fn key(game: &mut crate::game::Game<'_>, key: &str, pressed: bool) {
-    if !game.native_on(ID) {
+    if !voicechat_enabled(game) {
         return;
     }
     if key == game.native_mod_key(ID, PUSH_TO_TALK[0], PUSH_TO_TALK[2]) {
@@ -735,7 +746,7 @@ pub(super) fn hud(
     use crate::game::native_hooks::Corner;
     use voicechat_engine::State;
     with_state(|st| st.touch_buttons = [None; 3]);
-    if !game.native_on(ID) || game.remote.is_none() {
+    if !voicechat_enabled(game) || game.remote.is_none() {
         return;
     }
     let settings = {
@@ -923,7 +934,7 @@ pub(super) fn touch_hud(
     if ptt_id == Some(id) {
         return true;
     }
-    if !started || !game.native_on(ID) || !game.native_playing() {
+    if !started || !voicechat_enabled(game) || !game.native_playing() {
         return false;
     }
     let inside = |r: [f32; 4]| {
