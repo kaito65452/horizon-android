@@ -140,6 +140,9 @@ impl Default for TouchUi {
             pointer_drag: None,
             held_keys: BTreeMap::new(),
             f3_latched: false,
+            control_runtime: None,
+            replacement_dialog: None,
+            editor: None,
         }
     }
 }
