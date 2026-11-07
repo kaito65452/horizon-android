@@ -291,7 +291,7 @@ impl EnvelopeEchoCanceler {
                 }
             }
             let obs_ratio = (mic_rms / peak_tap).clamp(0.12, 1.4);
-            self.coupling_floor = (self.coupling_floor * 0.92 + obs_ratio * 0.08).clamp(0.25, 1.25);
+            self.coupling_floor = (self.coupling_floor * 0.92 + obs_ratio * 0.08).clamp(0.25, 0.80);
         }
 
         // Use the recent 200 ms peak rather than the whole 400 ms window so an old loud remote
@@ -449,7 +449,7 @@ impl MicFilter {
         for s in &mut working {
             let boosted = *s * pre_gain;
             // Soft-knee ceiling at 0.85 prevents hard clipping inside DenoiseState::process_frame.
-            *s = 0.85 * (boosted / 0.85).tanh();
+            *s = boosted.clamp(-0.95, 0.95);
         }
 
         // Step 4: RNNoise neural denoising + human speech VAD probability.
@@ -480,7 +480,7 @@ impl MicFilter {
 
             // Dry/wet blend: keep a floor of the clean voice so RNNoise cannot fully erase a
             // syllable it misreads as noise (45% dry at low VAD, 20% at high VAD).
-            let dry_share = 0.45 - 0.25 * vad_prob.clamp(0.0, 1.0);
+            let dry_share = 0.55 - 0.35 * vad_prob.clamp(0.0, 1.0);
             for (w, &d) in working.iter_mut().zip(&dry) {
                 *w = *w * (1.0 - dry_share) + d * dry_share;
             }
@@ -565,7 +565,7 @@ impl MicFilter {
         let min_vad = if !rnnoise_enabled {
             0.0
         } else if in_speech {
-            0.12
+            0.0
         } else if remote_talking {
             0.78
         } else if game_playing {
