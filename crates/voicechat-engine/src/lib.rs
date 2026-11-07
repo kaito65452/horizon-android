@@ -15,5 +15,6 @@ pub use client::{
     set_player_volume, set_settings, set_testing, speakers, status, toggle_disabled, toggle_mute,
     update_listener,
 };
-pub use device::set_platform_hooks;
+pub use device::{is_valid_input_device, is_valid_output_device, set_platform_hooks};
+pub use mic_filter::{push_game_audio_reference, set_hardware_volume_scale};
 pub use proto::GroupKind;

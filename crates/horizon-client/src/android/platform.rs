@@ -881,12 +881,86 @@ fn log_audio_manager_state(
         "[voicechat-jni:{stage}] mode={mode} (0=NORMAL,3=IN_COMM) music={music_vol}/{music_max} voice_call={call_vol}/{call_max} route=[speaker={speaker} bt_sco={bt_sco} bt_a2dp={bt_a2dp} wired={wired} music_active={music_active}] active_recordings=[{}]",
         rec_summary.join(", ")
     );
+    if music_max > 0 {
+        voicechat_engine::set_hardware_volume_scale(music_vol as f32 / music_max as f32);
+    }
+    // Keep MODE_NORMAL (0) and force loudspeaker routing when no external headset is connected,
+    // preventing Samsung/Android HALs from routing audio to the phone earpiece.
+    if mode != 0 {
+        let _ = env.call_method(audio_mgr, "setMode", "(I)V", &[JValue::Int(0)]);
+        let _ = env.exception_clear();
+    }
+    if !bt_sco && !bt_a2dp && !wired && !speaker {
+        let _ = env.call_method(audio_mgr, "setSpeakerphoneOn", "(Z)V", &[JValue::Bool(1)]);
+        let _ = env.exception_clear();
+    }
     Ok(session_ids)
 }
 
+/// Periodically updates the hardware media volume scale and ensures loudspeaker routing
+/// while voice chat is active on Android.
+pub fn sync_voice_audio_state() {
+    with_context(|env, activity| {
+        let svc_name = JObject::from(env.new_string("audio")?);
+        let audio_mgr = env
+            .call_method(
+                activity,
+                "getSystemService",
+                "(Ljava/lang/String;)Ljava/lang/Object;",
+                &[JValue::Object(&svc_name)],
+            )?
+            .l()?;
+        if audio_mgr.is_null() {
+            return Ok(());
+        }
+        let mode = env
+            .call_method(&audio_mgr, "getMode", "()I", &[])
+            .and_then(|v| v.i())
+            .unwrap_or(0);
+        let music_vol = env
+            .call_method(&audio_mgr, "getStreamVolume", "(I)I", &[JValue::Int(3)])
+            .and_then(|v| v.i())
+            .unwrap_or(10);
+        let music_max = env
+            .call_method(&audio_mgr, "getStreamMaxVolume", "(I)I", &[JValue::Int(3)])
+            .and_then(|v| v.i())
+            .unwrap_or(15);
+        if music_max > 0 {
+            voicechat_engine::set_hardware_volume_scale(music_vol as f32 / music_max as f32);
+        }
+        if mode != 0 {
+            let _ = env.call_method(&audio_mgr, "setMode", "(I)V", &[JValue::Int(0)]);
+            let _ = env.exception_clear();
+        }
+        let speaker = env
+            .call_method(&audio_mgr, "isSpeakerphoneOn", "()Z", &[])
+            .and_then(|v| v.z())
+            .unwrap_or(true);
+        let bt_sco = env
+            .call_method(&audio_mgr, "isBluetoothScoOn", "()Z", &[])
+            .and_then(|v| v.z())
+            .unwrap_or(false);
+        let bt_a2dp = env
+            .call_method(&audio_mgr, "isBluetoothA2dpOn", "()Z", &[])
+            .and_then(|v| v.z())
+            .unwrap_or(false);
+        let wired = env
+            .call_method(&audio_mgr, "isWiredHeadsetOn", "()Z", &[])
+            .and_then(|v| v.z())
+            .unwrap_or(false);
+        if !bt_sco && !bt_a2dp && !wired && !speaker {
+            let _ = env.call_method(&audio_mgr, "setSpeakerphoneOn", "(Z)V", &[JValue::Bool(1)]);
+            let _ = env.exception_clear();
+        }
+        Ok(())
+    });
+}
+
 /// Called once when the voicechat microphone stream opens on Android.
-/// Logs AudioManager diagnostics and attaches session-scoped AcousticEchoCanceler / NoiseSuppressor
-/// if supported by the device, without switching AudioManager out of MODE_NORMAL.
+/// Logs AudioManager diagnostics, syncs hardware volume ratio, and ensures MODE_NORMAL
+/// loudspeaker routing. Hardware AcousticEchoCanceler / NoiseSuppressor are intentionally NOT
+/// attached to Oboe's VOICE_RECOGNITION stream because on Samsung Exynos HALs they force
+/// BuiltinEarpiece routing while failing to cancel STREAM_MUSIC output.
 pub fn on_voice_mic_open() {
     with_context(|env, activity| {
         let svc_name = JObject::from(env.new_string("audio")?);
@@ -901,90 +975,14 @@ pub fn on_voice_mic_open() {
         if audio_mgr.is_null() {
             return Ok(());
         }
-        let session_ids = log_audio_manager_state(env, &audio_mgr, "mic_open")?;
+        let _ = log_audio_manager_state(env, &audio_mgr, "mic_open")?;
         let mut effects = ACTIVE_AUDIO_EFFECTS
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         effects.clear();
-
-        let aec_avail = env
-            .call_static_method(
-                "android/media/audiofx/AcousticEchoCanceler",
-                "isAvailable",
-                "()Z",
-                &[],
-            )
-            .and_then(|v| v.z())
-            .unwrap_or_else(|_| {
-                let _ = env.exception_clear();
-                false
-            });
-        let ns_avail = env
-            .call_static_method(
-                "android/media/audiofx/NoiseSuppressor",
-                "isAvailable",
-                "()Z",
-                &[],
-            )
-            .and_then(|v| v.z())
-            .unwrap_or_else(|_| {
-                let _ = env.exception_clear();
-                false
-            });
-
-        for &session_id in &session_ids {
-            if aec_avail {
-                if let Ok(aec_val) = env.call_static_method(
-                    "android/media/audiofx/AcousticEchoCanceler",
-                    "create",
-                    "(I)Landroid/media/audiofx/AcousticEchoCanceler;",
-                    &[JValue::Int(session_id)],
-                ) && let Ok(aec) = aec_val.l()
-                    && !aec.is_null()
-                {
-                    let rc = env
-                        .call_method(&aec, "setEnabled", "(Z)I", &[JValue::Bool(1)])
-                        .and_then(|v| v.i())
-                        .unwrap_or(-1);
-                    log::info!(
-                        "[voicechat-jni:mic_open] AcousticEchoCanceler attached to session {session_id} (setEnabled rc={rc})"
-                    );
-                    if let Ok(global) = env.new_global_ref(&aec) {
-                        effects.push(global);
-                    }
-                } else {
-                    let _ = env.exception_clear();
-                }
-            }
-            if ns_avail {
-                if let Ok(ns_val) = env.call_static_method(
-                    "android/media/audiofx/NoiseSuppressor",
-                    "create",
-                    "(I)Landroid/media/audiofx/NoiseSuppressor;",
-                    &[JValue::Int(session_id)],
-                ) && let Ok(ns) = ns_val.l()
-                    && !ns.is_null()
-                {
-                    let rc = env
-                        .call_method(&ns, "setEnabled", "(Z)I", &[JValue::Bool(1)])
-                        .and_then(|v| v.i())
-                        .unwrap_or(-1);
-                    log::info!(
-                        "[voicechat-jni:mic_open] NoiseSuppressor attached to session {session_id} (setEnabled rc={rc})"
-                    );
-                    if let Ok(global) = env.new_global_ref(&ns) {
-                        effects.push(global);
-                    }
-                } else {
-                    let _ = env.exception_clear();
-                }
-            }
-        }
-        if session_ids.is_empty() {
-            log::info!(
-                "[voicechat-jni:mic_open] No recording session ID exposed by AudioManager (aec_avail={aec_avail}, ns_avail={ns_avail}); keeping MODE_NORMAL and relying on software ducking/RNNoise"
-            );
-        }
+        log::info!(
+            "[voicechat-jni:mic_open] Using MODE_NORMAL loudspeaker routing + 400ms software EnvelopeEchoCanceler (voice + game audio reference)"
+        );
         Ok(())
     });
 }

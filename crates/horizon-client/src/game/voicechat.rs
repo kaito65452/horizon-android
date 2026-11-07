@@ -100,8 +100,8 @@ impl Settings {
             volume: num("volume", 2.0, 0.0, 2.0),
             mic_gain: num("mic_gain", 1.0, 0.0, 4.0),
             threshold_db: num("threshold_db", -45.0, -60.0, 0.0),
-            microphone: name("microphone"),
-            speakers: name("speakers"),
+            microphone: name("microphone").filter(|n| voicechat_engine::is_valid_input_device(n)),
+            speakers: name("speakers").filter(|n| voicechat_engine::is_valid_output_device(n)),
             colour: get("colour")
                 .filter(|c| voicechat_engine::icons::COLOURS.contains(&c.as_str()))
                 .unwrap_or_else(|| "blue".into()),
@@ -285,20 +285,22 @@ struct RuntimeState {
     /// Active touch ID holding the on-screen PTT button.
     #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     ptt_touch_id: Option<u64>,
+    /// Counter for periodic Android AudioManager volume/routing synchronization.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    audio_sync_ticks: u32,
 }
 
 fn ensure_platform_hooks() {
-    #[cfg(target_os = "android")]
-    {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            voicechat_engine::set_platform_hooks(
-                crate::platform::ensure_microphone_permission,
-                crate::platform::on_voice_mic_open,
-                crate::platform::on_voice_mic_close,
-            );
-        });
-    }
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        horizon_client::audio::set_output_tap(voicechat_engine::push_game_audio_reference);
+        #[cfg(target_os = "android")]
+        voicechat_engine::set_platform_hooks(
+            crate::platform::ensure_microphone_permission,
+            crate::platform::on_voice_mic_open,
+            crate::platform::on_voice_mic_close,
+        );
+    });
 }
 
 fn check_mic_permission() -> bool {
@@ -622,6 +624,16 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
     }
     if on && game.remote.is_some() {
         out.extend(voicechat_engine::poll_handshake_retry());
+        #[cfg(target_os = "android")]
+        {
+            let should_sync = with_state(|st| {
+                st.audio_sync_ticks = st.audio_sync_ticks.wrapping_add(1);
+                st.audio_sync_ticks % 40 == 0
+            });
+            if should_sync {
+                crate::platform::sync_voice_audio_state();
+            }
+        }
     }
     for (channel, data) in take_payloads() {
         if on && game.remote.is_some() {

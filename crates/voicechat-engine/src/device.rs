@@ -170,11 +170,40 @@ where
         .map_err(|e| e.to_string())
 }
 
-/// The names of the microphones (input devices) Windows offers.
+/// Returns whether `name` is a valid microphone (input) device name, filtering out
+/// speaker/earpiece/telephony routes that Android's Oboe/AAudio backend may enumerate.
+pub fn is_valid_input_device(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    !lower.contains("builtinspeaker")
+        && !lower.contains("earpiece")
+        && !lower.contains(":speaker")
+        && !lower.contains("telephony")
+        && !lower.contains("fm_tuner")
+        && !lower.contains("hdmi")
+}
+
+/// Returns whether `name` is a valid speaker/headphone (output) device name, filtering out
+/// phone earpiece and microphone routes (`BuiltinEarpiece`, `BuiltinMic`, `Telephony`) that
+/// Android's Oboe/AAudio backend enumerates under `output_devices()`.
+pub fn is_valid_output_device(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    !lower.contains("earpiece")
+        && !lower.contains("builtinmic")
+        && !lower.contains("mic:")
+        && !lower.contains("_mic")
+        && !lower.contains("telephony")
+        && !lower.contains("fm_tuner")
+}
+
+/// The names of the microphones (input devices).
 pub fn input_names() -> Vec<String> {
     let mut names: Vec<String> = cpal::default_host()
         .input_devices()
-        .map(|d| d.filter_map(|d| d.name().ok()).collect())
+        .map(|d| {
+            d.filter_map(|d| d.name().ok())
+                .filter(|n| is_valid_input_device(n))
+                .collect()
+        })
         .unwrap_or_default();
     names.sort();
     names.dedup();
@@ -185,45 +214,87 @@ pub fn input_names() -> Vec<String> {
 pub fn output_names() -> Vec<String> {
     let mut names: Vec<String> = cpal::default_host()
         .output_devices()
-        .map(|d| d.filter_map(|d| d.name().ok()).collect())
+        .map(|d| {
+            d.filter_map(|d| d.name().ok())
+                .filter(|n| is_valid_output_device(n))
+                .collect()
+        })
         .unwrap_or_default();
     names.sort();
     names.dedup();
     names
 }
 
-/// The device called `name`, else the default one.
+/// The device called `name`, else the default one (preferring `BuiltinSpeaker` over earpiece on Android).
 fn pick(name: Option<&str>, input: bool) -> Option<cpal::Device> {
     let host = cpal::default_host();
     if let Some(name) = name {
-        let found = if input {
-            host.input_devices().ok()
+        let valid = if input {
+            is_valid_input_device(name)
         } else {
-            host.output_devices().ok()
+            is_valid_output_device(name)
+        };
+        if valid {
+            let found = if input {
+                host.input_devices().ok()
+            } else {
+                host.output_devices().ok()
+            }
+            .and_then(|mut all| all.find(|d| d.name().is_ok_and(|n| n == name)));
+            if found.is_some() {
+                return found;
+            }
+            log::warn!("Voice chat: {name} is gone; using the default device");
+        } else {
+            log::warn!(
+                "Voice chat: ignoring invalid {} device '{name}'; using the default device",
+                if input { "microphone" } else { "speaker" }
+            );
         }
-        .and_then(|mut all| all.find(|d| d.name().is_ok_and(|n| n == name)));
-        if found.is_some() {
-            return found;
-        }
-        log::warn!("Voice chat: {name} is gone; using the default device");
     }
     if input {
         host.default_input_device()
     } else {
+        #[cfg(target_os = "android")]
+        if let Ok(devices) = host.output_devices() {
+            let list: Vec<cpal::Device> = devices.collect();
+            let has_external = list.iter().any(|d| {
+                d.name().is_ok_and(|n| {
+                    let l = n.to_ascii_lowercase();
+                    l.contains("bluetooth")
+                        || l.contains("a2dp")
+                        || l.contains("ble")
+                        || l.contains("wired")
+                        || l.contains("headset")
+                        || l.contains("headphone")
+                        || l.contains("usb")
+                })
+            });
+            if !has_external
+                && let Some(speaker) = list.into_iter().find(|d| {
+                    d.name()
+                        .is_ok_and(|n| n.to_ascii_lowercase().contains("builtinspeaker"))
+                })
+            {
+                return Some(speaker);
+            }
+        }
         host.default_output_device()
     }
 }
 
-fn open_output(mixer: Arc<Mutex<Mixer>>, name: Option<&str>) -> Result<cpal::Stream, String> {
+fn open_output_device(
+    device: &cpal::Device,
+    mixer: Arc<Mutex<Mixer>>,
+) -> Result<cpal::Stream, String> {
     use cpal::SampleFormat as F;
-    let device = pick(name, false).ok_or("no speakers")?;
     let config = device.default_output_config().map_err(|e| e.to_string())?;
     let stream = match config.sample_format() {
-        F::F32 => output_stream::<f32>(&device, &config, mixer),
-        F::I16 => output_stream::<i16>(&device, &config, mixer),
-        F::I32 => output_stream::<i32>(&device, &config, mixer),
-        F::U16 => output_stream::<u16>(&device, &config, mixer),
-        F::F64 => output_stream::<f64>(&device, &config, mixer),
+        F::F32 => output_stream::<f32>(device, &config, mixer),
+        F::I16 => output_stream::<i16>(device, &config, mixer),
+        F::I32 => output_stream::<i32>(device, &config, mixer),
+        F::U16 => output_stream::<u16>(device, &config, mixer),
+        F::F64 => output_stream::<f64>(device, &config, mixer),
         other => Err(format!("unsupported speaker format {other}")),
     }?;
     stream.play().map_err(|e| e.to_string())?;
@@ -234,6 +305,24 @@ fn open_output(mixer: Arc<Mutex<Mixer>>, name: Option<&str>) -> Result<cpal::Str
         config.channels()
     );
     Ok(stream)
+}
+
+fn open_output(mixer: Arc<Mutex<Mixer>>, name: Option<&str>) -> Result<cpal::Stream, String> {
+    let device = pick(name, false).ok_or("no speakers")?;
+    match open_output_device(&device, mixer.clone()) {
+        Ok(stream) => Ok(stream),
+        Err(first_err) => {
+            if let Some(fallback) = cpal::default_host().default_output_device()
+                && fallback.name().ok() != device.name().ok()
+            {
+                log::warn!(
+                    "Voice chat: preferred speaker failed ({first_err}); falling back to default"
+                );
+                return open_output_device(&fallback, mixer);
+            }
+            Err(first_err)
+        }
+    }
 }
 
 fn open_input(frames: SyncSender<Vec<f32>>, name: Option<&str>) -> Result<cpal::Stream, String> {
@@ -335,5 +424,19 @@ mod tests {
             });
             assert!((49..=50).contains(&frames), "{rate}: {frames}");
         }
+    }
+
+    #[test]
+    fn android_device_filter_rejects_earpiece_and_wrong_direction() {
+        assert!(!is_valid_output_device("SM-N975F:BuiltinEarpiece"));
+        assert!(!is_valid_output_device("SM-N975F:BuiltinMic:bottom"));
+        assert!(!is_valid_output_device("SM-N975F:Telephony"));
+        assert!(is_valid_output_device("SM-N975F:BuiltinSpeaker"));
+        assert!(is_valid_output_device("default"));
+
+        assert!(!is_valid_input_device("SM-N975F:BuiltinSpeaker"));
+        assert!(!is_valid_input_device("SM-N975F:BuiltinEarpiece"));
+        assert!(is_valid_input_device("SM-N975F:BuiltinMic:bottom"));
+        assert!(is_valid_input_device("default"));
     }
 }
