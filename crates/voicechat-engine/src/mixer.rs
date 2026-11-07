@@ -198,6 +198,7 @@ impl Mixer {
                 out[2 * i + 1] += s * r;
             }
         }
+        crate::mic_filter::push_speaker_reference(out);
         let local = self.volume * 0.9;
         for i in 0..frames {
             let Some(s) = self.local.pop_front() else { break };

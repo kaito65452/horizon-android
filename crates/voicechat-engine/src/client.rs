@@ -44,6 +44,8 @@ pub struct Settings {
     pub mic_gain: f32,
     /// Voice activation level in dBFS (-60..=0).
     pub threshold_db: f32,
+    /// Post-AEC RNNoise neural noise suppression and smart speaker-echo ducking.
+    pub rnnoise: bool,
     /// The microphone and speakers by name; None = Windows' default.
     pub input_device: Option<String>,
     pub output_device: Option<String>,
@@ -55,6 +57,7 @@ impl Default for Settings {
             volume: 2.0,
             mic_gain: 1.0,
             threshold_db: -45.0,
+            rnnoise: true,
             input_device: None,
             output_device: None,
         }
@@ -158,6 +161,7 @@ struct Mic {
     muted: AtomicBool,
     disabled: AtomicBool,
     voice_activation: AtomicBool,
+    rnnoise: AtomicBool,
     testing: AtomicBool,
     threshold_db: AtomicU32,
     gain: AtomicU32,
@@ -250,6 +254,7 @@ fn global() -> &'static Global {
                 muted: AtomicBool::new(false),
                 disabled: AtomicBool::new(false),
                 voice_activation: AtomicBool::new(settings.voice_activation),
+                rnnoise: AtomicBool::new(settings.rnnoise),
                 testing: AtomicBool::new(false),
                 threshold_db: AtomicU32::new(settings.threshold_db.to_bits()),
                 gain: AtomicU32::new(settings.mic_gain.to_bits()),
@@ -583,29 +588,31 @@ fn keep_up(s: Arc<Shared>) {
 fn microphone(frames: Receiver<Vec<f32>>) {
     let g = global();
     let mic = g.mic.clone();
+    let mut filter = crate::mic_filter::MicFilter::new();
     let mut encoder: Option<(i32, Encoder)> = None;
     let mut sequence: i64 = 0;
-    let mut hold_until = Instant::now();
     let mut last_on: Option<*const Shared> = None;
     loop {
         let Ok(frame) = frames.recv() else { return };
-        let gain = f(&mic.gain);
-        let samples: Vec<f32> = frame.iter().map(|&x| (x * gain).clamp(-1.0, 1.0)).collect();
-        let rms = (samples.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / FRAME as f64).sqrt();
-        let db = if rms > 0.0 { (20.0 * rms.log10()) as f32 } else { -100.0 };
-        mic.level_db.store(db.to_bits(), Relaxed);
-        let now = Instant::now();
+        let (speaker_ref, remote_rms) = crate::mic_filter::pull_speaker_reference(frame.len());
+        let filtered = filter.process_frame(
+            &frame,
+            &speaker_ref,
+            remote_rms,
+            f(&mic.gain),
+            f(&mic.threshold_db),
+            mic.rnnoise.load(Relaxed),
+        );
+        mic.level_db.store(filtered.level_db.to_bits(), Relaxed);
         let voice = mic.voice_activation.load(Relaxed);
-        if voice && db > f(&mic.threshold_db) {
-            hold_until = now + Duration::from_millis(500);
-        }
-        let speaking = if voice { now < hold_until } else { mic.ptt.load(Relaxed) };
+        let speaking = if voice { filtered.speaking } else { mic.ptt.load(Relaxed) };
+        let samples = filtered.samples;
         if mic.testing.load(Relaxed)
             && let Ok(mut m) = g.mixer.lock()
         {
             // The test plays what would be sent: with voice activation, only
             // above the level, so the level can be tuned by ear.
-            if !voice || now < hold_until {
+            if !voice || speaking {
                 m.push_local(&samples);
             }
         }
@@ -734,6 +741,7 @@ pub fn toggle_disabled() -> (bool, Vec<Payload>) {
 pub fn set_settings(settings: Settings) {
     let g = global();
     g.mic.voice_activation.store(settings.voice_activation, Relaxed);
+    g.mic.rnnoise.store(settings.rnnoise, Relaxed);
     g.mic.threshold_db.store(settings.threshold_db.to_bits(), Relaxed);
     g.mic.gain.store(settings.mic_gain.to_bits(), Relaxed);
     if let Ok(mut m) = g.mixer.lock() {

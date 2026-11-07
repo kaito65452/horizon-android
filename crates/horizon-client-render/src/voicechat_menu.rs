@@ -131,6 +131,7 @@ pub struct View {
     pub disabled: bool,
     pub transmitting: bool,
     pub voice_activation: bool,
+    pub rnnoise: bool,
     /// The keys, readable (`CAPS LOCK`, `V`).
     pub talk_key: String,
     pub menu_key: String,
@@ -194,6 +195,7 @@ pub enum Action {
     Mute,
     Disable,
     VoiceActivation(bool),
+    Rnnoise(bool),
     Volume(f32),
     MicGain(f32),
     Threshold(f32),
@@ -759,6 +761,7 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
                 if v.voice_activation { "You talk when the green bar passes the marker." } else { "The bar shows your microphone's level." },
                 FAINT,
             );
+            col.put(ROW, Kind::Toggle { label: "RNNoise & echo filter".into(), on: v.rnnoise, act: Act::Do(Action::Rnnoise(!v.rnnoise)) });
             col.put(ROW, Kind::Toggle { label: "Test microphone (hear yourself)".into(), on: v.testing, act: Act::Do(Action::Test(!v.testing)) });
             col.heading("KEYS");
             col.text(format!("Talk: {}    Mute: {}    Voice off: {}    Menu: {}", v.talk_key, v.mute_key, v.off_key, v.menu_key), DIM);

@@ -59,6 +59,7 @@ fn next_device(list: &[String], current: &Option<String>) -> Option<String> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub voice_activation: bool,
+    pub rnnoise: bool,
     pub volume: f32,
     pub mic_gain: f32,
     pub threshold_db: f32,
@@ -95,6 +96,7 @@ impl Settings {
         let name = |k: &str| get(k).filter(|v| !v.is_empty());
         Self {
             voice_activation: flag("voice_activation", cfg!(target_os = "android")),
+            rnnoise: flag("rnnoise", true),
             volume: num("volume", 2.0, 0.0, 2.0),
             mic_gain: num("mic_gain", 1.0, 0.0, 4.0),
             threshold_db: num("threshold_db", -45.0, -60.0, 0.0),
@@ -205,6 +207,7 @@ impl Settings {
     pub fn stored(&self) -> Vec<(&'static str, String)> {
         let mut out = vec![
             ("voice_activation", self.voice_activation.to_string()),
+            ("rnnoise", self.rnnoise.to_string()),
             ("volume", self.volume.to_string()),
             ("mic_gain", self.mic_gain.to_string()),
             ("threshold_db", self.threshold_db.to_string()),
@@ -218,6 +221,7 @@ impl Settings {
     pub fn engine(&self) -> voicechat_engine::Settings {
         voicechat_engine::Settings {
             voice_activation: self.voice_activation,
+            rnnoise: self.rnnoise,
             volume: self.volume,
             mic_gain: self.mic_gain,
             threshold_db: self.threshold_db,
@@ -406,6 +410,7 @@ pub(super) fn sync_menu(game: &mut crate::game::Game<'_>) {
                 }
                 s.voice_activation = on;
             }
+            Action::Rnnoise(on) => s.rnnoise = on,
             Action::Volume(v) => s.volume = v,
             Action::MicGain(v) => s.mic_gain = v,
             Action::Threshold(v) => s.threshold_db = v,
@@ -533,6 +538,7 @@ pub(super) fn sync_menu(game: &mut crate::game::Game<'_>) {
         disabled: st.disabled,
         transmitting: st.transmitting,
         voice_activation: s.voice_activation,
+        rnnoise: s.rnnoise,
         talk_key: key_text(&game.native_mod_key(ID, PUSH_TO_TALK[0], PUSH_TO_TALK[2])),
         menu_key: key_text(&game.native_mod_key(ID, MENU[0], MENU[2])),
         mute_key: key_text(&game.native_mod_key(ID, MUTE[0], MUTE[2])),

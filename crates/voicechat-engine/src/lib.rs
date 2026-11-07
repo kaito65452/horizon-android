@@ -3,6 +3,7 @@
 //! packet layouts; no code from the mod. Opus is the bundled libopus 1.5.2.
 pub mod proto;
 mod opus;
+pub mod mic_filter;
 mod mixer;
 mod device;
 mod client;
