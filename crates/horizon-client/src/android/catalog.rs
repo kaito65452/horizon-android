@@ -264,10 +264,7 @@ impl Config {
         horizon_client::android_runtime::set_experimental_leaf_culling(
             self.experimental_leaf_culling,
         );
-        horizon_client::android_runtime::set_experimental_svc(
-            self.svc_enabled,
-            self.svc_rnnoise,
-        );
+        horizon_client::android_runtime::set_experimental_svc(self.svc_enabled, self.svc_rnnoise);
         let game = self.game_home(home);
         let _ = std::fs::create_dir_all(&game);
         let options_path = game.join("options.txt");

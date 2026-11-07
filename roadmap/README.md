@@ -117,3 +117,8 @@ Kira uses the same endpoints, so a bug goes the same way from the site and from 
 - The page shows the forms and the buttons only once `GET /hub/votes` answers. Until then it points to GitHub and
   Discord. It keeps a random voter id and the items it voted for in `localStorage` (`hub:voter`, `hub:voted`).
 
+## Built-in Voice Chat (Android fork)
+
+On the Android fork (`feat/starling-voicechat-port`), `proximity-voice` is shipped built-in via `crates/voicechat-engine` (Complex Voice Chat v2.0.0, bundled `libopus 1.5.2`) and `crates/horizon-client/src/game/voicechat.rs`, with the 5-tab `V` menu in `crates/horizon-client-render/src/voicechat_menu.rs`, 4-layer speaker-echo/RNNoise conditioning in `crates/voicechat-engine/src/mic_filter.rs`, and Experimental toggles in the Android launcher (`SVC_PORT_BLUEPRINT.md`).
+
+

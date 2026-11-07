@@ -261,7 +261,12 @@ fn global() -> &'static Global {
                 transmitting: AtomicBool::new(false),
                 level_db: AtomicU32::new((-100f32).to_bits()),
             }),
-            audio: Mutex::new(Audio { stop: None, opened_with: (None, None), names: (None, None), problem: None }),
+            audio: Mutex::new(Audio {
+                stop: None,
+                opened_with: (None, None),
+                names: (None, None),
+                problem: None,
+            }),
             sending: Mutex::new(None),
             frames,
             frames_rx: Mutex::new(Some(frames_rx)),
@@ -296,7 +301,10 @@ pub fn join(resolve: impl FnOnce() -> Option<IpAddr> + Send + 'static) -> Vec<Pa
     log::info!("Voice chat: requesting secret (compatibility version {ver})");
     vec![
         ("minecraft:register".into(), proto::register_payload()),
-        (channel::REQUEST_SECRET.into(), proto::request_secret_version(ver)),
+        (
+            channel::REQUEST_SECRET.into(),
+            proto::request_secret_version(ver),
+        ),
     ]
 }
 
@@ -439,7 +447,11 @@ fn connect(secret: Secret) {
     std::thread::Builder::new()
         .name("voicechat-connect".into())
         .spawn(move || {
-            let game_ip = known_ip.or_else(|| resolver.and_then(|r| r.lock().ok()?.take()).and_then(|f| f()));
+            let game_ip = known_ip.or_else(|| {
+                resolver
+                    .and_then(|r| r.lock().ok()?.take())
+                    .and_then(|f| f())
+            });
             let result = open(&secret, game_ip);
             let g = global();
             {
@@ -477,9 +489,15 @@ fn open(secret: &Secret, game_ip: Option<IpAddr>) -> Result<Session, String> {
         .map_err(|e| format!("voice server {host}: {e}"))?
         .next()
         .ok_or_else(|| format!("voice server {host}: no address"))?;
-    let bind: SocketAddr = if server.is_ipv4() { "0.0.0.0:0".parse().unwrap() } else { "[::]:0".parse().unwrap() };
+    let bind: SocketAddr = if server.is_ipv4() {
+        "0.0.0.0:0".parse().unwrap()
+    } else {
+        "[::]:0".parse().unwrap()
+    };
     let socket = UdpSocket::bind(bind).map_err(|e| format!("UDP socket: {e}"))?;
-    socket.set_read_timeout(Some(Duration::from_millis(250))).ok();
+    socket
+        .set_read_timeout(Some(Duration::from_millis(250)))
+        .ok();
     let shared = Arc::new(Shared {
         socket,
         server,
@@ -498,9 +516,15 @@ fn open(secret: &Secret, game_ip: Option<IpAddr>) -> Result<Session, String> {
         auth_nonce: Mutex::new(None),
     });
     let receiver = shared.clone();
-    std::thread::Builder::new().name("voicechat-receive".into()).spawn(move || receive(receiver)).map_err(|e| e.to_string())?;
+    std::thread::Builder::new()
+        .name("voicechat-receive".into())
+        .spawn(move || receive(receiver))
+        .map_err(|e| e.to_string())?;
     let maintainer = shared.clone();
-    std::thread::Builder::new().name("voicechat-auth".into()).spawn(move || keep_up(maintainer)).map_err(|e| e.to_string())?;
+    std::thread::Builder::new()
+        .name("voicechat-auth".into())
+        .spawn(move || keep_up(maintainer))
+        .map_err(|e| e.to_string())?;
     Ok(Session { shared })
 }
 
@@ -549,7 +573,9 @@ fn receive(s: Arc<Shared>) {
                 s.send(&Voice::KeepAlive);
             }
             p @ Voice::Ping { .. } => s.send(&p),
-            p @ (Voice::PlayerSound { .. } | Voice::GroupSound { .. } | Voice::LocationSound { .. }) => {
+            p @ (Voice::PlayerSound { .. }
+            | Voice::GroupSound { .. }
+            | Voice::LocationSound { .. }) => {
                 if let Ok(mut m) = s.mixer.lock() {
                     m.push(p);
                 }
@@ -564,7 +590,10 @@ fn receive(s: Arc<Shared>) {
 fn keep_up(s: Arc<Shared>) {
     while s.running.load(Relaxed) {
         if !s.authenticated.load(Relaxed) {
-            s.send(&Voice::Authenticate { player: s.player, secret: s.secret });
+            s.send(&Voice::Authenticate {
+                player: s.player,
+                secret: s.secret,
+            });
         } else if !s.connected.load(Relaxed) {
             let check = match s.auth_nonce.lock().ok().and_then(|n| *n) {
                 Some(nonce) => Voice::ConnectionCheckNonce(nonce),
@@ -605,7 +634,11 @@ fn microphone(frames: Receiver<Vec<f32>>) {
         );
         mic.level_db.store(filtered.level_db.to_bits(), Relaxed);
         let voice = mic.voice_activation.load(Relaxed);
-        let speaking = if voice { filtered.speaking } else { mic.ptt.load(Relaxed) };
+        let speaking = if voice {
+            filtered.speaking
+        } else {
+            mic.ptt.load(Relaxed)
+        };
         let samples = filtered.samples;
         if mic.testing.load(Relaxed)
             && let Ok(mut m) = g.mixer.lock()
@@ -617,7 +650,8 @@ fn microphone(frames: Receiver<Vec<f32>>) {
             }
         }
         let shared = g.sending.lock().unwrap().clone();
-        let Some(s) = shared.filter(|s| s.connected.load(Relaxed) && s.running.load(Relaxed)) else {
+        let Some(s) = shared.filter(|s| s.connected.load(Relaxed) && s.running.load(Relaxed))
+        else {
             mic.transmitting.store(false, Relaxed);
             continue;
         };
@@ -627,20 +661,33 @@ fn microphone(frames: Receiver<Vec<f32>>) {
             sequence = 0;
             encoder = None;
         }
-        if encoder.as_ref().is_none_or(|(app, _)| *app != s.application) {
+        if encoder
+            .as_ref()
+            .is_none_or(|(app, _)| *app != s.application)
+        {
             encoder = Encoder::new(s.application).map(|e| (s.application, e));
         }
-        let Some((_, enc)) = encoder.as_mut() else { continue };
+        let Some((_, enc)) = encoder.as_mut() else {
+            continue;
+        };
         let wanted = speaking && !mic.muted.load(Relaxed) && !mic.disabled.load(Relaxed);
         if wanted {
             let pcm: Vec<i16> = samples.iter().map(|&x| (x * 32767.0) as i16).collect();
             if let Some(data) = enc.encode(&pcm) {
-                s.send(&Voice::Mic { data, sequence, whispering: false });
+                s.send(&Voice::Mic {
+                    data,
+                    sequence,
+                    whispering: false,
+                });
                 sequence += 1;
                 mic.transmitting.store(true, Relaxed);
             }
         } else if mic.transmitting.swap(false, Relaxed) {
-            s.send(&Voice::Mic { data: Vec::new(), sequence, whispering: false });
+            s.send(&Voice::Mic {
+                data: Vec::new(),
+                sequence,
+                whispering: false,
+            });
             sequence += 1;
             enc.reset();
         }
@@ -652,14 +699,20 @@ fn microphone(frames: Receiver<Vec<f32>>) {
 pub fn maintain() {
     let g = global();
     if let Some(rx) = g.frames_rx.lock().unwrap().take() {
-        std::thread::Builder::new().name("voicechat-mic".into()).spawn(move || microphone(rx)).ok();
+        std::thread::Builder::new()
+            .name("voicechat-mic".into())
+            .spawn(move || microphone(rx))
+            .ok();
     }
     let (wanted, devices) = {
         let inner = g.inner.lock().unwrap();
         let on_server = inner.session.is_some();
         (
             on_server || g.mic.testing.load(Relaxed),
-            (inner.settings.input_device.clone(), inner.settings.output_device.clone()),
+            (
+                inner.settings.input_device.clone(),
+                inner.settings.output_device.clone(),
+            ),
         )
     };
     let mut audio = g.audio.lock().unwrap();
@@ -671,7 +724,13 @@ pub fn maintain() {
     }
     if wanted && audio.stop.is_none() {
         let (stop_tx, stop_rx) = std::sync::mpsc::channel();
-        let errors = device::run(g.mixer.clone(), g.frames.clone(), stop_rx, devices.0.clone(), devices.1.clone());
+        let errors = device::run(
+            g.mixer.clone(),
+            g.frames.clone(),
+            stop_rx,
+            devices.0.clone(),
+            devices.1.clone(),
+        );
         let mut problems = Vec::new();
         if let Some(e) = &errors.speakers {
             problems.push(format!("speakers: {e}"));
@@ -684,8 +743,18 @@ pub fn maintain() {
             log::warn!("Voice chat: {p}");
         }
         audio.names = (
-            errors.microphone.is_none().then(|| devices.0.clone().unwrap_or_else(|| "Default microphone".into())),
-            errors.speakers.is_none().then(|| devices.1.clone().unwrap_or_else(|| "Default speakers".into())),
+            errors.microphone.is_none().then(|| {
+                devices
+                    .0
+                    .clone()
+                    .unwrap_or_else(|| "Default microphone".into())
+            }),
+            errors.speakers.is_none().then(|| {
+                devices
+                    .1
+                    .clone()
+                    .unwrap_or_else(|| "Default speakers".into())
+            }),
         );
         audio.opened_with = devices;
         audio.stop = Some(stop_tx);
@@ -734,15 +803,23 @@ pub fn toggle_disabled() -> (bool, Vec<Payload>) {
         }
     }
     let connected = g.inner.lock().unwrap().state != State::Off;
-    let out = if connected { vec![(channel::UPDATE_STATE.into(), proto::update_state(disabled))] } else { Vec::new() };
+    let out = if connected {
+        vec![(channel::UPDATE_STATE.into(), proto::update_state(disabled))]
+    } else {
+        Vec::new()
+    };
     (disabled, out)
 }
 
 pub fn set_settings(settings: Settings) {
     let g = global();
-    g.mic.voice_activation.store(settings.voice_activation, Relaxed);
+    g.mic
+        .voice_activation
+        .store(settings.voice_activation, Relaxed);
     g.mic.rnnoise.store(settings.rnnoise, Relaxed);
-    g.mic.threshold_db.store(settings.threshold_db.to_bits(), Relaxed);
+    g.mic
+        .threshold_db
+        .store(settings.threshold_db.to_bits(), Relaxed);
     g.mic.gain.store(settings.mic_gain.to_bits(), Relaxed);
     if let Ok(mut m) = g.mixer.lock() {
         m.volume = settings.volume;
@@ -767,7 +844,10 @@ pub fn create_group(name: &str, password: Option<&str>, kind: GroupKind) -> Vec<
     }
     let password = password.map(str::trim).filter(|p| !p.is_empty());
     global().inner.lock().unwrap().group_problem = None;
-    connected_payload(channel::CREATE_GROUP, proto::create_group(name, password, kind))
+    connected_payload(
+        channel::CREATE_GROUP,
+        proto::create_group(name, password, kind),
+    )
 }
 
 /// Join group `id`, with its password if it has one.
@@ -794,13 +874,20 @@ pub fn set_player_volume(uuid: u128, volume: f32) {
 
 /// Each tick: where the listener is and the positions of the entities
 /// voices come from.
-pub fn update_listener(position: [f64; 3], yaw: f32, mut locate: impl FnMut(u128) -> Option<[f64; 3]>) {
+pub fn update_listener(
+    position: [f64; 3],
+    yaw: f32,
+    mut locate: impl FnMut(u128) -> Option<[f64; 3]>,
+) {
     let g = global();
     let wanted = match g.mixer.lock() {
         Ok(m) => m.wanted_positions(),
         Err(_) => return,
     };
-    let found: HashMap<u128, [f64; 3]> = wanted.into_iter().filter_map(|e| locate(e).map(|p| (e, p))).collect();
+    let found: HashMap<u128, [f64; 3]> = wanted
+        .into_iter()
+        .filter_map(|e| locate(e).map(|p| (e, p)))
+        .collect();
     if let Ok(mut m) = g.mixer.lock() {
         m.listener = Listener { position, yaw };
         m.positions = found;
@@ -845,17 +932,31 @@ pub fn status() -> Status {
     let talking: Vec<String> = talking_ids
         .iter()
         .filter(|id| **id != inner.own)
-        .map(|id| inner.players.get(id).map_or_else(|| "someone".to_owned(), |p| p.name.clone()))
+        .map(|id| {
+            inner
+                .players
+                .get(id)
+                .map_or_else(|| "someone".to_owned(), |p| p.name.clone())
+        })
         .collect();
     let own_group = inner.players.get(&inner.own).and_then(|p| p.group);
-    let group = own_group.map(|id| inner.groups.get(&id).map_or_else(|| "a group".into(), |g| g.name.clone()));
+    let group = own_group.map(|id| {
+        inner
+            .groups
+            .get(&id)
+            .map_or_else(|| "a group".into(), |g| g.name.clone())
+    });
     let mut groups: Vec<GroupInfo> = inner
         .groups
         .values()
         .filter(|g| !g.hidden || Some(g.id) == own_group)
         .map(|g| {
-            let mut members: Vec<(u128, String)> =
-                inner.players.values().filter(|p| p.group == Some(g.id)).map(|p| (p.uuid, p.name.clone())).collect();
+            let mut members: Vec<(u128, String)> = inner
+                .players
+                .values()
+                .filter(|p| p.group == Some(g.id))
+                .map(|p| (p.uuid, p.name.clone()))
+                .collect();
             members.sort_by_key(|m| m.1.to_lowercase());
             GroupInfo {
                 id: g.id,
@@ -920,7 +1021,9 @@ mod tests {
     #[test]
     fn handshake_against_a_local_server() {
         let server = UdpSocket::bind("127.0.0.1:0").unwrap();
-        server.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         let port = server.local_addr().unwrap().port();
         let key = [5u8; 16];
         let me: u128 = 0xABCD;
@@ -938,7 +1041,10 @@ mod tests {
 
         let first = join(|| Some("127.0.0.1".parse().unwrap()));
         assert_eq!(first[0].0, "minecraft:register");
-        assert_eq!(first[1], (channel::REQUEST_SECRET.to_owned(), vec![0, 0, 0, 20]));
+        assert_eq!(
+            first[1],
+            (channel::REQUEST_SECRET.to_owned(), vec![0, 0, 0, 20])
+        );
         let reply = payload(channel::SECRET, &w.data);
         assert_eq!(reply, vec![(channel::UPDATE_STATE.to_owned(), vec![0])]);
 
@@ -959,7 +1065,13 @@ mod tests {
             server.send_to(&w.data, to).unwrap();
         };
         let (p, client) = read(&mut buf);
-        assert_eq!(p, Voice::Authenticate { player: me, secret: key });
+        assert_eq!(
+            p,
+            Voice::Authenticate {
+                player: me,
+                secret: key
+            }
+        );
         send(&Voice::AuthenticateAck, client);
         loop {
             let (p, _) = read(&mut buf);
@@ -975,10 +1087,19 @@ mod tests {
                 break;
             }
         }
-        send(&Voice::Ping { id: 9, timestamp: 1 }, client);
+        send(
+            &Voice::Ping {
+                id: 9,
+                timestamp: 1,
+            },
+            client,
+        );
         loop {
             let (p, _) = read(&mut buf);
-            if p == (Voice::Ping { id: 9, timestamp: 1 }) {
+            if p == (Voice::Ping {
+                id: 9,
+                timestamp: 1,
+            }) {
                 break;
             }
         }
@@ -987,16 +1108,44 @@ mod tests {
         // The server lists two players; we see the other one.
         let mut w = proto::Writer::new();
         w.i32(2);
-        PlayerState { disabled: false, disconnected: false, uuid: me, name: "me".into(), group: None }.write(&mut w);
-        PlayerState { disabled: true, disconnected: false, uuid: 77, name: "Steve".into(), group: None }.write(&mut w);
+        PlayerState {
+            disabled: false,
+            disconnected: false,
+            uuid: me,
+            name: "me".into(),
+            group: None,
+        }
+        .write(&mut w);
+        PlayerState {
+            disabled: true,
+            disconnected: false,
+            uuid: 77,
+            name: "Steve".into(),
+            group: None,
+        }
+        .write(&mut w);
         payload(channel::STATES, &w.data);
         set_player_volume(77, 1.5);
         let players = status().players;
         assert_eq!(players.len(), 1);
-        assert_eq!((players[0].name.as_str(), players[0].disabled, players[0].volume), ("Steve", true, 1.5));
+        assert_eq!(
+            (
+                players[0].name.as_str(),
+                players[0].disabled,
+                players[0].volume
+            ),
+            ("Steve", true, 1.5)
+        );
 
         // Groups: the server lists one, we ask to join, it says we're in.
-        let group = Group { id: 5, name: "Base".into(), has_password: true, persistent: false, hidden: false, kind: GroupKind::Open };
+        let group = Group {
+            id: 5,
+            name: "Base".into(),
+            has_password: true,
+            persistent: false,
+            hidden: false,
+            kind: GroupKind::Open,
+        };
         payload(channel::ADD_GROUP, &group.encode());
         let asks = join_group(5, Some("pw"));
         assert_eq!(asks.len(), 1);
@@ -1011,7 +1160,10 @@ mod tests {
         assert_eq!(s.group.as_deref(), Some("Base"));
         assert_eq!(s.groups.len(), 1);
         assert_eq!(s.groups[0].members, vec![(me, "me".to_owned())]);
-        assert_eq!(leave_group(), vec![(channel::LEAVE_GROUP.to_owned(), Vec::new())]);
+        assert_eq!(
+            leave_group(),
+            vec![(channel::LEAVE_GROUP.to_owned(), Vec::new())]
+        );
         payload(channel::JOINED_GROUP, &[0, 1]);
         assert_eq!(status().group_problem.as_deref(), Some("Wrong password"));
         assert_eq!(create_group("  ", None, GroupKind::Normal), Vec::new());

@@ -229,7 +229,8 @@ impl MicFilter {
         let mut working: Vec<f32> = raw_frame.iter().map(|&x| x.clamp(-1.0, 1.0)).collect();
         let len = working.len().max(1);
 
-        let raw_rms = (working.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / len as f64).sqrt() as f32;
+        let raw_rms =
+            (working.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / len as f64).sqrt() as f32;
         let remote_talking = remote_rms > 0.003;
         // Layer 1: Smart ducking gate — attenuate mic by -12 dB when remote voices are playing
         // unless local speech clearly breaks through above the speaker bleed.
@@ -337,13 +338,15 @@ mod tests {
             .collect();
 
         let out = filter.process_frame(&bleed, &speaker_ref, 0.08, 1.0, -45.0, false);
-        assert!(out.ducked, "expected ducking gate to engage on speaker bleed");
+        assert!(
+            out.ducked,
+            "expected ducking gate to engage on speaker bleed"
+        );
         assert!(
             !out.speaking,
             "expected raised ducking threshold (+12 dB) to prevent false VAD trigger"
         );
-        let out_rms =
-            (out.samples.iter().map(|&x| x * x).sum::<f32>() / FRAME as f32).sqrt();
+        let out_rms = (out.samples.iter().map(|&x| x * x).sum::<f32>() / FRAME as f32).sqrt();
         let in_rms = (bleed.iter().map(|&x| x * x).sum::<f32>() / FRAME as f32).sqrt();
         assert!(
             out_rms < in_rms * 0.35,
@@ -366,6 +369,9 @@ mod tests {
 
         // Subsequent silent frame stays `speaking = true` due to 500 ms hangover hold.
         let after = filter.process_frame(&silence, &[], 0.0, 1.0, -50.0, false);
-        assert!(after.speaking, "expected 500 ms hangover hold to keep speaking active");
+        assert!(
+            after.speaking,
+            "expected 500 ms hangover hold to keep speaking active"
+        );
     }
 }

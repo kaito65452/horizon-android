@@ -18,8 +18,15 @@ pub enum Icon {
     Group,
 }
 
-pub const ICONS: [Icon; 7] =
-    [Icon::Idle, Icon::Talking, Icon::Muted, Icon::Disabled, Icon::Connecting, Icon::Speaker, Icon::Group];
+pub const ICONS: [Icon; 7] = [
+    Icon::Idle,
+    Icon::Talking,
+    Icon::Muted,
+    Icon::Disabled,
+    Icon::Connecting,
+    Icon::Speaker,
+    Icon::Group,
+];
 
 /// Pixels as 0xAARRGGBB, row by row.
 #[derive(Clone, Debug)]
@@ -32,19 +39,67 @@ pub struct Image {
 macro_rules! colour {
     ($c:literal) => {
         [
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/idle.png")).as_slice(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/talking.png")).as_slice(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/muted.png")).as_slice(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/disabled.png")).as_slice(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/connecting.png")).as_slice(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/speaker.png")).as_slice(),
-            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/icons/", $c, "/group.png")).as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/idle.png"
+            ))
+            .as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/talking.png"
+            ))
+            .as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/muted.png"
+            ))
+            .as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/disabled.png"
+            ))
+            .as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/connecting.png"
+            ))
+            .as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/speaker.png"
+            ))
+            .as_slice(),
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/data/icons/",
+                $c,
+                "/group.png"
+            ))
+            .as_slice(),
         ]
     };
 }
 
-const FILES: [[&[u8]; 7]; 6] =
-    [colour!("blue"), colour!("grey"), colour!("black"), colour!("white"), colour!("red"), colour!("rainbow")];
+const FILES: [[&[u8]; 7]; 6] = [
+    colour!("blue"),
+    colour!("grey"),
+    colour!("black"),
+    colour!("white"),
+    colour!("red"),
+    colour!("rainbow"),
+];
 
 fn decode(bytes: &[u8]) -> Option<Image> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
@@ -71,7 +126,11 @@ fn decode(bytes: &[u8]) -> Option<Image> {
             (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | b as u32
         })
         .collect();
-    Some(Image { width: info.width, height: info.height, argb })
+    Some(Image {
+        width: info.width,
+        height: info.height,
+        argb,
+    })
 }
 
 /// The icon `icon` in the colour `colour` (an unknown colour is blue).
@@ -85,7 +144,11 @@ pub fn icon(colour: &str, icon: Icon) -> Option<&'static Image> {
                     Some(img) => {
                         all.insert((c, ICONS[i]), img);
                     }
-                    None => log::warn!("Voice chat: icon {}/{:?} didn't decode", COLOURS[c], ICONS[i]),
+                    None => log::warn!(
+                        "Voice chat: icon {}/{:?} didn't decode",
+                        COLOURS[c],
+                        ICONS[i]
+                    ),
                 }
             }
         }
@@ -127,10 +190,16 @@ mod tests {
             for i in ICONS {
                 let img = icon(c, i).unwrap_or_else(|| panic!("{c}/{i:?}"));
                 assert_eq!((img.width, img.height), (16, 16));
-                assert!(img.argb.iter().any(|p| p >> 24 == 255), "{c}/{i:?} is empty");
+                assert!(
+                    img.argb.iter().any(|p| p >> 24 == 255),
+                    "{c}/{i:?} is empty"
+                );
                 assert!(!runs(img).is_empty());
             }
         }
-        assert!(icon("purple", Icon::Idle).is_some(), "unknown colours fall back to blue");
+        assert!(
+            icon("purple", Icon::Idle).is_some(),
+            "unknown colours fall back to blue"
+        );
     }
 }

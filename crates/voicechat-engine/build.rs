@@ -1,7 +1,9 @@
 // Compiles the bundled libopus 1.5.2 (BSD-3-Clause, see data/opus/COPYING): the
 // float build, generic C only, no deep-learning extensions.
 fn main() {
-    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("data").join("opus");
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("data")
+        .join("opus");
     let list = std::fs::read_to_string(root.join("sources.txt")).expect("data/opus/sources.txt");
     let mut build = cc::Build::new();
     for dir in ["include", "celt", "silk", "silk/float", "src", ""] {

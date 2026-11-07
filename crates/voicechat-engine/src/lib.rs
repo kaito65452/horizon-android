@@ -1,13 +1,13 @@
 //! Complex Voice Chat for Horizon: voice chat compatible with servers running Simple Voice Chat
 //! 2.6.x (protocol compatibility version 20). Written from the protocol's
 //! packet layouts; no code from the mod. Opus is the bundled libopus 1.5.2.
-pub mod proto;
-mod opus;
+mod client;
+mod device;
+pub mod icons;
 pub mod mic_filter;
 mod mixer;
-mod device;
-mod client;
-pub mod icons;
+mod opus;
+pub mod proto;
 
 pub use client::{
     GroupInfo, Payload, Player, Settings, State, Status, create_group, join, join_group, leave,

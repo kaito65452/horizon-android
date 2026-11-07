@@ -36,7 +36,14 @@ pub mod channel {
     /// The channels the server sends on, announced in `minecraft:register`
     /// (a Paper server only sends plugin messages on registered channels).
     pub const CLIENTBOUND: [&str; 9] = [
-        SECRET, STATE, STATES, REMOVE_STATE, JOINED_GROUP, ADD_GROUP, REMOVE_GROUP, ADD_CATEGORY,
+        SECRET,
+        STATE,
+        STATES,
+        REMOVE_STATE,
+        JOINED_GROUP,
+        ADD_GROUP,
+        REMOVE_GROUP,
+        ADD_CATEGORY,
         REMOVE_CATEGORY,
     ];
 }
@@ -259,7 +266,10 @@ impl Secret {
         if let Some(rest) = host.strip_prefix('[')
             && let Some((h, tail)) = rest.split_once(']')
         {
-            let port = tail.strip_prefix(':').and_then(|p| p.parse().ok()).unwrap_or(default_port);
+            let port = tail
+                .strip_prefix(':')
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(default_port);
             return (h.to_owned(), port);
         }
         match host.rsplit_once(':') {
@@ -285,7 +295,13 @@ impl PlayerState {
         let uuid = r.uuid()?;
         let name = r.string(32767)?;
         let group = if r.bool()? { Some(r.uuid()?) } else { None };
-        Ok(Self { disabled, disconnected, uuid, name, group })
+        Ok(Self {
+            disabled,
+            disconnected,
+            uuid,
+            name,
+            group,
+        })
     }
     pub fn write(&self, w: &mut Writer) {
         w.bool(self.disabled);
@@ -435,8 +451,12 @@ pub struct Cipher {
 }
 impl Cipher {
     pub fn new(secret: &[u8; 16]) -> Self {
-        let unbound = ring::aead::UnboundKey::new(&ring::aead::AES_128_GCM, secret).expect("16-byte key");
-        Self { key: ring::aead::LessSafeKey::new(unbound), rng: ring::rand::SystemRandom::new() }
+        let unbound =
+            ring::aead::UnboundKey::new(&ring::aead::AES_128_GCM, secret).expect("16-byte key");
+        Self {
+            key: ring::aead::LessSafeKey::new(unbound),
+            rng: ring::rand::SystemRandom::new(),
+        }
     }
     pub fn encrypt(&self, plain: &[u8]) -> Vec<u8> {
         use ring::rand::SecureRandom;
@@ -444,7 +464,11 @@ impl Cipher {
         self.rng.fill(&mut iv).expect("random iv");
         let mut buf = plain.to_vec();
         self.key
-            .seal_in_place_append_tag(ring::aead::Nonce::assume_unique_for_key(iv), ring::aead::Aad::empty(), &mut buf)
+            .seal_in_place_append_tag(
+                ring::aead::Nonce::assume_unique_for_key(iv),
+                ring::aead::Aad::empty(),
+                &mut buf,
+            )
             .expect("seal");
         let mut out = iv.to_vec();
         out.extend_from_slice(&buf);
@@ -458,7 +482,11 @@ impl Cipher {
         let mut buf = data[12..].to_vec();
         let plain = self
             .key
-            .open_in_place(ring::aead::Nonce::assume_unique_for_key(iv), ring::aead::Aad::empty(), &mut buf)
+            .open_in_place(
+                ring::aead::Nonce::assume_unique_for_key(iv),
+                ring::aead::Aad::empty(),
+                &mut buf,
+            )
             .ok()?;
         Some(plain.to_vec())
     }
@@ -468,13 +496,39 @@ impl Cipher {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Voice {
     /// 1: our microphone (empty `data` = stopped talking).
-    Mic { data: Vec<u8>, sequence: i64, whispering: bool },
+    Mic {
+        data: Vec<u8>,
+        sequence: i64,
+        whispering: bool,
+    },
     /// 2: a player's voice, at that player's entity.
-    PlayerSound { channel: u128, sender: u128, data: Vec<u8>, sequence: i64, distance: f32, whispering: bool, category: Option<String> },
+    PlayerSound {
+        channel: u128,
+        sender: u128,
+        data: Vec<u8>,
+        sequence: i64,
+        distance: f32,
+        whispering: bool,
+        category: Option<String>,
+    },
     /// 3: a group member's voice, not positioned.
-    GroupSound { channel: u128, sender: u128, data: Vec<u8>, sequence: i64, category: Option<String> },
+    GroupSound {
+        channel: u128,
+        sender: u128,
+        data: Vec<u8>,
+        sequence: i64,
+        category: Option<String>,
+    },
     /// 4: a voice at a fixed place.
-    LocationSound { channel: u128, sender: u128, location: [f64; 3], data: Vec<u8>, sequence: i64, distance: f32, category: Option<String> },
+    LocationSound {
+        channel: u128,
+        sender: u128,
+        location: [f64; 3],
+        data: Vec<u8>,
+        sequence: i64,
+        distance: f32,
+        category: Option<String>,
+    },
     /// 5
     Authenticate { player: u128, secret: [u8; 16] },
     /// 6 (v18..=v20 empty ack)
@@ -497,13 +551,25 @@ impl Voice {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
         match self {
-            Voice::Mic { data, sequence, whispering } => {
+            Voice::Mic {
+                data,
+                sequence,
+                whispering,
+            } => {
                 w.u8(1);
                 w.byte_array(data);
                 w.i64(*sequence);
                 w.bool(*whispering);
             }
-            Voice::PlayerSound { channel, sender, data, sequence, distance, whispering, category } => {
+            Voice::PlayerSound {
+                channel,
+                sender,
+                data,
+                sequence,
+                distance,
+                whispering,
+                category,
+            } => {
                 w.u8(2);
                 w.uuid(*channel);
                 w.uuid(*sender);
@@ -515,7 +581,13 @@ impl Voice {
                     w.string(c);
                 }
             }
-            Voice::GroupSound { channel, sender, data, sequence, category } => {
+            Voice::GroupSound {
+                channel,
+                sender,
+                data,
+                sequence,
+                category,
+            } => {
                 w.u8(3);
                 w.uuid(*channel);
                 w.uuid(*sender);
@@ -526,7 +598,15 @@ impl Voice {
                     w.string(c);
                 }
             }
-            Voice::LocationSound { channel, sender, location, data, sequence, distance, category } => {
+            Voice::LocationSound {
+                channel,
+                sender,
+                location,
+                data,
+                sequence,
+                distance,
+                category,
+            } => {
                 w.u8(4);
                 w.uuid(*channel);
                 w.uuid(*sender);
@@ -570,10 +650,18 @@ impl Voice {
     pub fn decode(data: &[u8]) -> Result<Self> {
         let mut r = Reader::new(data);
         let category = |r: &mut Reader, flags: u8| -> Result<Option<String>> {
-            if flags & 2 != 0 { Ok(Some(r.string(16)?)) } else { Ok(None) }
+            if flags & 2 != 0 {
+                Ok(Some(r.string(16)?))
+            } else {
+                Ok(None)
+            }
         };
         Ok(match r.u8()? {
-            1 => Voice::Mic { data: r.byte_array(MAX_OPUS)?, sequence: r.i64()?, whispering: r.bool()? },
+            1 => Voice::Mic {
+                data: r.byte_array(MAX_OPUS)?,
+                sequence: r.i64()?,
+                whispering: r.bool()?,
+            },
             2 => {
                 let channel = r.uuid()?;
                 let sender = r.uuid()?;
@@ -582,7 +670,15 @@ impl Voice {
                 let distance = r.f32()?;
                 let flags = r.u8()?;
                 let category = category(&mut r, flags)?;
-                Voice::PlayerSound { channel, sender, data, sequence, distance, whispering: flags & 1 != 0, category }
+                Voice::PlayerSound {
+                    channel,
+                    sender,
+                    data,
+                    sequence,
+                    distance,
+                    whispering: flags & 1 != 0,
+                    category,
+                }
             }
             3 => {
                 let channel = r.uuid()?;
@@ -591,7 +687,13 @@ impl Voice {
                 let sequence = r.i64()?;
                 let flags = r.u8()?;
                 let category = category(&mut r, flags)?;
-                Voice::GroupSound { channel, sender, data, sequence, category }
+                Voice::GroupSound {
+                    channel,
+                    sender,
+                    data,
+                    sequence,
+                    category,
+                }
             }
             4 => {
                 let channel = r.uuid()?;
@@ -602,9 +704,20 @@ impl Voice {
                 let distance = r.f32()?;
                 let flags = r.u8()?;
                 let category = category(&mut r, flags)?;
-                Voice::LocationSound { channel, sender, location, data, sequence, distance, category }
+                Voice::LocationSound {
+                    channel,
+                    sender,
+                    location,
+                    data,
+                    sequence,
+                    distance,
+                    category,
+                }
             }
-            5 => Voice::Authenticate { player: r.uuid()?, secret: r.array()? },
+            5 => Voice::Authenticate {
+                player: r.uuid()?,
+                secret: r.array()?,
+            },
             6 => {
                 if r.rest.len() >= 16 {
                     Voice::AuthenticateAckNonce(r.array()?)
@@ -612,7 +725,10 @@ impl Voice {
                     Voice::AuthenticateAck
                 }
             }
-            7 => Voice::Ping { id: r.uuid()?, timestamp: r.i64()? },
+            7 => Voice::Ping {
+                id: r.uuid()?,
+                timestamp: r.i64()?,
+            },
             8 => Voice::KeepAlive,
             9 => {
                 if r.rest.len() >= 16 {
@@ -643,7 +759,9 @@ pub fn unwrap(cipher: &Cipher, datagram: &[u8]) -> Result<Voice> {
         return err("not a voice packet");
     }
     let body = r.byte_array(MAX_UDP_BODY)?;
-    let plain = cipher.decrypt(&body).ok_or_else(|| Error("failed to decrypt".into()))?;
+    let plain = cipher
+        .decrypt(&body)
+        .ok_or_else(|| Error("failed to decrypt".into()))?;
     Voice::decode(&plain)
 }
 
@@ -668,9 +786,18 @@ mod tests {
         w.bool(false);
         let s = Secret::decode(&w.data).unwrap();
         assert_eq!(s.secret, [7; 16]);
-        assert_eq!((s.server_port, s.player, s.codec, s.mtu), (24454, ME, Codec::Voip, 1024));
-        assert_eq!((s.distance, s.keep_alive_ms, s.groups_enabled), (48.0, 1000, true));
-        assert_eq!(s.voice_address("play.example.net"), ("play.example.net".into(), 24454));
+        assert_eq!(
+            (s.server_port, s.player, s.codec, s.mtu),
+            (24454, ME, Codec::Voip, 1024)
+        );
+        assert_eq!(
+            (s.distance, s.keep_alive_ms, s.groups_enabled),
+            (48.0, 1000, true)
+        );
+        assert_eq!(
+            s.voice_address("play.example.net"),
+            ("play.example.net".into(), 24454)
+        );
     }
 
     #[test]
@@ -698,14 +825,30 @@ mod tests {
             ("[::1]:5", ("::1", 5)),
         ] {
             s.voice_host = host.into();
-            assert_eq!(s.voice_address("game"), (want.0.to_owned(), want.1), "{host}");
+            assert_eq!(
+                s.voice_address("game"),
+                (want.0.to_owned(), want.1),
+                "{host}"
+            );
         }
     }
 
     #[test]
     fn states_round_trip() {
-        let a = PlayerState { disabled: false, disconnected: false, uuid: ME, name: "azetech_".into(), group: None };
-        let b = PlayerState { disabled: true, disconnected: false, uuid: 9, name: "x".into(), group: Some(42) };
+        let a = PlayerState {
+            disabled: false,
+            disconnected: false,
+            uuid: ME,
+            name: "azetech_".into(),
+            group: None,
+        };
+        let b = PlayerState {
+            disabled: true,
+            disconnected: false,
+            uuid: 9,
+            name: "x".into(),
+            group: Some(42),
+        };
         let mut w = Writer::new();
         w.i32(2);
         a.write(&mut w);
@@ -716,14 +859,50 @@ mod tests {
     #[test]
     fn voice_packets_round_trip() {
         let packets = [
-            Voice::Mic { data: vec![1, 2, 3], sequence: 7, whispering: true },
-            Voice::Mic { data: vec![], sequence: 8, whispering: false },
-            Voice::PlayerSound { channel: 1, sender: 2, data: vec![9; 40], sequence: -1, distance: 48.0, whispering: false, category: Some("music".into()) },
-            Voice::GroupSound { channel: 3, sender: 4, data: vec![5], sequence: 10, category: None },
-            Voice::LocationSound { channel: 5, sender: 6, location: [1.0, 2.0, 3.0], data: vec![], sequence: 0, distance: 10.0, category: None },
-            Voice::Authenticate { player: ME, secret: [3; 16] },
+            Voice::Mic {
+                data: vec![1, 2, 3],
+                sequence: 7,
+                whispering: true,
+            },
+            Voice::Mic {
+                data: vec![],
+                sequence: 8,
+                whispering: false,
+            },
+            Voice::PlayerSound {
+                channel: 1,
+                sender: 2,
+                data: vec![9; 40],
+                sequence: -1,
+                distance: 48.0,
+                whispering: false,
+                category: Some("music".into()),
+            },
+            Voice::GroupSound {
+                channel: 3,
+                sender: 4,
+                data: vec![5],
+                sequence: 10,
+                category: None,
+            },
+            Voice::LocationSound {
+                channel: 5,
+                sender: 6,
+                location: [1.0, 2.0, 3.0],
+                data: vec![],
+                sequence: 0,
+                distance: 10.0,
+                category: None,
+            },
+            Voice::Authenticate {
+                player: ME,
+                secret: [3; 16],
+            },
             Voice::AuthenticateAck,
-            Voice::Ping { id: 77, timestamp: 123 },
+            Voice::Ping {
+                id: 77,
+                timestamp: 123,
+            },
             Voice::KeepAlive,
             Voice::ConnectionCheck,
             Voice::ConnectionCheckAck,
@@ -736,14 +915,22 @@ mod tests {
     #[test]
     fn mic_packet_bytes_match_the_layout() {
         // id 1, VarInt length 2, data, long sequence, boolean.
-        let bytes = Voice::Mic { data: vec![0xAA, 0xBB], sequence: 1, whispering: false }.encode();
+        let bytes = Voice::Mic {
+            data: vec![0xAA, 0xBB],
+            sequence: 1,
+            whispering: false,
+        }
+        .encode();
         assert_eq!(bytes, [1, 2, 0xAA, 0xBB, 0, 0, 0, 0, 0, 0, 0, 1, 0]);
     }
 
     #[test]
     fn encrypted_datagram_round_trips_and_rejects_tampering() {
         let cipher = Cipher::new(&[9; 16]);
-        let packet = Voice::Authenticate { player: ME, secret: [9; 16] };
+        let packet = Voice::Authenticate {
+            player: ME,
+            secret: [9; 16],
+        };
         let datagram = wrap(&cipher, ME, &packet);
         assert_eq!(datagram[0], MAGIC);
         assert_eq!(u128::from_be_bytes(datagram[1..17].try_into().unwrap()), ME);
@@ -754,12 +941,14 @@ mod tests {
         let last = server_form.len() - 1;
         server_form[last] ^= 1;
         assert!(unwrap(&cipher, &server_form).is_err());
-        assert!(unwrap(&Cipher::new(&[8; 16]), &{
-            let mut s = vec![MAGIC];
-            s.extend_from_slice(&datagram[17..]);
-            s
-        })
-        .is_err());
+        assert!(
+            unwrap(&Cipher::new(&[8; 16]), &{
+                let mut s = vec![MAGIC];
+                s.extend_from_slice(&datagram[17..]);
+                s
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -773,16 +962,32 @@ mod tests {
     /// JoinGroupPacket, JoinedGroupPacket).
     #[test]
     fn group_packets() {
-        let g = Group { id: 7, name: "Base".into(), has_password: true, persistent: false, hidden: false, kind: GroupKind::Isolated };
+        let g = Group {
+            id: 7,
+            name: "Base".into(),
+            has_password: true,
+            persistent: false,
+            hidden: false,
+            kind: GroupKind::Isolated,
+        };
         let bytes = g.encode();
         // uuid(16) + varint len + "Base" + 3 bools + short
         assert_eq!(bytes.len(), 16 + 1 + 4 + 3 + 2);
         assert_eq!(&bytes[bytes.len() - 2..], &[0, 2]);
         assert_eq!(Group::decode(&bytes).unwrap(), g);
 
-        assert_eq!(create_group("ab", None, GroupKind::Open), vec![2, b'a', b'b', 0, 0, 1]);
-        assert_eq!(create_group("ab", Some("x"), GroupKind::Normal), vec![2, b'a', b'b', 1, 1, b'x', 0, 0]);
-        assert_eq!(create_group(&"n".repeat(40), None, GroupKind::Normal)[0], 24);
+        assert_eq!(
+            create_group("ab", None, GroupKind::Open),
+            vec![2, b'a', b'b', 0, 0, 1]
+        );
+        assert_eq!(
+            create_group("ab", Some("x"), GroupKind::Normal),
+            vec![2, b'a', b'b', 1, 1, b'x', 0, 0]
+        );
+        assert_eq!(
+            create_group(&"n".repeat(40), None, GroupKind::Normal)[0],
+            24
+        );
 
         let j = join_group(1, Some("pw"));
         assert_eq!(j.len(), 16 + 1 + 1 + 2);

@@ -102,8 +102,20 @@ impl Prefs {
     /// Apply `key = value` (as `Action::Set` carries it); false if unknown.
     pub fn set(&mut self, key: &str, value: &str) -> bool {
         let flag = || value == "true";
-        let num = |lo: f32, hi: f32, d: f32| value.parse::<f32>().ok().filter(|v| v.is_finite()).map_or(d, |v| v.clamp(lo, hi));
-        let index = |n: usize| value.parse::<u8>().ok().filter(|v| (*v as usize) < n).unwrap_or(0);
+        let num = |lo: f32, hi: f32, d: f32| {
+            value
+                .parse::<f32>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .map_or(d, |v| v.clamp(lo, hi))
+        };
+        let index = |n: usize| {
+            value
+                .parse::<u8>()
+                .ok()
+                .filter(|v| (*v as usize) < n)
+                .unwrap_or(0)
+        };
         match key {
             "theme" if THEMES.contains(&value) => self.theme = value.to_owned(),
             "opacity" => self.opacity = num(0.5, 1.0, 0.96),
@@ -206,7 +218,11 @@ pub enum Action {
     /// The device pickers opened: list the devices again.
     RefreshDevices,
     Colour(String),
-    CreateGroup { name: String, password: Option<String>, kind: u8 },
+    CreateGroup {
+        name: String,
+        password: Option<String>,
+        kind: u8,
+    },
     JoinGroup(u128, Option<String>),
     LeaveGroup,
     /// A look preference (`Prefs::set`).
@@ -282,17 +298,62 @@ enum Act {
 
 #[derive(Clone, Debug)]
 enum Kind {
-    Button { label: String, lit: Option<bool>, act: Act, primary: bool },
-    Toggle { label: String, on: bool, act: Act },
-    Slider { id: Slider, label: String, value: f32, min: f32, max: f32, text: String, meter: Option<f32> },
-    Text { text: String, color: Rgba },
-    Heading { text: String },
-    Player { row: PlayerRow },
-    Group { row: GroupRow, joined: bool },
-    Input { field: Field, text: String, placeholder: String, secret: bool, focused: bool },
-    Swatch { name: String, idle: Runs, talking: Runs, lit: bool },
-    Theme { name: String, lit: bool },
-    Tab { label: String, lit: bool, tab: Tab },
+    Button {
+        label: String,
+        lit: Option<bool>,
+        act: Act,
+        primary: bool,
+    },
+    Toggle {
+        label: String,
+        on: bool,
+        act: Act,
+    },
+    Slider {
+        id: Slider,
+        label: String,
+        value: f32,
+        min: f32,
+        max: f32,
+        text: String,
+        meter: Option<f32>,
+    },
+    Text {
+        text: String,
+        color: Rgba,
+    },
+    Heading {
+        text: String,
+    },
+    Player {
+        row: PlayerRow,
+    },
+    Group {
+        row: GroupRow,
+        joined: bool,
+    },
+    Input {
+        field: Field,
+        text: String,
+        placeholder: String,
+        secret: bool,
+        focused: bool,
+    },
+    Swatch {
+        name: String,
+        idle: Runs,
+        talking: Runs,
+        lit: bool,
+    },
+    Theme {
+        name: String,
+        lit: bool,
+    },
+    Tab {
+        label: String,
+        lit: bool,
+        tab: Tab,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -441,7 +502,12 @@ fn theme(name: &str, t: f32) -> (Rgba, Rgba) {
 }
 
 fn alpha(c: Rgba, a: f32) -> Rgba {
-    (c.0, c.1, c.2, (f32::from(c.3) * a.clamp(0.0, 1.0)).round() as u8)
+    (
+        c.0,
+        c.1,
+        c.2,
+        (f32::from(c.3) * a.clamp(0.0, 1.0)).round() as u8,
+    )
 }
 
 fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
@@ -482,9 +548,23 @@ fn frame(w: f32, h: f32, size: u8) -> Frame {
     let pw = mw.min(w - 12.0).max(260.0);
     let ph = mh.min(h - 12.0).max(160.0);
     let panel = [((w - pw) / 2.0).floor(), ((h - ph) / 2.0).floor(), pw, ph];
-    let side = [panel[0] + 4.0, panel[1] + TOP + 4.0, SIDE - 6.0, ph - TOP - 8.0];
-    let content = [panel[0] + SIDE + 4.0, panel[1] + TOP + 6.0, pw - SIDE - 4.0 - PAD, ph - TOP - 12.0];
-    Frame { panel, side, content }
+    let side = [
+        panel[0] + 4.0,
+        panel[1] + TOP + 4.0,
+        SIDE - 6.0,
+        ph - TOP - 8.0,
+    ];
+    let content = [
+        panel[0] + SIDE + 4.0,
+        panel[1] + TOP + 6.0,
+        pw - SIDE - 4.0 - PAD,
+        ph - TOP - 12.0,
+    ];
+    Frame {
+        panel,
+        side,
+        content,
+    }
 }
 
 fn pct(v: f32) -> String {
@@ -493,7 +573,9 @@ fn pct(v: f32) -> String {
 
 fn title_case(s: &str) -> String {
     let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 /// Lays widgets out down a column.
@@ -507,11 +589,17 @@ struct Column {
 
 impl Column {
     fn id(&self) -> u64 {
-        self.salt.wrapping_mul(1000).wrapping_add(self.out.len() as u64)
+        self.salt
+            .wrapping_mul(1000)
+            .wrapping_add(self.out.len() as u64)
     }
     fn put(&mut self, h: f32, kind: Kind) {
         let id = self.id();
-        self.out.push(Widget { id, rect: [self.x, self.y, self.w, h], kind });
+        self.out.push(Widget {
+            id,
+            rect: [self.x, self.y, self.w, h],
+            kind,
+        });
         self.y += h + GAP;
     }
     /// Several widgets side by side, sharing the width.
@@ -521,26 +609,55 @@ impl Column {
         for (k, kind) in kinds.into_iter().enumerate() {
             let id = self.id();
             let x = self.x + k as f32 * (cw + GAP);
-            let w = if k as f32 == n - 1.0 { self.x + self.w - x } else { cw };
-            self.out.push(Widget { id, rect: [x, self.y, w, h], kind });
+            let w = if k as f32 == n - 1.0 {
+                self.x + self.w - x
+            } else {
+                cw
+            };
+            self.out.push(Widget {
+                id,
+                rect: [x, self.y, w, h],
+                kind,
+            });
         }
         self.y += h + GAP;
     }
     fn heading(&mut self, text: &str) {
         self.y += 2.0;
-        self.put(10.0, Kind::Heading { text: text.to_owned() });
+        self.put(
+            10.0,
+            Kind::Heading {
+                text: text.to_owned(),
+            },
+        );
     }
     fn text(&mut self, text: impl Into<String>, color: Rgba) {
-        self.put(9.0, Kind::Text { text: text.into(), color });
+        self.put(
+            9.0,
+            Kind::Text {
+                text: text.into(),
+                color,
+            },
+        );
     }
 }
 
 fn button(label: impl Into<String>, act: Act) -> Kind {
-    Kind::Button { label: label.into(), lit: None, act, primary: false }
+    Kind::Button {
+        label: label.into(),
+        lit: None,
+        act,
+        primary: false,
+    }
 }
 
 fn choice(label: impl Into<String>, lit: bool, act: Act) -> Kind {
-    Kind::Button { label: label.into(), lit: Some(lit), act, primary: false }
+    Kind::Button {
+        label: label.into(),
+        lit: Some(lit),
+        act,
+        primary: false,
+    }
 }
 
 fn set(key: &'static str, value: impl ToString) -> Act {
@@ -571,19 +688,31 @@ fn sidebar(s: &State, f: &Frame) -> Vec<Widget> {
         out.push(Widget {
             id: 900 + k as u64,
             rect: [r[0], r[1] + k as f32 * (ROW + 2.0), r[2], ROW],
-            kind: Kind::Tab { label: (*label).to_owned(), lit: home == *tab, tab: *tab },
+            kind: Kind::Tab {
+                label: (*label).to_owned(),
+                lit: home == *tab,
+                tab: *tab,
+            },
         });
     }
     let foot = r[1] + r[3] - 2.0 * (ROW + 2.0) - 10.0;
     out.push(Widget {
         id: 950,
         rect: [r[0], foot, r[2], ROW],
-        kind: Kind::Toggle { label: "Microphone".into(), on: !v.muted, act: Act::Do(Action::Mute) },
+        kind: Kind::Toggle {
+            label: "Microphone".into(),
+            on: !v.muted,
+            act: Act::Do(Action::Mute),
+        },
     });
     out.push(Widget {
         id: 951,
         rect: [r[0], foot + ROW + 2.0, r[2], ROW],
-        kind: Kind::Toggle { label: "Voice chat".into(), on: !v.disabled, act: Act::Do(Action::Disable) },
+        kind: Kind::Toggle {
+            label: "Voice chat".into(),
+            on: !v.disabled,
+            act: Act::Do(Action::Disable),
+        },
     });
     out
 }
@@ -604,7 +733,13 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
         Tab::Create => 8,
         Tab::Password(_) => 9,
     };
-    let mut col = Column { x: c[0], w: c[2] - 4.0, y: top, salt, out: Vec::new() };
+    let mut col = Column {
+        x: c[0],
+        w: c[2] - 4.0,
+        y: top,
+        salt,
+        out: Vec::new(),
+    };
     let full = col.w;
     match s.tab {
         Tab::Players => {
@@ -613,8 +748,11 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
                 col.text(p.clone(), BAD);
             }
             let search = field_text(s, Field::Search).trim().to_lowercase();
-            let shown: Vec<&PlayerRow> =
-                v.players.iter().filter(|p| search.is_empty() || p.name.to_lowercase().contains(&search)).collect();
+            let shown: Vec<&PlayerRow> = v
+                .players
+                .iter()
+                .filter(|p| search.is_empty() || p.name.to_lowercase().contains(&search))
+                .collect();
             let talking = v.players.iter().filter(|p| p.talking).count();
             col.heading(&if talking > 0 {
                 format!("PLAYERS ({})  -  {talking} TALKING", v.players.len())
@@ -643,7 +781,11 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
                     id,
                     rect: [c[0] + full - mw, y + 3.0, mw, ROW - 4.0],
                     kind: Kind::Button {
-                        label: if muted { "Unmute".into() } else { "Mute".into() },
+                        label: if muted {
+                            "Unmute".into()
+                        } else {
+                            "Mute".into()
+                        },
                         lit: Some(muted),
                         act: Act::Do(Action::PlayerVolume(p.uuid, if muted { 1.0 } else { 0.0 })),
                         primary: false,
@@ -674,29 +816,70 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
                 if let Some(p) = &v.group_problem {
                     col.text(p.clone(), BAD);
                 }
-                let own = v.own_group.and_then(|id| v.groups.iter().find(|g| g.id == id));
+                let own = v
+                    .own_group
+                    .and_then(|id| v.groups.iter().find(|g| g.id == id));
                 if let Some(g) = own {
                     col.heading("YOUR GROUP");
-                    col.put(ROW + 6.0, Kind::Group { row: g.clone(), joined: true });
+                    col.put(
+                        ROW + 6.0,
+                        Kind::Group {
+                            row: g.clone(),
+                            joined: true,
+                        },
+                    );
                     let names: Vec<String> = g.members.iter().map(|(n, _)| n.clone()).collect();
-                    let line = if names.is_empty() { "Just you".to_owned() } else { names.join(", ") };
+                    let line = if names.is_empty() {
+                        "Just you".to_owned()
+                    } else {
+                        names.join(", ")
+                    };
                     col.text(format!("Members: {line}"), DIM);
                     col.text(GROUP_KINDS[(g.kind as usize).min(2)].1, FAINT);
-                    col.put(ROW, Kind::Button { label: "Leave group".into(), lit: None, act: Act::Do(Action::LeaveGroup), primary: false });
+                    col.put(
+                        ROW,
+                        Kind::Button {
+                            label: "Leave group".into(),
+                            lit: None,
+                            act: Act::Do(Action::LeaveGroup),
+                            primary: false,
+                        },
+                    );
                 } else if v.own_group.is_some() {
                     col.heading("YOUR GROUP");
                     col.text(v.group.clone().unwrap_or_default(), WHITE);
                     col.put(ROW, button("Leave group", Act::Do(Action::LeaveGroup)));
                 } else {
-                    col.put(ROW, Kind::Button { label: "+  Create a group".into(), lit: None, act: Act::Go(Tab::Create), primary: true });
+                    col.put(
+                        ROW,
+                        Kind::Button {
+                            label: "+  Create a group".into(),
+                            lit: None,
+                            act: Act::Go(Tab::Create),
+                            primary: true,
+                        },
+                    );
                 }
-                let others: Vec<&GroupRow> = v.groups.iter().filter(|g| Some(g.id) != v.own_group).collect();
+                let others: Vec<&GroupRow> = v
+                    .groups
+                    .iter()
+                    .filter(|g| Some(g.id) != v.own_group)
+                    .collect();
                 col.heading(&format!("GROUPS ON THIS SERVER ({})", others.len()));
                 if others.is_empty() {
-                    col.text("No other groups yet. Make one and invite your friends!", FAINT);
+                    col.text(
+                        "No other groups yet. Make one and invite your friends!",
+                        FAINT,
+                    );
                 }
                 for g in others {
-                    col.put(ROW + 6.0, Kind::Group { row: g.clone(), joined: false });
+                    col.put(
+                        ROW + 6.0,
+                        Kind::Group {
+                            row: g.clone(),
+                            joined: false,
+                        },
+                    );
                 }
             }
         }
@@ -709,71 +892,212 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
             col.text("Type", DIM);
             col.row(
                 ROW - 2.0,
-                GROUP_KINDS.iter().enumerate().map(|(k, (name, _))| choice(*name, s.create_kind as usize == k, Act::Kind(k as u8))).collect(),
+                GROUP_KINDS
+                    .iter()
+                    .enumerate()
+                    .map(|(k, (name, _))| {
+                        choice(*name, s.create_kind as usize == k, Act::Kind(k as u8))
+                    })
+                    .collect(),
             );
             col.text(GROUP_KINDS[(s.create_kind as usize).min(2)].1, FAINT);
             col.y += 4.0;
             let ready = !field_text(s, Field::Name).trim().is_empty();
-            col.row(ROW, vec![
-                button("Cancel", Act::Go(Tab::Groups)),
-                Kind::Button { label: "Create".into(), lit: Some(ready), act: Act::Submit, primary: true },
-            ]);
+            col.row(
+                ROW,
+                vec![
+                    button("Cancel", Act::Go(Tab::Groups)),
+                    Kind::Button {
+                        label: "Create".into(),
+                        lit: Some(ready),
+                        act: Act::Submit,
+                        primary: true,
+                    },
+                ],
+            );
         }
         Tab::Password(id) => {
-            let name = v.groups.iter().find(|g| g.id == id).map_or("this group".to_owned(), |g| g.name.clone());
+            let name = v
+                .groups
+                .iter()
+                .find(|g| g.id == id)
+                .map_or("this group".to_owned(), |g| g.name.clone());
             col.heading("PASSWORD NEEDED");
             col.text(format!("\"{name}\" has a password."), DIM);
-            col.put(15.0, input(s, Field::JoinPassword, "Type the password...", true));
+            col.put(
+                15.0,
+                input(s, Field::JoinPassword, "Type the password...", true),
+            );
             col.y += 4.0;
-            col.row(ROW, vec![
-                button("Cancel", Act::Go(Tab::Groups)),
-                Kind::Button { label: "Join".into(), lit: Some(true), act: Act::Submit, primary: true },
-            ]);
+            col.row(
+                ROW,
+                vec![
+                    button("Cancel", Act::Go(Tab::Groups)),
+                    Kind::Button {
+                        label: "Join".into(),
+                        lit: Some(true),
+                        act: Act::Submit,
+                        primary: true,
+                    },
+                ],
+            );
         }
         Tab::Audio => {
             col.heading("DEVICES");
-            col.put(ROW, button(format!("Microphone: {}", v.microphone.as_deref().unwrap_or("Default")), Act::Go(Tab::Microphones)));
-            col.put(ROW, button(format!("Speakers: {}", v.speakers.as_deref().unwrap_or("Default")), Act::Go(Tab::Speakers)));
+            col.put(
+                ROW,
+                button(
+                    format!(
+                        "Microphone: {}",
+                        v.microphone.as_deref().unwrap_or("Default")
+                    ),
+                    Act::Go(Tab::Microphones),
+                ),
+            );
+            col.put(
+                ROW,
+                button(
+                    format!("Speakers: {}", v.speakers.as_deref().unwrap_or("Default")),
+                    Act::Go(Tab::Speakers),
+                ),
+            );
             if let Some(p) = &v.problem {
                 col.text(p.clone(), BAD);
             }
             col.heading("VOLUME");
-            col.put(ROW, Kind::Slider { id: Slider::Volume, label: "Everyone".into(), value: v.volume, min: 0.0, max: 2.0, text: pct(v.volume), meter: None });
-            col.put(ROW, Kind::Slider { id: Slider::Gain, label: "Mic boost".into(), value: v.mic_gain, min: 0.0, max: 4.0, text: pct(v.mic_gain), meter: None });
+            col.put(
+                ROW,
+                Kind::Slider {
+                    id: Slider::Volume,
+                    label: "Everyone".into(),
+                    value: v.volume,
+                    min: 0.0,
+                    max: 2.0,
+                    text: pct(v.volume),
+                    meter: None,
+                },
+            );
+            col.put(
+                ROW,
+                Kind::Slider {
+                    id: Slider::Gain,
+                    label: "Mic boost".into(),
+                    value: v.mic_gain,
+                    min: 0.0,
+                    max: 4.0,
+                    text: pct(v.mic_gain),
+                    meter: None,
+                },
+            );
         }
         Tab::Talking => {
             col.heading("HOW YOU TALK");
-            col.row(ROW, vec![
-                choice(format!("Hold {}", v.talk_key), !v.voice_activation, Act::Do(Action::VoiceActivation(false))),
-                choice("Voice activation", v.voice_activation, Act::Do(Action::VoiceActivation(true))),
-            ]);
+            col.row(
+                ROW,
+                vec![
+                    choice(
+                        format!("Hold {}", v.talk_key),
+                        !v.voice_activation,
+                        Act::Do(Action::VoiceActivation(false)),
+                    ),
+                    choice(
+                        "Voice activation",
+                        v.voice_activation,
+                        Act::Do(Action::VoiceActivation(true)),
+                    ),
+                ],
+            );
             let meter = ((v.level_db + 60.0) / 60.0).clamp(0.0, 1.0);
-            col.put(ROW, Kind::Slider {
-                id: Slider::Threshold,
-                label: "Activation level".into(),
-                value: v.threshold_db,
-                min: -60.0,
-                max: 0.0,
-                text: format!("{} dB", v.threshold_db.round() as i32),
-                meter: Some(meter),
-            });
+            col.put(
+                ROW,
+                Kind::Slider {
+                    id: Slider::Threshold,
+                    label: "Activation level".into(),
+                    value: v.threshold_db,
+                    min: -60.0,
+                    max: 0.0,
+                    text: format!("{} dB", v.threshold_db.round() as i32),
+                    meter: Some(meter),
+                },
+            );
             col.text(
-                if v.voice_activation { "You talk when the green bar passes the marker." } else { "The bar shows your microphone's level." },
+                if v.voice_activation {
+                    "You talk when the green bar passes the marker."
+                } else {
+                    "The bar shows your microphone's level."
+                },
                 FAINT,
             );
-            col.put(ROW, Kind::Toggle { label: "RNNoise & echo filter".into(), on: v.rnnoise, act: Act::Do(Action::Rnnoise(!v.rnnoise)) });
-            col.put(ROW, Kind::Toggle { label: "Test microphone (hear yourself)".into(), on: v.testing, act: Act::Do(Action::Test(!v.testing)) });
+            col.put(
+                ROW,
+                Kind::Toggle {
+                    label: "RNNoise & echo filter".into(),
+                    on: v.rnnoise,
+                    act: Act::Do(Action::Rnnoise(!v.rnnoise)),
+                },
+            );
+            col.put(
+                ROW,
+                Kind::Toggle {
+                    label: "Test microphone (hear yourself)".into(),
+                    on: v.testing,
+                    act: Act::Do(Action::Test(!v.testing)),
+                },
+            );
             col.heading("KEYS");
-            col.text(format!("Talk: {}    Mute: {}    Voice off: {}    Menu: {}", v.talk_key, v.mute_key, v.off_key, v.menu_key), DIM);
-            col.text("Change them in Mod Menu > Complex Voice Chat > Change keys.", FAINT);
+            col.text(
+                format!(
+                    "Talk: {}    Mute: {}    Voice off: {}    Menu: {}",
+                    v.talk_key, v.mute_key, v.off_key, v.menu_key
+                ),
+                DIM,
+            );
+            col.text(
+                "Change them in Mod Menu > Complex Voice Chat > Change keys.",
+                FAINT,
+            );
         }
         Tab::Look => {
             let p = &v.prefs;
             col.heading("MENU THEME");
-            col.row(26.0, THEMES.iter().map(|t| Kind::Theme { name: (*t).to_owned(), lit: p.theme == *t }).collect());
-            col.put(ROW, Kind::Slider { id: Slider::Opacity, label: "Opacity".into(), value: p.opacity, min: 0.5, max: 1.0, text: pct(p.opacity), meter: None });
-            col.row(ROW - 2.0, SIZES.iter().enumerate().map(|(k, n)| choice(*n, p.size as usize == k, set("size", k))).collect());
-            col.put(ROW, Kind::Toggle { label: "Animations".into(), on: p.animations, act: set("animations", !p.animations) });
+            col.row(
+                26.0,
+                THEMES
+                    .iter()
+                    .map(|t| Kind::Theme {
+                        name: (*t).to_owned(),
+                        lit: p.theme == *t,
+                    })
+                    .collect(),
+            );
+            col.put(
+                ROW,
+                Kind::Slider {
+                    id: Slider::Opacity,
+                    label: "Opacity".into(),
+                    value: p.opacity,
+                    min: 0.5,
+                    max: 1.0,
+                    text: pct(p.opacity),
+                    meter: None,
+                },
+            );
+            col.row(
+                ROW - 2.0,
+                SIZES
+                    .iter()
+                    .enumerate()
+                    .map(|(k, n)| choice(*n, p.size as usize == k, set("size", k)))
+                    .collect(),
+            );
+            col.put(
+                ROW,
+                Kind::Toggle {
+                    label: "Animations".into(),
+                    on: p.animations,
+                    act: set("animations", !p.animations),
+                },
+            );
             col.heading("MIC ICON COLOUR");
             let n = v.swatches.len().max(1);
             col.row(
@@ -781,24 +1105,90 @@ fn widgets(s: &State, f: &Frame, scroll: f32) -> (Vec<Widget>, f32) {
                 v.swatches
                     .iter()
                     .take(n)
-                    .map(|(name, idle, talking)| Kind::Swatch { name: name.clone(), idle: idle.clone(), talking: talking.clone(), lit: *name == v.colour })
+                    .map(|(name, idle, talking)| Kind::Swatch {
+                        name: name.clone(),
+                        idle: idle.clone(),
+                        talking: talking.clone(),
+                        lit: *name == v.colour,
+                    })
                     .collect(),
             );
             col.heading("ON-SCREEN STATUS");
-            col.put(ROW, Kind::Toggle { label: "Show it".into(), on: p.show_hud, act: set("show_hud", !p.show_hud) });
-            col.row(ROW - 2.0, HUD_STYLES.iter().enumerate().map(|(k, n)| choice(*n, p.hud_style as usize == k, set("hud_style", k))).collect());
-            col.row(ROW - 2.0, HUD_CORNERS.iter().enumerate().map(|(k, n)| choice(*n, p.hud_corner as usize == k, set("hud_corner", k))).collect());
-            col.put(ROW, Kind::Slider { id: Slider::HudScale, label: "Size".into(), value: p.hud_scale, min: 1.0, max: 3.0, text: format!("{:.2}x", p.hud_scale), meter: None });
+            col.put(
+                ROW,
+                Kind::Toggle {
+                    label: "Show it".into(),
+                    on: p.show_hud,
+                    act: set("show_hud", !p.show_hud),
+                },
+            );
+            col.row(
+                ROW - 2.0,
+                HUD_STYLES
+                    .iter()
+                    .enumerate()
+                    .map(|(k, n)| choice(*n, p.hud_style as usize == k, set("hud_style", k)))
+                    .collect(),
+            );
+            col.row(
+                ROW - 2.0,
+                HUD_CORNERS
+                    .iter()
+                    .enumerate()
+                    .map(|(k, n)| choice(*n, p.hud_corner as usize == k, set("hud_corner", k)))
+                    .collect(),
+            );
+            col.put(
+                ROW,
+                Kind::Slider {
+                    id: Slider::HudScale,
+                    label: "Size".into(),
+                    value: p.hud_scale,
+                    min: 1.0,
+                    max: 3.0,
+                    text: format!("{:.2}x", p.hud_scale),
+                    meter: None,
+                },
+            );
             col.heading("CHAT");
-            col.put(ROW, Kind::Toggle { label: "Messages in chat (connected, mute...)".into(), on: p.announce, act: set("announce", !p.announce) });
+            col.put(
+                ROW,
+                Kind::Toggle {
+                    label: "Messages in chat (connected, mute...)".into(),
+                    on: p.announce,
+                    act: set("announce", !p.announce),
+                },
+            );
         }
         Tab::Microphones | Tab::Speakers => {
             let input = s.tab == Tab::Microphones;
-            let (chosen, list) = if input { (&v.microphone, &v.microphones) } else { (&v.speakers, &v.speaker_list) };
-            col.heading(if input { "CHOOSE A MICROPHONE" } else { "CHOOSE SPEAKERS" });
-            col.put(ROW, choice("Default (Windows' choice)", chosen.is_none(), Act::Pick(input, None)));
+            let (chosen, list) = if input {
+                (&v.microphone, &v.microphones)
+            } else {
+                (&v.speakers, &v.speaker_list)
+            };
+            col.heading(if input {
+                "CHOOSE A MICROPHONE"
+            } else {
+                "CHOOSE SPEAKERS"
+            });
+            col.put(
+                ROW,
+                choice(
+                    "Default (Windows' choice)",
+                    chosen.is_none(),
+                    Act::Pick(input, None),
+                ),
+            );
             for n in list {
-                col.put(ROW, choice(n.clone(), chosen.as_ref() == Some(n), Act::Pick(input, Some(n.clone()))));
+                col.put(
+                    ROW,
+                    choice(
+                        n.clone(),
+                        chosen.as_ref() == Some(n),
+                        Act::Pick(input, Some(n.clone())),
+                    ),
+                );
             }
             if list.is_empty() {
                 col.text("No devices found.", FAINT);
@@ -838,7 +1228,12 @@ fn rounded(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, c: Rgba) {
 
 fn framed(batch: &mut HudBatch, atlas: &HudAtlas, r: Rect, inner: Rgba, edge: Rgba) {
     rounded(batch, atlas, r, edge);
-    rounded(batch, atlas, [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0], inner);
+    rounded(
+        batch,
+        atlas,
+        [r[0] + 1.0, r[1] + 1.0, r[2] - 2.0, r[3] - 2.0],
+        inner,
+    );
 }
 
 fn disc(batch: &mut HudBatch, atlas: &HudAtlas, cx: f32, cy: f32, radius: f32, c: Rgba) {
@@ -852,8 +1247,23 @@ fn disc(batch: &mut HudBatch, atlas: &HudAtlas, cx: f32, cy: f32, radius: f32, c
     }
 }
 
-fn label(batch: &mut HudBatch, atlas: &HudAtlas, text: &str, x: f32, y: f32, c: Rgba, shadow: bool) {
-    batch.text_styled(atlas, &Text::literal(text), x.floor(), y.floor(), color(c), shadow);
+fn label(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    text: &str,
+    x: f32,
+    y: f32,
+    c: Rgba,
+    shadow: bool,
+) {
+    batch.text_styled(
+        atlas,
+        &Text::literal(text),
+        x.floor(),
+        y.floor(),
+        color(c),
+        shadow,
+    );
 }
 
 fn small(batch: &mut HudBatch, atlas: &HudAtlas, text: &str, x: f32, y: f32, c: Rgba) {
@@ -888,7 +1298,17 @@ fn centred(batch: &mut HudBatch, atlas: &HudAtlas, text: &str, r: Rect, c: Rgba)
 fn icon(batch: &mut HudBatch, atlas: &HudAtlas, runs: &Runs, x: f32, y: f32, scale: f32) {
     for &(rx, ry, len, argb) in runs {
         let [a, r, g, b] = argb.to_be_bytes();
-        fill(batch, atlas, [x + rx as f32 * scale, y + ry as f32 * scale, len as f32 * scale, scale], (r, g, b, a));
+        fill(
+            batch,
+            atlas,
+            [
+                x + rx as f32 * scale,
+                y + ry as f32 * scale,
+                len as f32 * scale,
+                scale,
+            ],
+            (r, g, b, a),
+        );
     }
 }
 
@@ -934,7 +1354,14 @@ struct Look {
     animations: bool,
 }
 
-fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget, cursor: (f32, f32), look: &Look) {
+fn draw_widget(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    s: &mut State,
+    w: &Widget,
+    cursor: (f32, f32),
+    look: &Look,
+) {
     let hover = inside(w.rect, cursor);
     let glow = {
         let g = s.glow.entry(w.id).or_insert(0.0);
@@ -948,7 +1375,12 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
     let accent = look.accent;
     let r = w.rect;
     match &w.kind {
-        Kind::Button { label: text, lit, primary, .. } => {
+        Kind::Button {
+            label: text,
+            lit,
+            primary,
+            ..
+        } => {
             let on = *lit == Some(true);
             let base = if *primary && on {
                 alpha(accent, 0.35)
@@ -961,13 +1393,40 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
             };
             let lift = -glow;
             let r = [r[0], r[1] + lift, r[2], r[3]];
-            framed(batch, atlas, r, mix(base, mix(base, WHITE, 0.25), glow), mix(EDGE, alpha(accent, 0.8), glow.max(if on { 0.5 } else { 0.0 })));
+            framed(
+                batch,
+                atlas,
+                r,
+                mix(base, mix(base, WHITE, 0.25), glow),
+                mix(
+                    EDGE,
+                    alpha(accent, 0.8),
+                    glow.max(if on { 0.5 } else { 0.0 }),
+                ),
+            );
             if on {
-                fill(batch, atlas, [r[0] + 4.0, r[1] + r[3] - 3.0, r[2] - 8.0, 1.0], accent);
+                fill(
+                    batch,
+                    atlas,
+                    [r[0] + 4.0, r[1] + r[3] - 3.0, r[2] - 8.0, 1.0],
+                    accent,
+                );
             }
-            centred(batch, atlas, text, r, if on || *primary { WHITE } else { mix(DIM, WHITE, 0.5 + glow * 0.5) });
+            centred(
+                batch,
+                atlas,
+                text,
+                r,
+                if on || *primary {
+                    WHITE
+                } else {
+                    mix(DIM, WHITE, 0.5 + glow * 0.5)
+                },
+            );
         }
-        Kind::Toggle { label: text, on, .. } => {
+        Kind::Toggle {
+            label: text, on, ..
+        } => {
             let k = {
                 let knob = s.knobs.entry(w.id).or_insert(if *on { 1.0 } else { 0.0 });
                 if look.animations {
@@ -977,12 +1436,36 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
                 }
                 *knob
             };
-            framed(batch, atlas, r, mix(BUTTON, BUTTON_HOVER, glow), mix(EDGE, alpha(accent, 0.6), glow));
+            framed(
+                batch,
+                atlas,
+                r,
+                mix(BUTTON, BUTTON_HOVER, glow),
+                mix(EDGE, alpha(accent, 0.6), glow),
+            );
             let room = r[2] - 40.0;
-            label(batch, atlas, &fit(atlas, text, room), r[0] + 6.0, r[1] + (r[3] - 8.0) / 2.0, mix(DIM, WHITE, k), true);
+            label(
+                batch,
+                atlas,
+                &fit(atlas, text, room),
+                r[0] + 6.0,
+                r[1] + (r[3] - 8.0) / 2.0,
+                mix(DIM, WHITE, k),
+                true,
+            );
             let track = [r[0] + r[2] - 28.0, r[1] + (r[3] - 10.0) / 2.0, 22.0, 10.0];
             if k > 0.0 {
-                rounded(batch, atlas, [track[0] - 2.0, track[1] - 2.0, track[2] + 4.0, track[3] + 4.0], alpha(accent, 0.2 * k));
+                rounded(
+                    batch,
+                    atlas,
+                    [
+                        track[0] - 2.0,
+                        track[1] - 2.0,
+                        track[2] + 4.0,
+                        track[3] + 4.0,
+                    ],
+                    alpha(accent, 0.2 * k),
+                );
             }
             rounded(batch, atlas, track, mix(TRACK_OFF, accent, k));
             // The knob squashes a little mid-slide.
@@ -992,7 +1475,15 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
             rounded(batch, atlas, [kx, track[1] + 2.0, kw, 8.0], SHADOW);
             rounded(batch, atlas, [kx, track[1] + 1.0, kw, 8.0], WHITE);
         }
-        Kind::Slider { id, label: text, value, min, max, text: shown, meter } => {
+        Kind::Slider {
+            id,
+            label: text,
+            value,
+            min,
+            max,
+            text: shown,
+            meter,
+        } => {
             let (track, caption) = if text.is_empty() {
                 (r, None)
             } else {
@@ -1000,7 +1491,15 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
                 ([r[0] + lw, r[1] + 4.0, r[2] - lw, r[3] - 8.0], Some(lw))
             };
             if let Some(lw) = caption {
-                label(batch, atlas, &fit(atlas, text, lw - 4.0), r[0], r[1] + (r[3] - 8.0) / 2.0, DIM, true);
+                label(
+                    batch,
+                    atlas,
+                    &fit(atlas, text, lw - 4.0),
+                    r[0],
+                    r[1] + (r[3] - 8.0) / 2.0,
+                    DIM,
+                    true,
+                );
             }
             let active = hover || s.dragging == Some(*id);
             rounded(batch, atlas, track, TRACK);
@@ -1008,16 +1507,41 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
             if let Some(m) = meter {
                 // The microphone's level, live; green past the activation level.
                 let c = if *m >= t { GOOD } else { alpha(GOOD, 0.45) };
-                fill(batch, atlas, [track[0] + 1.0, track[1] + 1.0, (track[2] - 2.0) * m, track[3] - 2.0], c);
+                fill(
+                    batch,
+                    atlas,
+                    [
+                        track[0] + 1.0,
+                        track[1] + 1.0,
+                        (track[2] - 2.0) * m,
+                        track[3] - 2.0,
+                    ],
+                    c,
+                );
             } else {
-                let inner = [track[0] + 1.0, track[1] + 1.0, (track[2] - 2.0) * t, track[3] - 2.0];
+                let inner = [
+                    track[0] + 1.0,
+                    track[1] + 1.0,
+                    (track[2] - 2.0) * t,
+                    track[3] - 2.0,
+                ];
                 fill(batch, atlas, inner, alpha(accent, 0.45 + 0.2 * glow));
             }
             let kx = track[0] + (track[2] - 4.0) * t;
             if active {
-                rounded(batch, atlas, [kx - 2.0, track[1] - 3.0, 8.0, track[3] + 6.0], alpha(accent, 0.3));
+                rounded(
+                    batch,
+                    atlas,
+                    [kx - 2.0, track[1] - 3.0, 8.0, track[3] + 6.0],
+                    alpha(accent, 0.3),
+                );
             }
-            fill(batch, atlas, [kx, track[1] - 1.0, 4.0, track[3] + 2.0], if active { WHITE } else { accent });
+            fill(
+                batch,
+                atlas,
+                [kx, track[1] - 1.0, 4.0, track[3] + 2.0],
+                if active { WHITE } else { accent },
+            );
             centred(batch, atlas, shown, track, WHITE);
         }
         Kind::Text { text, color: c } => {
@@ -1027,7 +1551,12 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
             fill(batch, atlas, [r[0], r[1] + 1.0, 2.0, 7.0], accent);
             small(batch, atlas, text, r[0] + 5.0, r[1] + 2.0, FAINT);
             let tw = atlas.font.width(text) * 0.75 + 10.0;
-            fill(batch, atlas, [r[0] + tw, r[1] + 5.0, (r[2] - tw).max(0.0), 1.0], alpha(WHITE, 0.06));
+            fill(
+                batch,
+                atlas,
+                [r[0] + tw, r[1] + 5.0, (r[2] - tw).max(0.0), 1.0],
+                alpha(WHITE, 0.06),
+            );
         }
         Kind::Player { row } => {
             if hover {
@@ -1037,40 +1566,100 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
                 // A green bar on the left, breathing while they talk.
                 let pulse = 0.6 + 0.4 * (look.clock * 7.0).sin().abs();
                 rounded(batch, atlas, r, alpha(GOOD, 0.08 * pulse));
-                fill(batch, atlas, [r[0], r[1] + 3.0, 2.0, r[3] - 6.0], alpha(GOOD, pulse));
+                fill(
+                    batch,
+                    atlas,
+                    [r[0], r[1] + 3.0, 2.0, r[3] - 6.0],
+                    alpha(GOOD, pulse),
+                );
             }
-            let dot = if row.talking { GOOD } else if row.status.is_empty() { FAINT } else { BAD };
+            let dot = if row.talking {
+                GOOD
+            } else if row.status.is_empty() {
+                FAINT
+            } else {
+                BAD
+            };
             if row.talking && !s.view.speaker_icon.is_empty() {
-                icon(batch, atlas, &s.view.speaker_icon.clone(), r[0] + 4.0, r[1] + r[3] / 2.0 - 5.0, 0.625);
+                icon(
+                    batch,
+                    atlas,
+                    &s.view.speaker_icon.clone(),
+                    r[0] + 4.0,
+                    r[1] + r[3] / 2.0 - 5.0,
+                    0.625,
+                );
             } else {
                 disc(batch, atlas, r[0] + 9.0, r[1] + r[3] / 2.0, 2.0, dot);
             }
             let room = r[2] * 0.45;
             let name_c = if row.talking { GOOD } else { WHITE };
             let has_sub = !row.status.is_empty() || row.group.is_some();
-            let ny = if has_sub { r[1] + 3.0 } else { r[1] + (r[3] - 8.0) / 2.0 };
-            label(batch, atlas, &fit(atlas, &row.name, room), r[0] + 17.0, ny, name_c, true);
+            let ny = if has_sub {
+                r[1] + 3.0
+            } else {
+                r[1] + (r[3] - 8.0) / 2.0
+            };
+            label(
+                batch,
+                atlas,
+                &fit(atlas, &row.name, room),
+                r[0] + 17.0,
+                ny,
+                name_c,
+                true,
+            );
             let sub = match (&row.group, row.status.is_empty()) {
                 (Some(g), true) => format!("in {g}"),
                 (Some(g), false) => format!("{} - in {g}", row.status),
                 (None, _) => row.status.clone(),
             };
             if !sub.is_empty() {
-                small(batch, atlas, &fit(atlas, &sub, room / 0.75), r[0] + 17.0, r[1] + 13.0, FAINT);
+                small(
+                    batch,
+                    atlas,
+                    &fit(atlas, &sub, room / 0.75),
+                    r[0] + 17.0,
+                    r[1] + 13.0,
+                    FAINT,
+                );
             }
         }
         Kind::Group { row, joined } => {
-            let base = if *joined { alpha(accent, 0.18) } else { mix(BUTTON, BUTTON_HOVER, glow) };
-            framed(batch, atlas, r, base, mix(EDGE, alpha(accent, 0.8), if *joined { 0.7 } else { glow }));
+            let base = if *joined {
+                alpha(accent, 0.18)
+            } else {
+                mix(BUTTON, BUTTON_HOVER, glow)
+            };
+            framed(
+                batch,
+                atlas,
+                r,
+                base,
+                mix(EDGE, alpha(accent, 0.8), if *joined { 0.7 } else { glow }),
+            );
             let gi = s.view.group_icon.clone();
             if !gi.is_empty() {
-                icon(batch, atlas, &gi, r[0] + 4.0, r[1] + (r[3] - 16.0) / 2.0, 1.0);
+                icon(
+                    batch,
+                    atlas,
+                    &gi,
+                    r[0] + 4.0,
+                    r[1] + (r[3] - 16.0) / 2.0,
+                    1.0,
+                );
             }
             let x = r[0] + 24.0;
             let name = fit(atlas, &row.name, r[2] - 110.0);
             label(batch, atlas, &name, x, r[1] + 4.0, WHITE, true);
             if row.locked {
-                lock(batch, atlas, x + atlas.font.width(&name) + 4.0, r[1] + 4.0, WARN);
+                lock(
+                    batch,
+                    atlas,
+                    x + atlas.font.width(&name) + 4.0,
+                    r[1] + 4.0,
+                    WARN,
+                );
             }
             let kind = GROUP_KINDS[(row.kind as usize).min(2)].0;
             let n = row.members.len();
@@ -1079,66 +1668,181 @@ fn draw_widget(batch: &mut HudBatch, atlas: &HudAtlas, s: &mut State, w: &Widget
             if talking > 0 {
                 sub.push_str(&format!(", {talking} talking"));
             }
-            small(batch, atlas, &sub, x, r[1] + 15.0, if talking > 0 { GOOD } else { FAINT });
-            let tag = if *joined { "JOINED" } else if row.locked { "JOIN (password)" } else { "JOIN" };
+            small(
+                batch,
+                atlas,
+                &sub,
+                x,
+                r[1] + 15.0,
+                if talking > 0 { GOOD } else { FAINT },
+            );
+            let tag = if *joined {
+                "JOINED"
+            } else if row.locked {
+                "JOIN (password)"
+            } else {
+                "JOIN"
+            };
             let tw = atlas.font.width(tag) * 0.75 + 10.0;
             let tr = [r[0] + r[2] - tw - 6.0, r[1] + (r[3] - 11.0) / 2.0, tw, 11.0];
-            framed(batch, atlas, tr, alpha(if *joined { GOOD } else { accent }, 0.15 + 0.2 * glow), alpha(if *joined { GOOD } else { accent }, 0.6));
+            framed(
+                batch,
+                atlas,
+                tr,
+                alpha(if *joined { GOOD } else { accent }, 0.15 + 0.2 * glow),
+                alpha(if *joined { GOOD } else { accent }, 0.6),
+            );
             small(batch, atlas, tag, tr[0] + 5.0, tr[1] + 3.0, WHITE);
         }
-        Kind::Input { text, placeholder, secret, focused, .. } => {
+        Kind::Input {
+            text,
+            placeholder,
+            secret,
+            focused,
+            ..
+        } => {
             let f = if *focused { 1.0 } else { glow * 0.5 };
             if *focused {
-                rounded(batch, atlas, [r[0] - 1.0, r[1] - 1.0, r[2] + 2.0, r[3] + 2.0], alpha(accent, 0.25));
+                rounded(
+                    batch,
+                    atlas,
+                    [r[0] - 1.0, r[1] - 1.0, r[2] + 2.0, r[3] + 2.0],
+                    alpha(accent, 0.25),
+                );
             }
             framed(batch, atlas, r, FIELD, mix(EDGE, accent, f));
-            let shown = if *secret { "*".repeat(text.chars().count()) } else { text.clone() };
+            let shown = if *secret {
+                "*".repeat(text.chars().count())
+            } else {
+                text.clone()
+            };
             let room = r[2] - 10.0;
             if shown.is_empty() && !*focused {
-                label(batch, atlas, &fit(atlas, placeholder, room), r[0] + 4.0, r[1] + (r[3] - 8.0) / 2.0, FAINT, false);
+                label(
+                    batch,
+                    atlas,
+                    &fit(atlas, placeholder, room),
+                    r[0] + 4.0,
+                    r[1] + (r[3] - 8.0) / 2.0,
+                    FAINT,
+                    false,
+                );
             } else {
                 let mut cut = shown.clone();
                 while atlas.font.width(&cut) > room && !cut.is_empty() {
                     cut.remove(0);
                 }
-                label(batch, atlas, &cut, r[0] + 4.0, r[1] + (r[3] - 8.0) / 2.0, WHITE, false);
+                label(
+                    batch,
+                    atlas,
+                    &cut,
+                    r[0] + 4.0,
+                    r[1] + (r[3] - 8.0) / 2.0,
+                    WHITE,
+                    false,
+                );
                 if *focused {
                     let caret = 0.5 + 0.5 * (look.clock * 6.0).cos();
                     let cx = r[0] + 5.0 + atlas.font.width(&cut);
-                    fill(batch, atlas, [cx, r[1] + 3.0, 1.0, r[3] - 6.0], alpha(accent, caret));
+                    fill(
+                        batch,
+                        atlas,
+                        [cx, r[1] + 3.0, 1.0, r[3] - 6.0],
+                        alpha(accent, caret),
+                    );
                 }
             }
         }
-        Kind::Swatch { name, idle, talking, lit } => {
-            framed(batch, atlas, r, if *lit { alpha(accent, 0.25) } else { mix(BUTTON, BUTTON_HOVER, glow) }, if *lit { accent } else { mix(EDGE, alpha(accent, 0.6), glow) });
+        Kind::Swatch {
+            name,
+            idle,
+            talking,
+            lit,
+        } => {
+            framed(
+                batch,
+                atlas,
+                r,
+                if *lit {
+                    alpha(accent, 0.25)
+                } else {
+                    mix(BUTTON, BUTTON_HOVER, glow)
+                },
+                if *lit {
+                    accent
+                } else {
+                    mix(EDGE, alpha(accent, 0.6), glow)
+                },
+            );
             let both = 34.0;
             let x = r[0] + (r[2] - both).max(0.0) / 2.0;
-            let bob = if hover && look.animations { (look.clock * 8.0).sin() * 1.0 } else { 0.0 };
+            let bob = if hover && look.animations {
+                (look.clock * 8.0).sin() * 1.0
+            } else {
+                0.0
+            };
             if r[2] >= both + 4.0 {
                 icon(batch, atlas, idle, x, r[1] + 2.0 + bob, 1.0);
                 icon(batch, atlas, talking, x + 18.0, r[1] + 2.0 - bob, 1.0);
             } else {
-                icon(batch, atlas, idle, r[0] + (r[2] - 16.0) / 2.0, r[1] + 2.0 + bob, 1.0);
+                icon(
+                    batch,
+                    atlas,
+                    idle,
+                    r[0] + (r[2] - 16.0) / 2.0,
+                    r[1] + 2.0 + bob,
+                    1.0,
+                );
             }
             let t = fit(atlas, &title_case(name), r[2] / 0.75 - 4.0);
             let tw = atlas.font.width(&t) * 0.75;
-            small(batch, atlas, &t, r[0] + (r[2] - tw) / 2.0, r[1] + 21.0, if *lit { WHITE } else { DIM });
+            small(
+                batch,
+                atlas,
+                &t,
+                r[0] + (r[2] - tw) / 2.0,
+                r[1] + 21.0,
+                if *lit { WHITE } else { DIM },
+            );
         }
         Kind::Theme { name, lit } => {
             let (a, panel) = theme(name, look.clock);
-            framed(batch, atlas, r, panel, if *lit { WHITE } else { mix(EDGE, a, glow) });
+            framed(
+                batch,
+                atlas,
+                r,
+                panel,
+                if *lit { WHITE } else { mix(EDGE, a, glow) },
+            );
             let dot = 4.0 + glow * 1.0 + if *lit { 1.0 } else { 0.0 };
             disc(batch, atlas, r[0] + r[2] / 2.0, r[1] + 9.0, dot, a);
             let t = fit(atlas, &title_case(name), r[2] / 0.75 - 4.0);
             let tw = atlas.font.width(&t) * 0.75;
-            small(batch, atlas, &t, r[0] + (r[2] - tw) / 2.0, r[1] + 17.0, if *lit { WHITE } else { DIM });
+            small(
+                batch,
+                atlas,
+                &t,
+                r[0] + (r[2] - tw) / 2.0,
+                r[1] + 17.0,
+                if *lit { WHITE } else { DIM },
+            );
         }
-        Kind::Tab { label: text, lit, .. } => {
+        Kind::Tab {
+            label: text, lit, ..
+        } => {
             if !*lit && glow > 0.0 {
                 rounded(batch, atlas, r, alpha(WHITE, 0.06 * glow));
             }
             let x = r[0] + 8.0 + glow * 2.0;
-            label(batch, atlas, &fit(atlas, text, r[2] - 12.0), x, r[1] + (r[3] - 8.0) / 2.0, if *lit { WHITE } else { mix(DIM, WHITE, glow) }, true);
+            label(
+                batch,
+                atlas,
+                &fit(atlas, text, r[2] - 12.0),
+                x,
+                r[1] + (r[3] - 8.0) / 2.0,
+                if *lit { WHITE } else { mix(DIM, WHITE, glow) },
+                true,
+            );
         }
     }
 }
@@ -1149,11 +1853,20 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
     with_state(|s| {
         let prefs = s.view.prefs.clone();
         let anim = prefs.animations;
-        let dt = s.drawn.map_or(0.0, |d| now.duration_since(d).as_secs_f32().min(0.1));
+        let dt = s
+            .drawn
+            .map_or(0.0, |d| now.duration_since(d).as_secs_f32().min(0.1));
         s.drawn = Some(now);
-        let clock = s.opened.map_or(0.0, |o| now.duration_since(o).as_secs_f32());
+        let clock = s
+            .opened
+            .map_or(0.0, |o| now.duration_since(o).as_secs_f32());
         let (accent, panel_c) = theme(&prefs.theme, clock);
-        let look = Look { accent, clock, dt, animations: anim };
+        let look = Look {
+            accent,
+            clock,
+            dt,
+            animations: anim,
+        };
         let f = frame(w, h, prefs.size);
         let st = s.scroll_target;
         if anim {
@@ -1170,15 +1883,31 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
         let side = sidebar(s, &f);
 
         let open = if anim { ease_out(clock / 0.22) } else { 1.0 };
-        fill(batch, atlas, [0.0, 0.0, w, h], (4, 6, 12, (140.0 * open) as u8));
+        fill(
+            batch,
+            atlas,
+            [0.0, 0.0, w, h],
+            (4, 6, 12, (140.0 * open) as u8),
+        );
         let p = f.panel;
         let start_panel = batch.vertices.len();
         for k in 1..=3 {
             let g = k as f32 * 2.0;
-            rounded(batch, atlas, [p[0] - g, p[1] - g + 3.0, p[2] + g * 2.0, p[3] + g * 2.0], (0, 0, 0, 24));
+            rounded(
+                batch,
+                atlas,
+                [p[0] - g, p[1] - g + 3.0, p[2] + g * 2.0, p[3] + g * 2.0],
+                (0, 0, 0, 24),
+            );
         }
         let pa = prefs.opacity.clamp(0.5, 1.0);
-        framed(batch, atlas, p, alpha(panel_c, pa), alpha(mix(EDGE, accent, 0.25), 1.0));
+        framed(
+            batch,
+            atlas,
+            p,
+            alpha(panel_c, pa),
+            alpha(mix(EDGE, accent, 0.25), 1.0),
+        );
         // The accent line along the top, a shine sweeping across it.
         let bar = [p[0] + 2.0, p[1] + 1.0, p[2] - 4.0, 2.0];
         fill(batch, atlas, bar, accent);
@@ -1189,23 +1918,53 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
                 let a = 1.0 - (k as f32 - 2.5).abs() / 3.0;
                 let x0 = (sx + k as f32 * 5.0).max(bar[0]);
                 let x1 = (sx + k as f32 * 5.0 + 5.0).min(bar[0] + bar[2]);
-                fill(batch, atlas, [x0, bar[1], x1 - x0, 2.0], alpha(WHITE, a * 0.55));
+                fill(
+                    batch,
+                    atlas,
+                    [x0, bar[1], x1 - x0, 2.0],
+                    alpha(WHITE, a * 0.55),
+                );
             }
         }
-        fill(batch, atlas, [p[0] + 1.0, p[1] + TOP, p[2] - 2.0, 1.0], EDGE);
+        fill(
+            batch,
+            atlas,
+            [p[0] + 1.0, p[1] + TOP, p[2] - 2.0, 1.0],
+            EDGE,
+        );
         // The sidebar's panel.
-        fill(batch, atlas, [p[0] + 1.0, p[1] + TOP + 1.0, SIDE - 2.0, p[3] - TOP - 2.0], (0, 0, 0, (70.0 * pa) as u8));
+        fill(
+            batch,
+            atlas,
+            [p[0] + 1.0, p[1] + TOP + 1.0, SIDE - 2.0, p[3] - TOP - 2.0],
+            (0, 0, 0, (70.0 * pa) as u8),
+        );
 
         // The header: the mic icon (breathing while talking), the title, the connection.
         let (ix, iy) = (p[0] + 7.0, p[1] + 7.0);
         if s.view.transmitting && anim {
             let b = 0.5 + 0.5 * (clock * 8.0).sin();
-            disc(batch, atlas, ix + 8.0, iy + 8.0, 9.0 + b * 2.0, alpha(GOOD, 0.15 + 0.1 * b));
+            disc(
+                batch,
+                atlas,
+                ix + 8.0,
+                iy + 8.0,
+                9.0 + b * 2.0,
+                alpha(GOOD, 0.15 + 0.1 * b),
+            );
         }
         if !s.view.icon.is_empty() {
             icon(batch, atlas, &s.view.icon.clone(), ix, iy, 1.0);
         }
-        label(batch, atlas, "Complex Voice Chat", ix + 21.0, p[1] + 7.0, WHITE, true);
+        label(
+            batch,
+            atlas,
+            "Complex Voice Chat",
+            ix + 21.0,
+            p[1] + 7.0,
+            WHITE,
+            true,
+        );
         let sub = match s.tab {
             Tab::Players => "Players",
             Tab::Groups => "Groups",
@@ -1221,16 +1980,55 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
         // The close button and the connection chip.
         let close = [p[0] + p[2] - 18.0, p[1] + 7.0, 13.0, 13.0];
         let ch = inside(close, cursor);
-        rounded(batch, atlas, close, if ch { alpha(BAD, 0.6) } else { BUTTON });
-        centred(batch, atlas, "x", [close[0], close[1] - 1.0, close[2], close[3]], WHITE);
+        rounded(
+            batch,
+            atlas,
+            close,
+            if ch { alpha(BAD, 0.6) } else { BUTTON },
+        );
+        centred(
+            batch,
+            atlas,
+            "x",
+            [close[0], close[1] - 1.0, close[2], close[3]],
+            WHITE,
+        );
         let chip = fit(atlas, &s.view.state, p[2] * 0.4);
         let cw = atlas.font.width(&chip) + 14.0;
         let cr = [close[0] - cw - 5.0, p[1] + 7.0, cw, 13.0];
         let good = s.view.state_good;
-        let pulse = if !good && anim { 0.6 + 0.4 * (clock * 4.0).sin().abs() } else { 1.0 };
-        rounded(batch, atlas, cr, if good { (92, 230, 138, 36) } else { (255, 206, 92, 30) });
-        disc(batch, atlas, cr[0] + 6.0, cr[1] + 6.5, 2.0, alpha(if good { GOOD } else { WARN }, pulse));
-        label(batch, atlas, &chip, cr[0] + 10.0, cr[1] + 3.0, if good { GOOD } else { WARN }, true);
+        let pulse = if !good && anim {
+            0.6 + 0.4 * (clock * 4.0).sin().abs()
+        } else {
+            1.0
+        };
+        rounded(
+            batch,
+            atlas,
+            cr,
+            if good {
+                (92, 230, 138, 36)
+            } else {
+                (255, 206, 92, 30)
+            },
+        );
+        disc(
+            batch,
+            atlas,
+            cr[0] + 6.0,
+            cr[1] + 6.5,
+            2.0,
+            alpha(if good { GOOD } else { WARN }, pulse),
+        );
+        label(
+            batch,
+            atlas,
+            &chip,
+            cr[0] + 10.0,
+            cr[1] + 3.0,
+            if good { GOOD } else { WARN },
+            true,
+        );
 
         // The sidebar: the highlight glides to the page picked.
         let home = s.tab.home();
@@ -1250,7 +2048,14 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
             draw_widget(batch, atlas, s, wd, cursor, &look);
         }
         let hint = format!("{} / Esc closes", s.view.menu_key);
-        small(batch, atlas, &fit(atlas, &hint, (f.side[2] - 4.0) / 0.75), f.side[0] + 2.0, f.side[1] + f.side[3] - 6.0, FAINT);
+        small(
+            batch,
+            atlas,
+            &fit(atlas, &hint, (f.side[2] - 4.0) / 0.75),
+            f.side[0] + 2.0,
+            f.side[1] + f.side[3] - 6.0,
+            FAINT,
+        );
 
         // The page, sliding in when it changes.
         let start_page = batch.vertices.len();
@@ -1262,26 +2067,59 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
             draw_widget(batch, atlas, s, wd, cursor, &look);
         }
         if anim {
-            let e = ease_out(s.page_at.map_or(1.0, |t| now.duration_since(t).as_secs_f32() / 0.2));
+            let e = ease_out(
+                s.page_at
+                    .map_or(1.0, |t| now.duration_since(t).as_secs_f32() / 0.2),
+            );
             shift_since(batch, start_page, (1.0 - e) * 14.0, 0.0);
             fade_since(batch, start_page, e);
         }
-        batch.clip_since(start_page, area[0] - 2.0, area[1] - 1.0, area[0] + area[2] + 2.0, area[1] + area[3]);
+        batch.clip_since(
+            start_page,
+            area[0] - 2.0,
+            area[1] - 1.0,
+            area[0] + area[2] + 2.0,
+            area[1] + area[3],
+        );
         if most > 0.0 {
             let bar_h = (area[3] * area[3] / content).max(12.0);
             let by = area[1] + (area[3] - bar_h) * (s.scroll / most);
-            rounded(batch, atlas, [area[0] + area[2] + 2.0, area[1], 2.0, area[3]], alpha(WHITE, 0.05));
-            rounded(batch, atlas, [area[0] + area[2] + 2.0, by, 2.0, bar_h], alpha(accent, 0.8));
+            rounded(
+                batch,
+                atlas,
+                [area[0] + area[2] + 2.0, area[1], 2.0, area[3]],
+                alpha(WHITE, 0.05),
+            );
+            rounded(
+                batch,
+                atlas,
+                [area[0] + area[2] + 2.0, by, 2.0, bar_h],
+                alpha(accent, 0.8),
+            );
         }
 
         // Ripples where the last clicks landed.
-        s.ripples.retain(|r| now.duration_since(r.at).as_secs_f32() < 0.45);
+        s.ripples
+            .retain(|r| now.duration_since(r.at).as_secs_f32() < 0.45);
         if anim {
             for r in &s.ripples {
                 let t = now.duration_since(r.at).as_secs_f32() / 0.45;
                 let rs = batch.vertices.len();
-                disc(batch, atlas, r.x, r.y, 3.0 + ease_out(t) * 50.0, alpha(WHITE, (1.0 - t) * 0.2));
-                batch.clip_since(rs, r.clip[0], r.clip[1], r.clip[0] + r.clip[2], r.clip[1] + r.clip[3]);
+                disc(
+                    batch,
+                    atlas,
+                    r.x,
+                    r.y,
+                    3.0 + ease_out(t) * 50.0,
+                    alpha(WHITE, (1.0 - t) * 0.2),
+                );
+                batch.clip_since(
+                    rs,
+                    r.clip[0],
+                    r.clip[1],
+                    r.clip[0] + r.clip[2],
+                    r.clip[1] + r.clip[3],
+                );
             }
         }
 
@@ -1289,7 +2127,13 @@ pub fn draw(batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32)) {
         if anim && clock < 0.35 {
             let t = (clock / 0.3).min(1.0);
             let grow = 0.9 + 0.1 * ease_back(t);
-            batch.scale_since(start_panel, p[0] + p[2] / 2.0, p[1] + p[3] / 2.0, grow, grow);
+            batch.scale_since(
+                start_panel,
+                p[0] + p[2] / 2.0,
+                p[1] + p[3] / 2.0,
+                grow,
+                grow,
+            );
             fade_since(batch, start_panel, ease_out(t * 1.3));
         }
     });
@@ -1339,7 +2183,16 @@ fn same_slot(a: &Action, b: &Action) -> bool {
 }
 
 fn slider_value(w: &Widget, x: f32) -> Option<(Slider, f32)> {
-    let Kind::Slider { id, label: text, min, max, .. } = &w.kind else { return None };
+    let Kind::Slider {
+        id,
+        label: text,
+        min,
+        max,
+        ..
+    } = &w.kind
+    else {
+        return None;
+    };
     let r = w.rect;
     let track = if text.is_empty() {
         r
@@ -1391,7 +2244,11 @@ fn submit(s: &mut State) {
                 return;
             }
             let pw = field_text(s, Field::Password).trim().to_owned();
-            s.actions.push(Action::CreateGroup { name, password: (!pw.is_empty()).then_some(pw), kind: s.create_kind });
+            s.actions.push(Action::CreateGroup {
+                name,
+                password: (!pw.is_empty()).then_some(pw),
+                kind: s.create_kind,
+            });
             go(s, Tab::Groups);
         }
         Tab::Password(id) => {
@@ -1411,7 +2268,9 @@ pub fn click(x: f32, y: f32, size: (f32, f32), drag: bool) {
         if drag {
             let Some(id) = s.dragging else { return };
             // The slider being dragged, wherever the pointer went.
-            if let Some(w) = ws.iter().find(|w| matches!(&w.kind, Kind::Slider { id: i, .. } if *i == id))
+            if let Some(w) = ws
+                .iter()
+                .find(|w| matches!(&w.kind, Kind::Slider { id: i, .. } if *i == id))
                 && let Some((id, value)) = slider_value(w, x)
             {
                 apply_slider(s, id, value);
@@ -1427,16 +2286,40 @@ pub fn click(x: f32, y: f32, size: (f32, f32), drag: bool) {
         let side = sidebar(s, &f);
         // Sliders and buttons sit on player rows: test them first.
         let mut order: Vec<&Widget> = side.iter().collect();
-        let content: Vec<&Widget> = if inside(f.content, (x, y)) { ws.iter().collect() } else { Vec::new() };
-        order.extend(content.iter().filter(|w| !matches!(w.kind, Kind::Player { .. })));
-        order.extend(content.iter().filter(|w| matches!(w.kind, Kind::Player { .. })));
+        let content: Vec<&Widget> = if inside(f.content, (x, y)) {
+            ws.iter().collect()
+        } else {
+            Vec::new()
+        };
+        order.extend(
+            content
+                .iter()
+                .filter(|w| !matches!(w.kind, Kind::Player { .. })),
+        );
+        order.extend(
+            content
+                .iter()
+                .filter(|w| matches!(w.kind, Kind::Player { .. })),
+        );
         let Some(w) = order.into_iter().find(|w| inside(w.rect, (x, y))).cloned() else {
             s.focus = None;
             return;
         };
-        if !matches!(w.kind, Kind::Slider { .. } | Kind::Text { .. } | Kind::Heading { .. } | Kind::Player { .. }) {
-            let clip = if inside(f.side, (x, y)) { f.side } else { w.rect };
-            s.ripples.push(Ripple { at: Instant::now(), x, y, clip });
+        if !matches!(
+            w.kind,
+            Kind::Slider { .. } | Kind::Text { .. } | Kind::Heading { .. } | Kind::Player { .. }
+        ) {
+            let clip = if inside(f.side, (x, y)) {
+                f.side
+            } else {
+                w.rect
+            };
+            s.ripples.push(Ripple {
+                at: Instant::now(),
+                x,
+                y,
+                clip,
+            });
         }
         if !matches!(w.kind, Kind::Input { .. }) {
             s.focus = None;
@@ -1479,7 +2362,9 @@ pub fn click(x: f32, y: f32, size: (f32, f32), drag: bool) {
                     Action::LeaveGroup => s.view.own_group = None,
                     _ => {}
                 }
-                s.actions.retain(|old| !same_slot(old, &a) || matches!(a, Action::Mute | Action::Disable));
+                s.actions.retain(|old| {
+                    !same_slot(old, &a) || matches!(a, Action::Mute | Action::Disable)
+                });
                 s.actions.push(a);
             }
             Act::Go(tab) => go(s, tab),
@@ -1562,8 +2447,15 @@ pub fn key(key: winit::keyboard::KeyCode) -> bool {
             }
             K::ArrowUp | K::ArrowDown => {
                 // Up and down move through the sidebar's pages.
-                let at = SIDEBAR.iter().position(|(t, _)| *t == s.tab.home()).unwrap_or(0);
-                let next = if key == K::ArrowUp { at.saturating_sub(1) } else { (at + 1).min(SIDEBAR.len() - 1) };
+                let at = SIDEBAR
+                    .iter()
+                    .position(|(t, _)| *t == s.tab.home())
+                    .unwrap_or(0);
+                let next = if key == K::ArrowUp {
+                    at.saturating_sub(1)
+                } else {
+                    (at + 1).min(SIDEBAR.len() - 1)
+                };
                 go(s, SIDEBAR[next].0);
                 true
             }
@@ -1606,7 +2498,10 @@ mod tests {
             let (ws, _) = widgets(s, &f, s.scroll);
             let mut all = sidebar(s, &f);
             all.extend(ws);
-            all.iter().find(|w| pick(&w.kind)).map(|w| (w.rect[0] + 3.0, w.rect[1] + 3.0)).expect("widget")
+            all.iter()
+                .find(|w| pick(&w.kind))
+                .map(|w| (w.rect[0] + 3.0, w.rect[1] + 3.0))
+                .expect("widget")
         })
     }
 
@@ -1627,22 +2522,39 @@ mod tests {
     fn menu_pages_groups_and_typing() {
         reset();
         open();
-        set_view(View { microphones: vec!["Mic A".into(), "Mic B".into()], ..View::default() });
+        set_view(View {
+            microphones: vec!["Mic A".into(), "Mic B".into()],
+            ..View::default()
+        });
         press(button_named("Audio"));
         press(button_named("Microphone:"));
         press(button_named("Mic B"));
         let actions = take_actions();
-        assert!(actions.contains(&Action::Microphone(Some("Mic B".into()))), "{actions:?}");
+        assert!(
+            actions.contains(&Action::Microphone(Some("Mic B".into()))),
+            "{actions:?}"
+        );
         assert!(with_state(|s| s.tab == Tab::Audio));
         press(button_named("Microphone:"));
-        assert!(key(winit::keyboard::KeyCode::Escape), "Escape goes back a page");
-        assert!(!key(winit::keyboard::KeyCode::Escape), "Escape on a sidebar page closes the menu");
+        assert!(
+            key(winit::keyboard::KeyCode::Escape),
+            "Escape goes back a page"
+        );
+        assert!(
+            !key(winit::keyboard::KeyCode::Escape),
+            "Escape on a sidebar page closes the menu"
+        );
 
         // Groups: a locked one asks for the password; Enter joins with it.
         set_view(View {
             connected: true,
             groups_enabled: true,
-            groups: vec![GroupRow { id: 42, name: "Base".into(), locked: true, ..GroupRow::default() }],
+            groups: vec![GroupRow {
+                id: 42,
+                name: "Base".into(),
+                locked: true,
+                ..GroupRow::default()
+            }],
             ..View::default()
         });
         press(button_named("Groups"));
@@ -1663,7 +2575,11 @@ mod tests {
         press(button_named("Create"));
         let actions = take_actions();
         assert!(
-            actions.contains(&Action::CreateGroup { name: "Friends".into(), password: Some("123".into()), kind: 2 }),
+            actions.contains(&Action::CreateGroup {
+                name: "Friends".into(),
+                password: Some("123".into()),
+                kind: 2
+            }),
             "{actions:?}"
         );
 
@@ -1672,8 +2588,13 @@ mod tests {
         press(|k| matches!(k, Kind::Theme { name, .. } if name == "red"));
         press(button_named("Large"));
         let actions = take_actions();
-        assert!(actions.contains(&Action::Set("theme", "red".into())), "{actions:?}");
-        assert!(with_state(|s| s.view.prefs.theme == "red" && s.view.prefs.size == 2));
+        assert!(
+            actions.contains(&Action::Set("theme", "red".into())),
+            "{actions:?}"
+        );
+        assert!(with_state(
+            |s| s.view.prefs.theme == "red" && s.view.prefs.size == 2
+        ));
     }
 
     #[test]

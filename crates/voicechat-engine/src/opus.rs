@@ -18,13 +18,31 @@ struct RawDecoder {
 }
 
 unsafe extern "C" {
-    fn opus_encoder_create(fs: i32, channels: c_int, application: c_int, error: *mut c_int) -> *mut RawEncoder;
+    fn opus_encoder_create(
+        fs: i32,
+        channels: c_int,
+        application: c_int,
+        error: *mut c_int,
+    ) -> *mut RawEncoder;
     fn opus_encoder_destroy(st: *mut RawEncoder);
-    fn opus_encode(st: *mut RawEncoder, pcm: *const i16, frame_size: c_int, data: *mut c_uchar, max: i32) -> i32;
+    fn opus_encode(
+        st: *mut RawEncoder,
+        pcm: *const i16,
+        frame_size: c_int,
+        data: *mut c_uchar,
+        max: i32,
+    ) -> i32;
     fn opus_encoder_ctl(st: *mut RawEncoder, request: c_int, ...) -> c_int;
     fn opus_decoder_create(fs: i32, channels: c_int, error: *mut c_int) -> *mut RawDecoder;
     fn opus_decoder_destroy(st: *mut RawDecoder);
-    fn opus_decode(st: *mut RawDecoder, data: *const c_uchar, len: i32, pcm: *mut i16, frame_size: c_int, fec: c_int) -> c_int;
+    fn opus_decode(
+        st: *mut RawDecoder,
+        data: *const c_uchar,
+        len: i32,
+        pcm: *mut i16,
+        frame_size: c_int,
+        fec: c_int,
+    ) -> c_int;
     fn opus_decoder_ctl(st: *mut RawDecoder, request: c_int, ...) -> c_int;
 }
 
@@ -50,7 +68,15 @@ impl Encoder {
             return None;
         }
         let mut out = vec![0u8; crate::proto::MAX_OPUS];
-        let n = unsafe { opus_encode(self.0, pcm.as_ptr(), FRAME as c_int, out.as_mut_ptr(), out.len() as i32) };
+        let n = unsafe {
+            opus_encode(
+                self.0,
+                pcm.as_ptr(),
+                FRAME as c_int,
+                out.as_mut_ptr(),
+                out.len() as i32,
+            )
+        };
         if n < 0 {
             return None;
         }
@@ -112,7 +138,10 @@ mod tests {
         let mut energy_out = 0.0;
         for f in 0..20 {
             let pcm: Vec<i16> = (0..FRAME)
-                .map(|i| (((f * FRAME + i) as f32 * 2.0 * std::f32::consts::PI * 440.0 / 48000.0).sin() * 8000.0) as i16)
+                .map(|i| {
+                    (((f * FRAME + i) as f32 * 2.0 * std::f32::consts::PI * 440.0 / 48000.0).sin()
+                        * 8000.0) as i16
+                })
                 .collect();
             let packet = enc.encode(&pcm).unwrap();
             assert!(!packet.is_empty() && packet.len() < 400);

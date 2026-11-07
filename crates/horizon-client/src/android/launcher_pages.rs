@@ -1852,7 +1852,9 @@ impl Launcher {
                 let rich_summary = if crate::catalog::source_only_mod(p) {
                     "Native .hnmod temporarily unsupported on Android; built-in mods are available."
                 } else {
-                    self.catalog.enriched_summaries.get(&p.id)
+                    self.catalog
+                        .enriched_summaries
+                        .get(&p.id)
                         .map_or(p.summary.as_str(), String::as_str)
                 };
                 let summary = ui.fit_text(Face::Regular, 12.5, rich_summary, text_max);
@@ -5301,10 +5303,7 @@ impl Launcher {
                     (
                         "SVC RNNoise & Echo Suppression",
                         "Post-AEC RNNoise neural denoiser, NLMS echo filter & smart speaker ducking",
-                        SettingControl::Toggle(
-                            c.svc_rnnoise,
-                            Action::ToggleExperimentalSvcRnnoise,
-                        ),
+                        SettingControl::Toggle(c.svc_rnnoise, Action::ToggleExperimentalSvcRnnoise),
                     ),
                 ];
 

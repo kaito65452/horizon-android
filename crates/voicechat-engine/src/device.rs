@@ -24,11 +24,7 @@ static HOOKS: Mutex<PlatformHooks> = Mutex::new(PlatformHooks {
 });
 
 /// Registers platform-specific microphone permission and lifecycle diagnostic hooks.
-pub fn set_platform_hooks(
-    ensure_permission: fn() -> bool,
-    on_mic_open: fn(),
-    on_mic_close: fn(),
-) {
+pub fn set_platform_hooks(ensure_permission: fn() -> bool, on_mic_open: fn(), on_mic_close: fn()) {
     if let Ok(mut h) = HOOKS.lock() {
         h.ensure_permission = Some(ensure_permission);
         h.on_mic_open = Some(on_mic_open);
@@ -45,7 +41,12 @@ pub struct OutResampler {
 }
 impl OutResampler {
     pub fn new(device_rate: u32) -> Self {
-        Self { step: 48_000.0 / device_rate.max(1) as f64, pos: 0.0, buf: VecDeque::new(), scratch: vec![0.0; CHUNK * 2] }
+        Self {
+            step: 48_000.0 / device_rate.max(1) as f64,
+            pos: 0.0,
+            buf: VecDeque::new(),
+            scratch: vec![0.0; CHUNK * 2],
+        }
     }
     pub fn fill(&mut self, mixer: &Mutex<Mixer>, out: &mut [f32], channels: usize) {
         let channels = channels.max(1);
@@ -56,7 +57,8 @@ impl OutResampler {
                 if let Ok(mut m) = mixer.try_lock() {
                     m.render(&mut self.scratch);
                 }
-                self.buf.extend(self.scratch.chunks(2).map(|c| [c[0], c[1]]));
+                self.buf
+                    .extend(self.scratch.chunks(2).map(|c| [c[0], c[1]]));
             }
             let i = self.pos as usize;
             let t = (self.pos - i as f64) as f32;
@@ -89,16 +91,25 @@ pub struct InResampler {
 }
 impl InResampler {
     pub fn new(device_rate: u32) -> Self {
-        Self { step: device_rate.max(1) as f64 / 48_000.0, pos: 0.0, buf: VecDeque::new(), frame: Vec::with_capacity(FRAME) }
+        Self {
+            step: device_rate.max(1) as f64 / 48_000.0,
+            pos: 0.0,
+            buf: VecDeque::new(),
+            frame: Vec::with_capacity(FRAME),
+        }
     }
     pub fn push(&mut self, mono: impl Iterator<Item = f32>, mut emit: impl FnMut(Vec<f32>)) {
         self.buf.extend(mono);
         while self.buf.len() >= self.pos as usize + 2 {
             let i = self.pos as usize;
             let t = (self.pos - i as f64) as f32;
-            self.frame.push(self.buf[i] + (self.buf[i + 1] - self.buf[i]) * t);
+            self.frame
+                .push(self.buf[i] + (self.buf[i + 1] - self.buf[i]) * t);
             if self.frame.len() == FRAME {
-                emit(std::mem::replace(&mut self.frame, Vec::with_capacity(FRAME)));
+                emit(std::mem::replace(
+                    &mut self.frame,
+                    Vec::with_capacity(FRAME),
+                ));
             }
             self.pos += self.step;
             let used = self.pos as usize;
@@ -185,14 +196,22 @@ pub fn output_names() -> Vec<String> {
 fn pick(name: Option<&str>, input: bool) -> Option<cpal::Device> {
     let host = cpal::default_host();
     if let Some(name) = name {
-        let found = if input { host.input_devices().ok() } else { host.output_devices().ok() }
-            .and_then(|mut all| all.find(|d| d.name().is_ok_and(|n| n == name)));
+        let found = if input {
+            host.input_devices().ok()
+        } else {
+            host.output_devices().ok()
+        }
+        .and_then(|mut all| all.find(|d| d.name().is_ok_and(|n| n == name)));
         if found.is_some() {
             return found;
         }
         log::warn!("Voice chat: {name} is gone; using the default device");
     }
-    if input { host.default_input_device() } else { host.default_output_device() }
+    if input {
+        host.default_input_device()
+    } else {
+        host.default_output_device()
+    }
 }
 
 fn open_output(mixer: Arc<Mutex<Mixer>>, name: Option<&str>) -> Result<cpal::Stream, String> {
@@ -268,24 +287,25 @@ pub fn run(
             let output = open_output(mixer, output_name.as_deref());
             let input = open_input(frames, input_name.as_deref());
             let mic_opened = input.is_ok();
-            if mic_opened
-                && let Some(on_open) = HOOKS.lock().ok().and_then(|h| h.on_mic_open)
-            {
+            if mic_opened && let Some(on_open) = HOOKS.lock().ok().and_then(|h| h.on_mic_open) {
                 on_open();
             }
-            let errors = DeviceErrors { speakers: output.as_ref().err().cloned(), microphone: input.as_ref().err().cloned() };
+            let errors = DeviceErrors {
+                speakers: output.as_ref().err().cloned(),
+                microphone: input.as_ref().err().cloned(),
+            };
             let _ = ready_tx.send(errors);
             let _ = stop.recv();
             drop(input);
-            if mic_opened
-                && let Some(on_close) = HOOKS.lock().ok().and_then(|h| h.on_mic_close)
-            {
+            if mic_opened && let Some(on_close) = HOOKS.lock().ok().and_then(|h| h.on_mic_close) {
                 on_close();
             }
             drop(output);
         })
         .ok();
-    ready_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or_default()
+    ready_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

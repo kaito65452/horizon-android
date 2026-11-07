@@ -80,23 +80,55 @@ impl Mixer {
             return;
         }
         let (channel, sender, data, sequence, place, distance) = match packet {
-            Voice::PlayerSound { channel, sender, data, sequence, distance, .. } => {
-                (channel, sender, data, sequence, Place::Entity(channel), distance)
-            }
-            Voice::GroupSound { channel, sender, data, sequence, .. } => {
-                (channel, sender, data, sequence, Place::Everywhere, 0.0)
-            }
-            Voice::LocationSound { channel, sender, location, data, sequence, distance, .. } => {
-                (channel, sender, data, sequence, Place::At(location), distance)
-            }
+            Voice::PlayerSound {
+                channel,
+                sender,
+                data,
+                sequence,
+                distance,
+                ..
+            } => (
+                channel,
+                sender,
+                data,
+                sequence,
+                Place::Entity(channel),
+                distance,
+            ),
+            Voice::GroupSound {
+                channel,
+                sender,
+                data,
+                sequence,
+                ..
+            } => (channel, sender, data, sequence, Place::Everywhere, 0.0),
+            Voice::LocationSound {
+                channel,
+                sender,
+                location,
+                data,
+                sequence,
+                distance,
+                ..
+            } => (
+                channel,
+                sender,
+                data,
+                sequence,
+                Place::At(location),
+                distance,
+            ),
             _ => return,
         };
         let now = Instant::now();
-        self.sources.retain(|_, s| now.duration_since(s.last_packet) < IDLE);
+        self.sources
+            .retain(|_, s| now.duration_since(s.last_packet) < IDLE);
         let source = match self.sources.entry(channel) {
             std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
             std::collections::hash_map::Entry::Vacant(e) => {
-                let Some(decoder) = Decoder::new() else { return };
+                let Some(decoder) = Decoder::new() else {
+                    return;
+                };
                 e.insert(Source {
                     decoder,
                     buffer: VecDeque::new(),
@@ -121,7 +153,9 @@ impl Mixer {
             if (1..=MAX_CONCEAL).contains(&gap) && !data.is_empty() {
                 for _ in 0..gap {
                     let pcm = source.decoder.decode(None);
-                    source.buffer.extend(pcm.iter().map(|&s| s as f32 / 32768.0));
+                    source
+                        .buffer
+                        .extend(pcm.iter().map(|&s| s as f32 / 32768.0));
                 }
             } else if gap > MAX_CONCEAL {
                 source.decoder.reset();
@@ -136,7 +170,9 @@ impl Mixer {
             return;
         }
         let pcm = source.decoder.decode(Some(&data));
-        source.buffer.extend(pcm.iter().map(|&s| s as f32 / 32768.0));
+        source
+            .buffer
+            .extend(pcm.iter().map(|&s| s as f32 / 32768.0));
         while source.buffer.len() > MAX_BUFFER {
             source.buffer.pop_front();
         }
@@ -144,7 +180,12 @@ impl Mixer {
 
     /// Who is audible right now (senders), for the HUD.
     pub fn talking(&self) -> Vec<u128> {
-        let mut v: Vec<u128> = self.sources.values().filter(|s| s.playing).map(|s| s.sender).collect();
+        let mut v: Vec<u128> = self
+            .sources
+            .values()
+            .filter(|s| s.playing)
+            .map(|s| s.sender)
+            .collect();
         v.sort_unstable();
         v.dedup();
         v
@@ -186,8 +227,17 @@ impl Mixer {
                     continue;
                 }
             }
-            let personal = self.player_volume.get(&source.sender).copied().unwrap_or(1.0);
-            let (l, r) = gains(source.place, source.distance, &self.listener, &self.positions);
+            let personal = self
+                .player_volume
+                .get(&source.sender)
+                .copied()
+                .unwrap_or(1.0);
+            let (l, r) = gains(
+                source.place,
+                source.distance,
+                &self.listener,
+                &self.positions,
+            );
             let (l, r) = (l * self.volume * personal, r * self.volume * personal);
             for i in 0..frames {
                 let Some(s) = source.buffer.pop_front() else {
@@ -201,7 +251,9 @@ impl Mixer {
         crate::mic_filter::push_speaker_reference(out);
         let local = self.volume * 0.9;
         for i in 0..frames {
-            let Some(s) = self.local.pop_front() else { break };
+            let Some(s) = self.local.pop_front() else {
+                break;
+            };
             out[2 * i] += s * local;
             out[2 * i + 1] += s * local;
         }
@@ -213,7 +265,12 @@ impl Mixer {
 }
 
 /// Left and right gain for a voice at `place`.
-pub fn gains(place: Place, max_distance: f32, listener: &Listener, positions: &HashMap<u128, [f64; 3]>) -> (f32, f32) {
+pub fn gains(
+    place: Place,
+    max_distance: f32,
+    listener: &Listener,
+    positions: &HashMap<u128, [f64; 3]>,
+) -> (f32, f32) {
     let at = match place {
         Place::Everywhere => return (0.75, 0.75),
         Place::At(p) => p,
@@ -223,9 +280,17 @@ pub fn gains(place: Place, max_distance: f32, listener: &Listener, positions: &H
             None => return (0.5, 0.5),
         },
     };
-    let d = [at[0] - listener.position[0], at[1] - listener.position[1], at[2] - listener.position[2]];
+    let d = [
+        at[0] - listener.position[0],
+        at[1] - listener.position[1],
+        at[2] - listener.position[2],
+    ];
     let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() as f32;
-    let max = if max_distance > 0.0 { max_distance } else { 48.0 };
+    let max = if max_distance > 0.0 {
+        max_distance
+    } else {
+        48.0
+    };
     let volume = (1.0 - dist / max).clamp(0.0, 1.0);
     if volume == 0.0 {
         return (0.0, 0.0);
@@ -252,12 +317,17 @@ mod tests {
     use crate::opus::Encoder;
 
     fn tone(frame: usize) -> Vec<i16> {
-        (0..FRAME).map(|i| (((frame * FRAME + i) as f32 * 0.06).sin() * 9000.0) as i16).collect()
+        (0..FRAME)
+            .map(|i| (((frame * FRAME + i) as f32 * 0.06).sin() * 9000.0) as i16)
+            .collect()
     }
 
     #[test]
     fn panning_follows_the_listener() {
-        let listener = Listener { position: [0.0; 3], yaw: 0.0 };
+        let listener = Listener {
+            position: [0.0; 3],
+            yaw: 0.0,
+        };
         let positions = HashMap::new();
         // Facing south (+Z): west (-X) is on the right.
         let (l, r) = gains(Place::At([-5.0, 0.0, 0.0]), 48.0, &listener, &positions);
@@ -267,10 +337,16 @@ mod tests {
         let (l, r) = gains(Place::At([0.0, 0.0, 5.0]), 48.0, &listener, &positions);
         assert!((l - r).abs() < 1e-4);
         // Turned to face west (yaw 90): west is ahead.
-        let west = Listener { position: [0.0; 3], yaw: 90.0 };
+        let west = Listener {
+            position: [0.0; 3],
+            yaw: 90.0,
+        };
         let (l, r) = gains(Place::At([-5.0, 0.0, 0.0]), 48.0, &west, &positions);
         assert!((l - r).abs() < 1e-3);
-        assert_eq!(gains(Place::At([100.0, 0.0, 0.0]), 48.0, &listener, &positions), (0.0, 0.0));
+        assert_eq!(
+            gains(Place::At([100.0, 0.0, 0.0]), 48.0, &listener, &positions),
+            (0.0, 0.0)
+        );
         let near = gains(Place::At([0.0, 0.0, 2.0]), 48.0, &listener, &positions).0;
         let far = gains(Place::At([0.0, 0.0, 30.0]), 48.0, &listener, &positions).0;
         assert!(near > far);
@@ -282,7 +358,13 @@ mod tests {
         let mut mixer = Mixer::default();
         mixer.positions.insert(7, [0.0, 0.0, 3.0]);
         let packet = |data: Vec<u8>, sequence| Voice::PlayerSound {
-            channel: 7, sender: 7, data, sequence, distance: 48.0, whispering: false, category: None,
+            channel: 7,
+            sender: 7,
+            data,
+            sequence,
+            distance: 48.0,
+            whispering: false,
+            category: None,
         };
         mixer.push(packet(enc.encode(&tone(0)).unwrap(), 0));
         mixer.push(packet(enc.encode(&tone(1)).unwrap(), 1));
@@ -319,8 +401,17 @@ mod tests {
     #[test]
     fn deafened_drops_everything() {
         let mut enc = Encoder::new(2048).unwrap();
-        let mut mixer = Mixer { deafened: true, ..Default::default() };
-        mixer.push(Voice::GroupSound { channel: 1, sender: 1, data: enc.encode(&tone(0)).unwrap(), sequence: 0, category: None });
+        let mut mixer = Mixer {
+            deafened: true,
+            ..Default::default()
+        };
+        mixer.push(Voice::GroupSound {
+            channel: 1,
+            sender: 1,
+            data: enc.encode(&tone(0)).unwrap(),
+            sequence: 0,
+            category: None,
+        });
         assert!(mixer.sources.is_empty());
     }
 }

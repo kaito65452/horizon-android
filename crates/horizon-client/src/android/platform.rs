@@ -997,7 +997,10 @@ pub fn on_voice_mic_close() {
             .unwrap_or_else(|e| e.into_inner());
         let released_count = effects.len();
         for effect in effects.drain(..) {
-            if env.call_method(effect.as_obj(), "release", "()V", &[]).is_err() {
+            if env
+                .call_method(effect.as_obj(), "release", "()V", &[])
+                .is_err()
+            {
                 let _ = env.exception_clear();
             }
         }

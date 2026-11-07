@@ -263,7 +263,10 @@ pub fn devices(refresh: bool) -> (Vec<String>, Vec<String>) {
     static LISTS: Mutex<Option<(Vec<String>, Vec<String>)>> = Mutex::new(None);
     let mut guard = LISTS.lock().unwrap_or_else(|e| e.into_inner());
     if refresh || guard.is_none() {
-        *guard = Some((voicechat_engine::microphones(), voicechat_engine::speakers()));
+        *guard = Some((
+            voicechat_engine::microphones(),
+            voicechat_engine::speakers(),
+        ));
     }
     guard.clone().unwrap_or_default()
 }
@@ -522,11 +525,7 @@ pub(super) fn sync_menu(game: &mut crate::game::Game<'_>) {
                 .map(|(id, n)| {
                     let me = *id == st.own;
                     (
-                        if me {
-                            format!("{n} (you)")
-                        } else {
-                            n.clone()
-                        },
+                        if me { format!("{n} (you)") } else { n.clone() },
                         if me {
                             st.transmitting
                         } else {
