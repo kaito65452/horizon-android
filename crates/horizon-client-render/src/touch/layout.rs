@@ -493,9 +493,6 @@ pub struct Settings {
     pub button_visibility: [u8; 14],
     pub horizontal_margin: f32,
     pub vertical_margin: f32,
-    pub button_visibility: [u8; 14],
-    pub horizontal_margin: f32,
-    pub vertical_margin: f32,
     #[serde(default = "default_profile_name")]
     pub active_control_layout: String,
     #[serde(default = "default_profile_name")]
