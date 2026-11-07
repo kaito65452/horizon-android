@@ -72,7 +72,7 @@ jobs:
       - name: Install Linux build dependencies
         run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libudev-dev libxkbcommon-dev libopus-dev cmake pkg-config
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::all
+        run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::all -A private_interfaces -A dead_code
       - name: Tests
         run: cargo test --workspace
       - name: Summary

@@ -9,7 +9,7 @@
 //! sends them while connected and talking.
 use crate::device;
 use crate::mixer::{Listener, Mixer};
-use crate::opus::{Encoder, FRAME};
+use crate::opus::Encoder;
 use crate::proto::{self, Cipher, Group, GroupKind, PlayerState, Secret, Voice, channel};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket};

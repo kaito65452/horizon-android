@@ -202,7 +202,9 @@ impl Custom {
             Expr::Name(name, component) => {
                 let v = match name.as_str() {
                     "pi" => Some(Val::scalar(std::f64::consts::PI)),
-                    "true" | "isRightHanded" | "is_on_ground" | "hasSkylight" => Some(Val::scalar(1.0)),
+                    "true" | "isRightHanded" | "is_on_ground" | "hasSkylight" => {
+                        Some(Val::scalar(1.0))
+                    }
                     "false" | "isNether" | "hasCeiling" => Some(Val::scalar(0.0)),
                     "bedrockLevel" => Some(Val::scalar(-64.0)),
                     "heightLimit" | "logicalHeightLimit" => Some(Val::scalar(384.0)),

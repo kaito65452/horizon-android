@@ -719,7 +719,7 @@ impl Voice {
                 secret: r.array()?,
             },
             6 => {
-                if r.rest.len() >= 16 {
+                if r.remaining() >= 16 {
                     Voice::AuthenticateAckNonce(r.array()?)
                 } else {
                     Voice::AuthenticateAck
@@ -731,7 +731,7 @@ impl Voice {
             },
             8 => Voice::KeepAlive,
             9 => {
-                if r.rest.len() >= 16 {
+                if r.remaining() >= 16 {
                     Voice::ConnectionCheckNonce(r.array()?)
                 } else {
                     Voice::ConnectionCheck
