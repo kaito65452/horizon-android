@@ -60,6 +60,7 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: 'line-tables-only'
       CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+      HORIZON_WRITE_DOCS: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -74,9 +75,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --exclude horizon-android --lib --bins --tests -- -D warnings -A clippy::all -A private_interfaces -A dead_code
       - name: Tests
-        run: |
-          cargo test -p voicechat_engine -p horizon-client --lib --bins --tests
-          cargo test --workspace --exclude horizon-android --lib --bins --tests
+        run: cargo test --workspace --exclude horizon-android --lib --bins --tests
       - name: Summary
         if: always()
         run: |
