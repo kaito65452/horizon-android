@@ -17,13 +17,16 @@ use std::sync::{Mutex, OnceLock};
 
 /// 10 ms subframe size required by `nnnoiseless::DenoiseState` at 48 kHz.
 pub const RNNOISE_SUBFRAME: usize = 480;
-/// Number of 20 ms frames to hold voice activation open after clean speech stops (15 * 20 ms = 300 ms).
-pub const HANGOVER_FRAMES: u32 = 15;
+/// Number of 20 ms frames to hold voice activation open after speech stops (32 * 20 ms = 640 ms).
+pub const HANGOVER_FRAMES: u32 = 32;
+/// Sustain hysteresis (in dB) below `threshold_db` while `hangover_left > 0` so trailing words
+/// and unstressed syllables never cut off mid-sentence.
+pub const SUSTAIN_HYSTERESIS_DB: f32 = 6.0;
 /// Extra VAD threshold required (in dB) while remote voices are playing from the speakers.
 pub const DUCKING_THRESHOLD_BOOST_DB: f32 = 16.0;
 /// Attenuation factor (-28 dB) applied to the microphone while remote voices dominate.
 pub const DUCKING_ATTENUATION: f32 = 0.04;
-/// Attenuation factor (-20 dB) applied to non-speech game audio bleed when the player is not speaking.
+/// Attenuation factor (-20 dB) applied to non-speech game audio bleed when the player is silent.
 pub const GAME_BLEED_ATTENUATION: f32 = 0.10;
 /// Number of 10 ms envelope history taps (40 * 10 ms = 400 ms delay coverage).
 pub const ENVELOPE_TAPS: usize = 40;
@@ -302,6 +305,11 @@ impl EnvelopeEchoCanceler {
     }
 }
 
+/// Lowers a threshold by the sustain hysteresis while a sentence is in progress.
+fn sustain_db_adjust(threshold_db: f32, sustain_db: f32) -> f32 {
+    threshold_db - sustain_db
+}
+
 /// Output of conditioning a single 20 ms (960-sample) 48 kHz microphone frame.
 #[derive(Clone, Debug)]
 pub struct FilterOutput {
@@ -480,7 +488,10 @@ impl MicFilter {
         } else {
             boosted_raw_rms > (expected_game_bleed * 1.8).max(0.022)
         };
-        let music_ducked = !voice_ducked && game_playing && !is_clear_speech;
+        // While the gate is held open after speech, never duck for game bleed: VAD dips between
+        // syllables would otherwise chop the sentence after two or three words.
+        let in_speech = self.hangover_left > 0;
+        let music_ducked = !voice_ducked && game_playing && !is_clear_speech && !in_speech;
         if music_ducked {
             for s in &mut working {
                 *s *= GAME_BLEED_ATTENUATION;
@@ -512,17 +523,27 @@ impl MicFilter {
         } else {
             -100.0
         };
-        let effective_threshold = if remote_talking {
-            (threshold_db + DUCKING_THRESHOLD_BOOST_DB)
-                .max(voice_echo_floor_db)
-                .min(-14.0)
-        } else if game_playing && !is_clear_speech {
-            (threshold_db + 10.0).min(-22.0)
+        let sustain_db = if in_speech {
+            SUSTAIN_HYSTERESIS_DB
         } else {
-            threshold_db
+            0.0
         };
+        let effective_threshold = sustain_db_adjust(
+            if remote_talking {
+                (threshold_db + DUCKING_THRESHOLD_BOOST_DB)
+                    .max(voice_echo_floor_db)
+                    .min(-14.0)
+            } else if game_playing && !is_clear_speech {
+                (threshold_db + 10.0).min(-22.0)
+            } else {
+                threshold_db
+            },
+            sustain_db,
+        );
         let min_vad = if !rnnoise_enabled {
             0.0
+        } else if in_speech {
+            0.12
         } else if remote_talking {
             0.78
         } else if game_playing {
