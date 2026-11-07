@@ -202,7 +202,10 @@ mod native_entities;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
+#[cfg(feature = "svc_legacy")]
 mod voice_ui;
+#[cfg(not(feature = "svc_legacy"))]
+pub(crate) mod voicechat;
 #[cfg(target_os = "android")]
 use android_bundled::{
     official_minimap, official_recipes, official_recipes_glue, official_zoom, smartf3,
@@ -2274,6 +2277,7 @@ struct Game<'a> {
     pause: bool,
     debug: bool,
     screen: Screen,
+    #[cfg(feature = "svc_legacy")]
     pub voice: horizon_client::voice::VoiceChatClient,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
@@ -8420,11 +8424,15 @@ impl Game<'_> {
             }
             Screen::Chat => self.draw_chat_screen(&mut batch),
             Screen::Mod => self.draw_mod_screen(&mut batch),
+            #[cfg(feature = "svc_legacy")]
             Screen::VoiceChat => self.draw_voice_chat_screen(&mut batch),
+            #[cfg(not(feature = "svc_legacy"))]
+            Screen::VoiceChat => {}
             Screen::Playing | Screen::Options | Screen::Win => {}
         }
         self.fire_screen_render_post(&mut batch);
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_saving_indicator(b));
+        #[cfg(feature = "svc_legacy")]
         self.draw_voice_hud_indicator(&mut batch);
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| self.draw_toasts(b, !show_hud));
         horizon_client::hud::inset_overlay(&mut batch, margins, |b| {
@@ -15804,17 +15812,21 @@ impl Game<'_> {
                 let all = drop_whole_stack(self.modifiers);
                 self.drop_held(all);
             }
+            #[cfg(feature = "svc_legacy")]
             KeyCode::KeyV if self.screen == Screen::VoiceChat => {
                 self.screen = Screen::Playing;
                 self.capture(true);
             }
+            #[cfg(feature = "svc_legacy")]
             KeyCode::KeyV if self.screen == Screen::Playing => {
                 self.screen = Screen::VoiceChat;
                 self.capture(false);
             }
+            #[cfg(feature = "svc_legacy")]
             KeyCode::KeyM if self.screen == Screen::Playing => {
                 self.voice_toggle_mute();
             }
+            #[cfg(feature = "svc_legacy")]
             KeyCode::KeyN if self.screen == Screen::Playing => {
                 self.voice_toggle_disable();
             }
@@ -17700,6 +17712,7 @@ impl Game<'_> {
                         Screen::DebugOptions if button == MouseButton::Left => {
                             self.debug_options_release()
                         }
+                        #[cfg(feature = "svc_legacy")]
                         Screen::VoiceChat if pressed && button == MouseButton::Left => {
                             self.voice_chat_click();
                         }
@@ -18008,6 +18021,7 @@ impl Game<'_> {
                     };
                     self.mod_key(key, event.state == ElementState::Pressed, event.repeat);
                     self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
+                    #[cfg(feature = "svc_legacy")]
                     if key == KeyCode::CapsLock {
                         self.voice_ptt(event.state == ElementState::Pressed);
                     }
@@ -18579,6 +18593,7 @@ impl<'a> Game<'a> {
             pause: false,
             debug: false,
             screen: Screen::Playing,
+            #[cfg(feature = "svc_legacy")]
             voice: horizon_client::voice::VoiceChatClient::new(
                 &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             ),

@@ -2909,7 +2909,10 @@ impl Game<'_> {
                 self.remote_native_net(&p.data);
             }
             C::CustomPayload(p) if p.channel.starts_with("voicechat:") => {
+                #[cfg(feature = "svc_legacy")]
                 self.remote_voicechat_payload(&p.channel, &p.data);
+                #[cfg(not(feature = "svc_legacy"))]
+                super::voicechat::push_payload(p.channel.clone(), p.data.clone());
             }
             // PingDebugMonitor.onPongReceived.
             C::PongResponse(p) => {
@@ -2959,6 +2962,7 @@ impl Game<'_> {
                 }
                 self.send(S::ClientInformation(info));
                 self.remote_chat_login();
+                #[cfg(feature = "svc_legacy")]
                 self.initiate_voice_handshake();
             }
             C::Respawn(p) => {
@@ -5141,6 +5145,7 @@ impl Game<'_> {
 
     /// Resolves real player Gamertag and custom skin texture for Voice Chat UI.
     /// Handles Offline-Mode servers and SkinsRestorer via UUID and name fallback.
+    #[cfg(feature = "svc_legacy")]
     pub(crate) fn voice_player_name_and_skin(
         &mut self,
         uuid_u128: u128,
@@ -5529,6 +5534,7 @@ impl Game<'_> {
         self.native_net.to_server = 0;
         self.native_tick();
         self.tick_chat_session();
+        #[cfg(feature = "svc_legacy")]
         self.tick_voice_chat();
         // Minecraft.tick sends this even when the player cannot tick yet,
         // including while waiting for chunks. Keep it outside early returns.
@@ -9244,6 +9250,7 @@ impl Game<'_> {
         }))
     }
 
+    #[cfg(feature = "svc_legacy")]
     pub(super) fn remote_voicechat_payload(&mut self, channel: &str, data: &[u8]) {
         match self.voice.handle_custom_payload(channel, data) {
             Ok(Some((resp_channel, resp_data))) => {
@@ -9261,6 +9268,7 @@ impl Game<'_> {
         }
     }
 
+    #[cfg(feature = "svc_legacy")]
     pub(super) fn initiate_voice_handshake(&mut self) {
         if let Some(r) = self.remote.as_ref() {
             let addr = &r.session.address;
@@ -9273,6 +9281,7 @@ impl Game<'_> {
         ));
     }
 
+    #[cfg(feature = "svc_legacy")]
     pub(super) fn tick_voice_chat(&mut self) {
         if self.server_packs.is_busy() || self.pack_reload.is_some() {
             self.voice.delay_handshake_timer();

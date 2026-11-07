@@ -915,6 +915,10 @@ fn receive_brand(payload: &cfg::CustomPayload, send: &Sender<Event>) {
         let _ = send.send(Event::QuietCommands);
     } else if payload.channel == horizon_protocol::mod_net::CHANNEL {
         let _ = send.send(Event::ModNet);
+    } else if payload.channel.starts_with("voicechat:") {
+        let _ = send.send(Event::Packet(Box::new(play::Clientbound::CustomPayload(
+            payload.clone(),
+        ))));
     }
 }
 

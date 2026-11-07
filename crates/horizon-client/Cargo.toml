@@ -21,6 +21,7 @@ horizon-threads = { path = "../horizon-threads" }
 horizon-hdr = { path = "../horizon-hdr" }
 horizon-world = { path = "../horizon-world" }
 horizon-protocol = { path = "../horizon-protocol" }
+voicechat_engine = { path = "../voicechat-engine" }
 aes-gcm = "0.10"
 getrandom = "0.3"
 nnnoiseless = "0.5"
@@ -128,6 +129,8 @@ rng-trace = ["horizon-core/rng-trace"]
 windows-mimalloc = []
 # Opt-in Windows heap experiment; see docs/windows-allocators.md.
 windows-segment-heap = []
+# Legacy Simple Voice Chat implementation (`src/voice/`) kept for A/B comparison.
+svc_legacy = []
 
 # Its own name, not `probe`: Cargo copies every crate's examples into one target/<profile>/examples.
 [[example]]
