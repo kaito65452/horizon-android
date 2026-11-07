@@ -122,7 +122,6 @@ fn default_active_control_layout() -> String {
 fn default_true() -> bool {
     true
 }
-}
 
 pub use horizon_client::android_gamepad::InputMode as InputHost;
 
