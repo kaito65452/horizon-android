@@ -94,8 +94,8 @@ impl Settings {
         };
         let name = |k: &str| get(k).filter(|v| !v.is_empty());
         Self {
-            voice_activation: flag("voice_activation", false),
-            volume: num("volume", 1.0, 0.0, 2.0),
+            voice_activation: flag("voice_activation", cfg!(target_os = "android")),
+            volume: num("volume", 2.0, 0.0, 2.0),
             mic_gain: num("mic_gain", 1.0, 0.0, 4.0),
             threshold_db: num("threshold_db", -45.0, -60.0, 0.0),
             microphone: name("microphone"),
@@ -272,6 +272,35 @@ struct RuntimeState {
     /// The last problem said in chat.
     told: Option<String>,
     told_connected: bool,
+    /// Touch HUD button rectangles `[x, y, w, h]` in GUI-scaled coordinates: `[menu, mute, ptt]`.
+    touch_buttons: [Option<[f32; 4]>; 3],
+    /// Active touch ID holding the on-screen PTT button.
+    ptt_touch_id: Option<u64>,
+}
+
+fn ensure_platform_hooks() {
+    #[cfg(target_os = "android")]
+    {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            voicechat_engine::set_platform_hooks(
+                crate::platform::ensure_microphone_permission,
+                crate::platform::on_voice_mic_open,
+                crate::platform::on_voice_mic_close,
+            );
+        });
+    }
+}
+
+fn check_mic_permission() -> bool {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::ensure_microphone_permission();
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        true
+    }
 }
 
 fn with_state<T>(f: impl FnOnce(&mut RuntimeState) -> T) -> T {
@@ -356,6 +385,7 @@ pub const LINE: f32 = 10.0;
 /// Applies the menu's clicks, then gives it the state to show.
 pub(super) fn sync_menu(game: &mut crate::game::Game<'_>) {
     use horizon_client::options_ui::voicechat_menu::{Action, GroupRow, PlayerRow, View};
+    ensure_platform_hooks();
     let mut s = {
         let game = &*game;
         settings(|k| game.native_setting(ID, k))
@@ -366,16 +396,27 @@ pub(super) fn sync_menu(game: &mut crate::game::Game<'_>) {
     for action in menu::take_actions() {
         match action {
             Action::Mute => {
+                let _ = check_mic_permission();
                 voicechat_engine::toggle_mute();
             }
             Action::Disable => out.extend(voicechat_engine::toggle_disabled().1),
-            Action::VoiceActivation(on) => s.voice_activation = on,
+            Action::VoiceActivation(on) => {
+                if on {
+                    let _ = check_mic_permission();
+                }
+                s.voice_activation = on;
+            }
             Action::Volume(v) => s.volume = v,
             Action::MicGain(v) => s.mic_gain = v,
             Action::Threshold(v) => s.threshold_db = v,
             Action::Microphone(name) => s.microphone = name,
             Action::Speakers(name) => s.speakers = name,
-            Action::Test(on) => voicechat_engine::set_testing(on),
+            Action::Test(on) => {
+                if on && !check_mic_permission() {
+                    continue;
+                }
+                voicechat_engine::set_testing(on);
+            }
             Action::PlayerVolume(uuid, v) => voicechat_engine::set_player_volume(uuid, v),
             Action::RefreshDevices => refresh = true,
             Action::Colour(c) => s.colour = c,
@@ -538,6 +579,7 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
     if !game.native_window() {
         return;
     }
+    ensure_platform_hooks();
     let on = game.native_on(ID);
     let settings = {
         let game = &*game;
@@ -552,6 +594,7 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
     let mut out: Vec<voicechat_engine::Payload> = Vec::new();
     match session_change(server.clone()) {
         Some(true) => {
+            let _ = check_mic_permission();
             let address = server.map(|s| s.0).unwrap_or_default();
             out.extend(voicechat_engine::join(move || {
                 horizon_protocol::servers::resolve_address_ip(&address)
@@ -559,6 +602,9 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
         }
         Some(false) => voicechat_engine::leave(),
         None => {}
+    }
+    if on && game.remote.is_some() {
+        out.extend(voicechat_engine::poll_handshake_retry());
     }
     for (channel, data) in take_payloads() {
         if on && game.remote.is_some() {
@@ -614,7 +660,11 @@ pub(super) fn key(game: &mut crate::game::Game<'_>, key: &str, pressed: bool) {
     }
     if key == game.native_mod_key(ID, PUSH_TO_TALK[0], PUSH_TO_TALK[2]) {
         // Released anywhere; pressed only while playing (not typing in chat).
-        voicechat_engine::push_to_talk(pressed && game.native_playing());
+        let active = pressed && game.native_playing();
+        if active && !check_mic_permission() {
+            return;
+        }
+        voicechat_engine::push_to_talk(active);
         return;
     }
     if pressed && game.native_window() && key == game.native_mod_key(ID, MENU[0], MENU[2]) {
@@ -643,6 +693,7 @@ pub(super) fn key(game: &mut crate::game::Game<'_>, key: &str, pressed: bool) {
         settings(|k| game.native_setting(ID, k)).look.announce
     };
     if key == game.native_mod_key(ID, MUTE[0], MUTE[2]) {
+        let _ = check_mic_permission();
         let muted = voicechat_engine::toggle_mute();
         if announce {
             game.native_chat(if muted {
@@ -677,6 +728,7 @@ pub(super) fn hud(
 ) {
     use crate::game::native_hooks::Corner;
     use voicechat_engine::State;
+    with_state(|st| st.touch_buttons = [None; 3]);
     if !game.native_on(ID) || game.remote.is_none() {
         return;
     }
@@ -783,6 +835,118 @@ pub(super) fn hud(
     if scale != 1.0 {
         batch.scale_since(start, x, y, scale, scale);
     }
+
+    if crate::touch_visible() && game.native_playing() {
+        let btn_h = 18.0;
+        let gap = 3.0;
+        let show_ptt = s.state == State::Connected && !s.voice_activation;
+        let mute_lbl = if s.muted { "Unmute" } else { "Mute" };
+        let ptt_lbl = if s.transmitting { "Talking" } else { "PTT" };
+        let w_menu = game.native_text_width("V") + 10.0;
+        let w_mute = game.native_text_width(mute_lbl) + 10.0;
+        let w_ptt = if show_ptt {
+            game.native_text_width(ptt_lbl) + 10.0
+        } else {
+            0.0
+        };
+        let total_w = w_menu + gap + w_mute + if show_ptt { gap + w_ptt } else { 0.0 };
+        let (bx, by) = corners.place(corner, total_w, btn_h);
+        let draw_touch_btn = |game: &crate::game::Game<'_>,
+                              batch: &mut horizon_client::hud::HudBatch,
+                              rect: [f32; 4],
+                              label: &str,
+                              fg: u32| {
+            game.native_fill(batch, rect, PANEL);
+            let tw = game.native_text_width(label);
+            game.native_text(
+                batch,
+                label,
+                [rect[0] + (rect[2] - tw) * 0.5, rect[1] + 5.0],
+                fg,
+                true,
+            );
+        };
+        let r_menu = [bx, by, w_menu, btn_h];
+        let r_mute = [bx + w_menu + gap, by, w_mute, btn_h];
+        draw_touch_btn(game, batch, r_menu, "V", WHITE);
+        draw_touch_btn(
+            game,
+            batch,
+            r_mute,
+            mute_lbl,
+            if s.muted { RED } else { GREEN },
+        );
+        let r_ptt = if show_ptt {
+            let r = [r_mute[0] + w_mute + gap, by, w_ptt, btn_h];
+            draw_touch_btn(
+                game,
+                batch,
+                r,
+                ptt_lbl,
+                if s.transmitting { GREEN } else { YELLOW },
+            );
+            Some(r)
+        } else {
+            None
+        };
+        with_state(|st| {
+            st.touch_buttons = [Some(r_menu), Some(r_mute), r_ptt];
+        });
+    }
+}
+
+/// Handles touch input on the on-screen voice chat HUD buttons (`[V]`, `[Mute]`, `[PTT]`).
+pub(super) fn touch_hud(
+    game: &mut crate::game::Game<'_>,
+    id: u64,
+    point: [f32; 2],
+    started: bool,
+    ended: bool,
+) -> bool {
+    let (btns, ptt_id) = with_state(|st| {
+        if ended && st.ptt_touch_id == Some(id) {
+            st.ptt_touch_id = None;
+            return (st.touch_buttons, Some(id));
+        }
+        (st.touch_buttons, st.ptt_touch_id)
+    });
+    if ended && ptt_id == Some(id) {
+        voicechat_engine::push_to_talk(false);
+        return true;
+    }
+    if ptt_id == Some(id) {
+        return true;
+    }
+    if !started || !game.native_on(ID) || !game.native_playing() {
+        return false;
+    }
+    let inside = |r: [f32; 4]| {
+        point[0] >= r[0] && point[0] <= r[0] + r[2] && point[1] >= r[1] && point[1] <= r[1] + r[3]
+    };
+    if let Some(r) = btns[0]
+        && inside(r)
+    {
+        let menu_key = game.native_mod_key(ID, MENU[0], MENU[2]);
+        key(game, &menu_key, true);
+        return true;
+    }
+    if let Some(r) = btns[1]
+        && inside(r)
+    {
+        let mute_key = game.native_mod_key(ID, MUTE[0], MUTE[2]);
+        key(game, &mute_key, true);
+        return true;
+    }
+    if let Some(r) = btns[2]
+        && inside(r)
+    {
+        if check_mic_permission() {
+            with_state(|st| st.ptt_touch_id = Some(id));
+            voicechat_engine::push_to_talk(true);
+        }
+        return true;
+    }
+    false
 }
 
 /// Each frame: tear down voice session if we left a server to the title screen,

@@ -16774,6 +16774,24 @@ impl Game<'_> {
                 if !self.pad_in_menu() && !self.captured && self.focused {
                     self.capture(true);
                 }
+                #[cfg(not(feature = "svc_legacy"))]
+                {
+                    let batch = HudBatch::new([size.width, size.height]);
+                    let point = [
+                        touch.location.x as f32 / batch.scale,
+                        touch.location.y as f32 / batch.scale,
+                    ];
+                    if crate::game::voicechat::touch_hud(
+                        self,
+                        touch.id,
+                        point,
+                        touch.phase == TouchPhase::Started,
+                        matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled),
+                    ) {
+                        self.pad.touch.ignore(touch.id);
+                        return;
+                    }
+                }
                 if touch.phase == TouchPhase::Started {
                     let batch = HudBatch::new([size.width, size.height]);
                     let point = [

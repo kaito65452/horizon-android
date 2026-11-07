@@ -10,6 +10,32 @@ use std::sync::{Arc, Mutex};
 /// 48 kHz frames rendered from the mixer at a time.
 const CHUNK: usize = 480;
 
+#[derive(Clone, Copy, Default)]
+struct PlatformHooks {
+    ensure_permission: Option<fn() -> bool>,
+    on_mic_open: Option<fn()>,
+    on_mic_close: Option<fn()>,
+}
+
+static HOOKS: Mutex<PlatformHooks> = Mutex::new(PlatformHooks {
+    ensure_permission: None,
+    on_mic_open: None,
+    on_mic_close: None,
+});
+
+/// Registers platform-specific microphone permission and lifecycle diagnostic hooks.
+pub fn set_platform_hooks(
+    ensure_permission: fn() -> bool,
+    on_mic_open: fn(),
+    on_mic_close: fn(),
+) {
+    if let Ok(mut h) = HOOKS.lock() {
+        h.ensure_permission = Some(ensure_permission);
+        h.on_mic_open = Some(on_mic_open);
+        h.on_mic_close = Some(on_mic_close);
+    }
+}
+
 /// Linear-interpolating rate change from 48 kHz stereo to the device.
 pub struct OutResampler {
     step: f64,
@@ -26,7 +52,8 @@ impl OutResampler {
         for frame in out.chunks_mut(channels) {
             while self.buf.len() < self.pos as usize + 2 {
                 self.scratch.fill(0.0);
-                if let Ok(mut m) = mixer.lock() {
+                // Non-blocking try_lock so real-time audio callbacks never stall on UDP/UI threads.
+                if let Ok(mut m) = mixer.try_lock() {
                     m.render(&mut self.scratch);
                 }
                 self.buf.extend(self.scratch.chunks(2).map(|c| [c[0], c[1]]));
@@ -192,6 +219,12 @@ fn open_output(mixer: Arc<Mutex<Mixer>>, name: Option<&str>) -> Result<cpal::Str
 
 fn open_input(frames: SyncSender<Vec<f32>>, name: Option<&str>) -> Result<cpal::Stream, String> {
     use cpal::SampleFormat as F;
+    let check = HOOKS.lock().ok().and_then(|h| h.ensure_permission);
+    if let Some(ensure_perm) = check
+        && !ensure_perm()
+    {
+        return Err("microphone permission denied".into());
+    }
     let device = pick(name, true).ok_or("no microphone")?;
     let config = device.default_input_config().map_err(|e| e.to_string())?;
     let stream = match config.sample_format() {
@@ -234,10 +267,21 @@ pub fn run(
         .spawn(move || {
             let output = open_output(mixer, output_name.as_deref());
             let input = open_input(frames, input_name.as_deref());
+            let mic_opened = input.is_ok();
+            if mic_opened
+                && let Some(on_open) = HOOKS.lock().ok().and_then(|h| h.on_mic_open)
+            {
+                on_open();
+            }
             let errors = DeviceErrors { speakers: output.as_ref().err().cloned(), microphone: input.as_ref().err().cloned() };
             let _ = ready_tx.send(errors);
             let _ = stop.recv();
             drop(input);
+            if mic_opened
+                && let Some(on_close) = HOOKS.lock().ok().and_then(|h| h.on_mic_close)
+            {
+                on_close();
+            }
             drop(output);
         })
         .ok();

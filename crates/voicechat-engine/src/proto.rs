@@ -8,6 +8,8 @@
 
 /// The handshake version a 2.6.x server expects in `request_secret`.
 pub const COMPATIBILITY_VERSION: i32 = 20;
+/// Ordered compatibility versions to try when a server runs an older or newer SVC build (18..=22).
+pub const COMPATIBILITY_VERSIONS: [i32; 5] = [20, 21, 19, 18, 22];
 /// The first byte of every UDP voice packet.
 pub const MAGIC: u8 = 0xFF;
 /// Largest Opus frame the protocol carries.
@@ -403,8 +405,13 @@ pub fn decode_joined_group(data: &[u8]) -> Result<(Option<u128>, bool)> {
 
 /// `voicechat:request_secret`.
 pub fn request_secret() -> Vec<u8> {
+    request_secret_version(COMPATIBILITY_VERSION)
+}
+
+/// `voicechat:request_secret` with an explicit compatibility version.
+pub fn request_secret_version(version: i32) -> Vec<u8> {
     let mut w = Writer::new();
-    w.i32(COMPATIBILITY_VERSION);
+    w.i32(version);
     w.data
 }
 
@@ -470,14 +477,18 @@ pub enum Voice {
     LocationSound { channel: u128, sender: u128, location: [f64; 3], data: Vec<u8>, sequence: i64, distance: f32, category: Option<String> },
     /// 5
     Authenticate { player: u128, secret: [u8; 16] },
-    /// 6
+    /// 6 (v18..=v20 empty ack)
     AuthenticateAck,
+    /// 6 (v21+ ack carrying 16-byte challenge nonce)
+    AuthenticateAckNonce([u8; 16]),
     /// 7: answered with the same packet.
     Ping { id: u128, timestamp: i64 },
     /// 8: answered with the same packet.
     KeepAlive,
-    /// 9
+    /// 9 (v18..=v20 empty connection check)
     ConnectionCheck,
+    /// 9 (v21+ connection check echoing the 16-byte challenge nonce)
+    ConnectionCheckNonce([u8; 16]),
     /// 10
     ConnectionCheckAck,
 }
@@ -536,6 +547,10 @@ impl Voice {
                 w.data.extend_from_slice(secret);
             }
             Voice::AuthenticateAck => w.u8(6),
+            Voice::AuthenticateAckNonce(nonce) => {
+                w.u8(6);
+                w.data.extend_from_slice(nonce);
+            }
             Voice::Ping { id, timestamp } => {
                 w.u8(7);
                 w.uuid(*id);
@@ -543,6 +558,10 @@ impl Voice {
             }
             Voice::KeepAlive => w.u8(8),
             Voice::ConnectionCheck => w.u8(9),
+            Voice::ConnectionCheckNonce(nonce) => {
+                w.u8(9);
+                w.data.extend_from_slice(nonce);
+            }
             Voice::ConnectionCheckAck => w.u8(10),
         }
         w.data
@@ -586,10 +605,22 @@ impl Voice {
                 Voice::LocationSound { channel, sender, location, data, sequence, distance, category }
             }
             5 => Voice::Authenticate { player: r.uuid()?, secret: r.array()? },
-            6 => Voice::AuthenticateAck,
+            6 => {
+                if r.rest.len() >= 16 {
+                    Voice::AuthenticateAckNonce(r.array()?)
+                } else {
+                    Voice::AuthenticateAck
+                }
+            }
             7 => Voice::Ping { id: r.uuid()?, timestamp: r.i64()? },
             8 => Voice::KeepAlive,
-            9 => Voice::ConnectionCheck,
+            9 => {
+                if r.rest.len() >= 16 {
+                    Voice::ConnectionCheckNonce(r.array()?)
+                } else {
+                    Voice::ConnectionCheck
+                }
+            }
             10 => Voice::ConnectionCheckAck,
             id => return Err(Error(format!("unknown voice packet {id}"))),
         })

@@ -51,8 +51,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            voice_activation: false,
-            volume: 1.0,
+            voice_activation: cfg!(target_os = "android"),
+            volume: 2.0,
             mic_gain: 1.0,
             threshold_db: -45.0,
             input_device: None,
@@ -138,6 +138,7 @@ struct Shared {
     last_keep_alive: AtomicU64,
     started: Instant,
     mixer: Arc<Mutex<Mixer>>,
+    auth_nonce: Mutex<Option<[u8; 16]>>,
 }
 impl Shared {
     fn send(&self, packet: &Voice) {
@@ -203,6 +204,8 @@ struct Inner {
     group_problem: Option<String>,
     own: u128,
     settings: Settings,
+    version_idx: usize,
+    waiting_since: Option<Instant>,
 }
 
 struct Global {
@@ -235,8 +238,13 @@ fn global() -> &'static Global {
                 group_problem: None,
                 own: 0,
                 settings: settings.clone(),
+                version_idx: 0,
+                waiting_since: None,
             }),
-            mixer: Arc::new(Mutex::new(Mixer::default())),
+            mixer: Arc::new(Mutex::new(Mixer {
+                volume: settings.volume,
+                ..Mixer::default()
+            })),
             mic: Arc::new(Mic {
                 ptt: AtomicBool::new(false),
                 muted: AtomicBool::new(false),
@@ -272,15 +280,48 @@ pub fn join(resolve: impl FnOnce() -> Option<IpAddr> + Send + 'static) -> Vec<Pa
         inner.group_problem = None;
         inner.game_ip = None;
         inner.resolver = Some(Arc::new(Mutex::new(Some(Box::new(resolve)))));
+        inner.version_idx = 0;
+        inner.waiting_since = Some(Instant::now());
     }
     *g.sending.lock().unwrap() = None;
     if let Ok(mut m) = g.mixer.lock() {
         m.clear();
     }
+    let ver = proto::COMPATIBILITY_VERSIONS[0];
+    log::info!("Voice chat: requesting secret (compatibility version {ver})");
     vec![
         ("minecraft:register".into(), proto::register_payload()),
-        (channel::REQUEST_SECRET.into(), proto::request_secret()),
+        (channel::REQUEST_SECRET.into(), proto::request_secret_version(ver)),
     ]
+}
+
+/// Retries `voicechat:request_secret` with fallback compatibility versions `[20, 21, 19, 18, 22]`
+/// every 4 seconds if the server has not answered yet.
+pub fn poll_handshake_retry() -> Vec<Payload> {
+    let g = global();
+    let mut inner = g.inner.lock().unwrap();
+    if inner.state != State::Waiting || inner.session.is_some() {
+        return Vec::new();
+    }
+    let Some(since) = inner.waiting_since else {
+        return Vec::new();
+    };
+    if since.elapsed() < Duration::from_secs(4) {
+        return Vec::new();
+    }
+    let next_idx = inner.version_idx + 1;
+    if next_idx >= proto::COMPATIBILITY_VERSIONS.len() {
+        inner.waiting_since = None;
+        return Vec::new();
+    }
+    inner.version_idx = next_idx;
+    inner.waiting_since = Some(Instant::now());
+    let ver = proto::COMPATIBILITY_VERSIONS[next_idx];
+    log::info!("Voice chat: no secret reply yet; retrying with compatibility version {ver}");
+    vec![(
+        channel::REQUEST_SECRET.into(),
+        proto::request_secret_version(ver),
+    )]
 }
 
 /// Left the server.
@@ -296,6 +337,7 @@ pub fn leave() {
         inner.groups.clear();
         inner.group_problem = None;
         inner.resolver = None;
+        inner.waiting_since = None;
     }
     *g.sending.lock().unwrap() = None;
     g.mic.transmitting.store(false, Relaxed);
@@ -314,7 +356,21 @@ pub fn payload(channel: &str, data: &[u8]) -> Vec<Payload> {
         channel::SECRET => match Secret::decode(data) {
             Ok(secret) => {
                 let disabled = g.mic.disabled.load(Relaxed);
-                g.inner.lock().unwrap().groups_enabled = secret.groups_enabled;
+                {
+                    let mut inner = g.inner.lock().unwrap();
+                    let ver = proto::COMPATIBILITY_VERSIONS
+                        .get(inner.version_idx)
+                        .copied()
+                        .unwrap_or(proto::COMPATIBILITY_VERSION);
+                    log::info!(
+                        "Voice chat: received secret (compatibility version {ver}, port {}, codec {:?}, distance {})",
+                        secret.server_port,
+                        secret.codec,
+                        secret.distance
+                    );
+                    inner.groups_enabled = secret.groups_enabled;
+                    inner.waiting_since = None;
+                }
                 out.push((channel::UPDATE_STATE.into(), proto::update_state(disabled)));
                 connect(secret);
             }
@@ -434,6 +490,7 @@ fn open(secret: &Secret, game_ip: Option<IpAddr>) -> Result<Session, String> {
         last_keep_alive: AtomicU64::new(0),
         started: Instant::now(),
         mixer: global().mixer.clone(),
+        auth_nonce: Mutex::new(None),
     });
     let receiver = shared.clone();
     std::thread::Builder::new().name("voicechat-receive".into()).spawn(move || receive(receiver)).map_err(|e| e.to_string())?;
@@ -461,8 +518,19 @@ fn receive(s: Arc<Shared>) {
         };
         match packet {
             Voice::AuthenticateAck => {
+                if let Ok(mut n) = s.auth_nonce.lock() {
+                    *n = None;
+                }
                 if !s.authenticated.swap(true, Relaxed) {
-                    log::info!("Voice chat: authenticated");
+                    log::info!("Voice chat: authenticated (v18-v20 ack)");
+                }
+            }
+            Voice::AuthenticateAckNonce(nonce) => {
+                if let Ok(mut n) = s.auth_nonce.lock() {
+                    *n = Some(nonce);
+                }
+                if !s.authenticated.swap(true, Relaxed) {
+                    log::info!("Voice chat: authenticated (v21+ nonce ack)");
                 }
             }
             Voice::ConnectionCheckAck => {
@@ -493,7 +561,11 @@ fn keep_up(s: Arc<Shared>) {
         if !s.authenticated.load(Relaxed) {
             s.send(&Voice::Authenticate { player: s.player, secret: s.secret });
         } else if !s.connected.load(Relaxed) {
-            s.send(&Voice::ConnectionCheck);
+            let check = match s.auth_nonce.lock().ok().and_then(|n| *n) {
+                Some(nonce) => Voice::ConnectionCheckNonce(nonce),
+                None => Voice::ConnectionCheck,
+            };
+            s.send(&check);
         } else {
             let silent = s.now_ms().saturating_sub(s.last_keep_alive.load(Relaxed));
             if silent > s.keep_alive.as_millis() as u64 * 10 {

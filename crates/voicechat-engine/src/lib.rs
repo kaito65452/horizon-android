@@ -9,8 +9,10 @@ mod client;
 pub mod icons;
 
 pub use client::{
-    GroupInfo, Payload, Player, Settings, State, Status, create_group, join, join_group, leave, leave_group, maintain,
-    microphones, payload, push_to_talk, set_player_volume, set_settings, set_testing, speakers, status,
-    toggle_disabled, toggle_mute, update_listener,
+    GroupInfo, Payload, Player, Settings, State, Status, create_group, join, join_group, leave,
+    leave_group, maintain, microphones, payload, poll_handshake_retry, push_to_talk,
+    set_player_volume, set_settings, set_testing, speakers, status, toggle_disabled, toggle_mute,
+    update_listener,
 };
+pub use device::set_platform_hooks;
 pub use proto::GroupKind;

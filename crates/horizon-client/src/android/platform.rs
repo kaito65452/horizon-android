@@ -198,27 +198,42 @@ fn vibrate_gamepad(pulse: horizon_client::gamepad::Pulse, amplitude: i32) -> boo
     .unwrap_or(false)
 }
 
+static VM_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ACTIVITY_PTR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ACTIVE_AUDIO_EFFECTS: std::sync::Mutex<Vec<GlobalRef>> = std::sync::Mutex::new(Vec::new());
+
 pub(crate) fn with_context<R>(
     f: impl FnOnce(&mut JNIEnv<'_>, &JObject<'_>) -> jni::errors::Result<R>,
 ) -> Option<R> {
-    crate::APP.with(|slot| {
-        let app = slot.borrow();
-        let app = app.as_ref()?;
-        let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
-        let mut env = vm.attach_current_thread().ok()?;
-        let result = env.with_local_frame(64, |env| {
-            let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
-            f(env, &activity)
-        });
-        match result {
-            Ok(value) => Some(value),
-            Err(error) => {
-                let _ = env.exception_clear();
-                log::warn!("Android platform: {error}");
-                None
-            }
+    let (vm_raw, activity_raw) = crate::APP
+        .with(|slot| {
+            let app = slot.borrow();
+            let app = app.as_ref()?;
+            let vm = app.vm_as_ptr() as usize;
+            let act = app.activity_as_ptr() as usize;
+            VM_PTR.store(vm, std::sync::atomic::Ordering::Release);
+            ACTIVITY_PTR.store(act, std::sync::atomic::Ordering::Release);
+            Some((vm, act))
+        })
+        .or_else(|| {
+            let vm = VM_PTR.load(std::sync::atomic::Ordering::Acquire);
+            let act = ACTIVITY_PTR.load(std::sync::atomic::Ordering::Acquire);
+            (vm != 0 && act != 0).then_some((vm, act))
+        })?;
+    let vm = unsafe { JavaVM::from_raw(vm_raw as *mut _) }.ok()?;
+    let mut env = vm.attach_current_thread().ok()?;
+    let result = env.with_local_frame(64, |env| {
+        let activity = unsafe { JObject::from_raw(activity_raw as *mut _) };
+        f(env, &activity)
+    });
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            let _ = env.exception_clear();
+            log::warn!("Android platform: {error}");
+            None
         }
-    })
+    }
 }
 pub fn clipboard_get() -> Option<String> {
     with_context(|env, activity| {
@@ -468,10 +483,13 @@ pub fn active() -> bool {
 }
 
 pub fn finish() {
+    on_voice_mic_close();
     with_context(|env, activity| {
         env.call_method(activity, "finish", "()V", &[])?;
         Ok(())
     });
+    VM_PTR.store(0, std::sync::atomic::Ordering::Release);
+    ACTIVITY_PTR.store(0, std::sync::atomic::Ordering::Release);
 }
 
 pub fn capture_mouse(capture: bool) -> bool {
@@ -782,4 +800,222 @@ pub fn ensure_microphone_permission() -> bool {
         Ok(false)
     })
     .unwrap_or(true)
+}
+
+fn log_audio_manager_state(
+    env: &mut JNIEnv<'_>,
+    audio_mgr: &JObject<'_>,
+    stage: &str,
+) -> jni::errors::Result<Vec<i32>> {
+    let mode = env.call_method(audio_mgr, "getMode", "()I", &[])?.i()?;
+    let music_vol = env
+        .call_method(audio_mgr, "getStreamVolume", "(I)I", &[JValue::Int(3)])?
+        .i()?;
+    let music_max = env
+        .call_method(audio_mgr, "getStreamMaxVolume", "(I)I", &[JValue::Int(3)])?
+        .i()?;
+    let call_vol = env
+        .call_method(audio_mgr, "getStreamVolume", "(I)I", &[JValue::Int(0)])?
+        .i()?;
+    let call_max = env
+        .call_method(audio_mgr, "getStreamMaxVolume", "(I)I", &[JValue::Int(0)])?
+        .i()?;
+    let speaker = env
+        .call_method(audio_mgr, "isSpeakerphoneOn", "()Z", &[])?
+        .z()?;
+    let bt_sco = env
+        .call_method(audio_mgr, "isBluetoothScoOn", "()Z", &[])?
+        .z()?;
+    let bt_a2dp = env
+        .call_method(audio_mgr, "isBluetoothA2dpOn", "()Z", &[])?
+        .z()?;
+    let wired = env
+        .call_method(audio_mgr, "isWiredHeadsetOn", "()Z", &[])?
+        .z()?;
+    let music_active = env
+        .call_method(audio_mgr, "isMusicActive", "()Z", &[])?
+        .z()?;
+
+    let mut session_ids = Vec::new();
+    let mut rec_summary = Vec::new();
+    if let Ok(configs_val) = env.call_method(
+        audio_mgr,
+        "getActiveRecordingConfigurations",
+        "()Ljava/util/List;",
+        &[],
+    ) && let Ok(configs) = configs_val.l()
+        && !configs.is_null()
+    {
+        let size = env
+            .call_method(&configs, "size", "()I", &[])
+            .and_then(|v| v.i())
+            .unwrap_or(0);
+        for idx in 0..size {
+            if let Ok(item_val) = env.call_method(
+                &configs,
+                "get",
+                "(I)Ljava/lang/Object;",
+                &[JValue::Int(idx)],
+            ) && let Ok(item) = item_val.l()
+                && !item.is_null()
+            {
+                let session_id = env
+                    .call_method(&item, "getClientAudioSessionId", "()I", &[])
+                    .and_then(|v| v.i())
+                    .unwrap_or(-1);
+                let source = env
+                    .call_method(&item, "getClientAudioSource", "()I", &[])
+                    .and_then(|v| v.i())
+                    .unwrap_or(-1);
+                rec_summary.push(format!("src={source}:sess={session_id}"));
+                if session_id > 0 && !session_ids.contains(&session_id) {
+                    session_ids.push(session_id);
+                }
+            }
+        }
+    } else {
+        let _ = env.exception_clear();
+    }
+
+    log::info!(
+        "[voicechat-jni:{stage}] mode={mode} (0=NORMAL,3=IN_COMM) music={music_vol}/{music_max} voice_call={call_vol}/{call_max} route=[speaker={speaker} bt_sco={bt_sco} bt_a2dp={bt_a2dp} wired={wired} music_active={music_active}] active_recordings=[{}]",
+        rec_summary.join(", ")
+    );
+    Ok(session_ids)
+}
+
+/// Called once when the voicechat microphone stream opens on Android.
+/// Logs AudioManager diagnostics and attaches session-scoped AcousticEchoCanceler / NoiseSuppressor
+/// if supported by the device, without switching AudioManager out of MODE_NORMAL.
+pub fn on_voice_mic_open() {
+    with_context(|env, activity| {
+        let svc_name = JObject::from(env.new_string("audio")?);
+        let audio_mgr = env
+            .call_method(
+                activity,
+                "getSystemService",
+                "(Ljava/lang/String;)Ljava/lang/Object;",
+                &[JValue::Object(&svc_name)],
+            )?
+            .l()?;
+        if audio_mgr.is_null() {
+            return Ok(());
+        }
+        let session_ids = log_audio_manager_state(env, &audio_mgr, "mic_open")?;
+        let mut effects = ACTIVE_AUDIO_EFFECTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        effects.clear();
+
+        let aec_avail = env
+            .call_static_method(
+                "android/media/audiofx/AcousticEchoCanceler",
+                "isAvailable",
+                "()Z",
+                &[],
+            )
+            .and_then(|v| v.z())
+            .unwrap_or_else(|_| {
+                let _ = env.exception_clear();
+                false
+            });
+        let ns_avail = env
+            .call_static_method(
+                "android/media/audiofx/NoiseSuppressor",
+                "isAvailable",
+                "()Z",
+                &[],
+            )
+            .and_then(|v| v.z())
+            .unwrap_or_else(|_| {
+                let _ = env.exception_clear();
+                false
+            });
+
+        for &session_id in &session_ids {
+            if aec_avail {
+                if let Ok(aec_val) = env.call_static_method(
+                    "android/media/audiofx/AcousticEchoCanceler",
+                    "create",
+                    "(I)Landroid/media/audiofx/AcousticEchoCanceler;",
+                    &[JValue::Int(session_id)],
+                ) && let Ok(aec) = aec_val.l()
+                    && !aec.is_null()
+                {
+                    let rc = env
+                        .call_method(&aec, "setEnabled", "(Z)I", &[JValue::Bool(1)])
+                        .and_then(|v| v.i())
+                        .unwrap_or(-1);
+                    log::info!(
+                        "[voicechat-jni:mic_open] AcousticEchoCanceler attached to session {session_id} (setEnabled rc={rc})"
+                    );
+                    if let Ok(global) = env.new_global_ref(&aec) {
+                        effects.push(global);
+                    }
+                } else {
+                    let _ = env.exception_clear();
+                }
+            }
+            if ns_avail {
+                if let Ok(ns_val) = env.call_static_method(
+                    "android/media/audiofx/NoiseSuppressor",
+                    "create",
+                    "(I)Landroid/media/audiofx/NoiseSuppressor;",
+                    &[JValue::Int(session_id)],
+                ) && let Ok(ns) = ns_val.l()
+                    && !ns.is_null()
+                {
+                    let rc = env
+                        .call_method(&ns, "setEnabled", "(Z)I", &[JValue::Bool(1)])
+                        .and_then(|v| v.i())
+                        .unwrap_or(-1);
+                    log::info!(
+                        "[voicechat-jni:mic_open] NoiseSuppressor attached to session {session_id} (setEnabled rc={rc})"
+                    );
+                    if let Ok(global) = env.new_global_ref(&ns) {
+                        effects.push(global);
+                    }
+                } else {
+                    let _ = env.exception_clear();
+                }
+            }
+        }
+        if session_ids.is_empty() {
+            log::info!(
+                "[voicechat-jni:mic_open] No recording session ID exposed by AudioManager (aec_avail={aec_avail}, ns_avail={ns_avail}); keeping MODE_NORMAL and relying on software ducking/RNNoise"
+            );
+        }
+        Ok(())
+    });
+}
+
+/// Called once when the voicechat microphone stream closes on Android.
+pub fn on_voice_mic_close() {
+    with_context(|env, activity| {
+        let mut effects = ACTIVE_AUDIO_EFFECTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let released_count = effects.len();
+        for effect in effects.drain(..) {
+            if env.call_method(effect.as_obj(), "release", "()V", &[]).is_err() {
+                let _ = env.exception_clear();
+            }
+        }
+        let svc_name = JObject::from(env.new_string("audio")?);
+        let audio_mgr = env
+            .call_method(
+                activity,
+                "getSystemService",
+                "(Ljava/lang/String;)Ljava/lang/Object;",
+                &[JValue::Object(&svc_name)],
+            )?
+            .l()?;
+        if !audio_mgr.is_null() {
+            let _ = log_audio_manager_state(env, &audio_mgr, "mic_close");
+        }
+        if released_count > 0 {
+            log::info!("[voicechat-jni:mic_close] Released {released_count} session audio effects");
+        }
+        Ok(())
+    });
 }
