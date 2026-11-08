@@ -1857,6 +1857,7 @@ dependencies = [
  "android_logger",
  "bytemuck",
  "chrono",
+ "cpal",
  "flate2",
  "getrandom 0.3.4",
  "glam",
@@ -1899,6 +1900,7 @@ dependencies = [
  "symphonia",
  "ureq",
  "url",
+ "voicechat_engine",
  "wgpu",
  "winit",
  "zip 2.6.1",
@@ -2006,6 +2008,7 @@ dependencies = [
  "unicode-bidi",
  "ureq",
  "url",
+ "voicechat_engine",
  "wgpu",
  "winit",
  "winresource",
@@ -5060,6 +5063,18 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "voicechat_engine"
+version = "2.0.0"
+dependencies = [
+ "cc",
+ "cpal",
+ "log",
+ "nnnoiseless",
+ "png",
+ "ring",
+]
 
 [[package]]
 name = "walkdir"

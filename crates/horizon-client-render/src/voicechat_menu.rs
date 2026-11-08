@@ -387,6 +387,7 @@ struct State {
     view: View,
     actions: Vec<Action>,
     dragging: Option<Slider>,
+    scrollbar_dragging: bool,
     scroll: f32,
     scroll_target: f32,
     content: f32,
@@ -421,6 +422,7 @@ pub fn open() {
         s.scroll = 0.0;
         s.scroll_target = 0.0;
         s.dragging = None;
+        s.scrollbar_dragging = false;
         s.opened = Some(Instant::now());
         s.page_at = None;
         s.drawn = None;
@@ -439,7 +441,16 @@ pub fn closed() {
     with_state(|s| {
         s.open = false;
         s.dragging = None;
+        s.scrollbar_dragging = false;
         s.focus = None;
+    });
+}
+
+/// The mouse button was released.
+pub fn release() {
+    with_state(|s| {
+        s.dragging = None;
+        s.scrollbar_dragging = false;
     });
 }
 
@@ -2264,8 +2275,25 @@ fn submit(s: &mut State) {
 pub fn click(x: f32, y: f32, size: (f32, f32), drag: bool) {
     with_state(|s| {
         let f = frame(size.0, size.1, s.view.prefs.size);
-        let (ws, _) = widgets(s, &f, s.scroll);
+        let area = f.content;
+        let most = (s.content - area[3]).max(0.0);
+        let bar_h = if s.content > 0.0 {
+            (area[3] * area[3] / s.content).max(12.0)
+        } else {
+            12.0
+        };
         if drag {
+            if s.scrollbar_dragging && most > 0.0 {
+                let travel = area[3] - bar_h;
+                let ratio = if travel > 0.0 {
+                    ((y - area[1] - bar_h / 2.0) / travel).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                s.scroll_target = (ratio * most).clamp(0.0, (s.content - 40.0).max(0.0));
+                return;
+            }
+            let (ws, _) = widgets(s, &f, s.scroll);
             let Some(id) = s.dragging else { return };
             // The slider being dragged, wherever the pointer went.
             if let Some(w) = ws
@@ -2278,6 +2306,19 @@ pub fn click(x: f32, y: f32, size: (f32, f32), drag: bool) {
             return;
         }
         s.dragging = None;
+        s.scrollbar_dragging = false;
+        if most > 0.0 && inside([area[0] + area[2] - 4.0, area[1], 16.0, area[3]], (x, y)) {
+            s.scrollbar_dragging = true;
+            let travel = area[3] - bar_h;
+            let ratio = if travel > 0.0 {
+                ((y - area[1] - bar_h / 2.0) / travel).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            s.scroll_target = (ratio * most).clamp(0.0, (s.content - 40.0).max(0.0));
+            return;
+        }
+        let (ws, _) = widgets(s, &f, s.scroll);
         let p = f.panel;
         if inside([p[0] + p[2] - 18.0, p[1] + 7.0, 13.0, 13.0], (x, y)) {
             s.done = true;
@@ -2405,6 +2446,7 @@ pub fn key(key: winit::keyboard::KeyCode) -> bool {
     use winit::keyboard::KeyCode as K;
     with_state(|s| {
         s.dragging = None;
+        s.scrollbar_dragging = false;
         if let Some(field) = s.focus {
             match key {
                 K::Escape => s.focus = None,

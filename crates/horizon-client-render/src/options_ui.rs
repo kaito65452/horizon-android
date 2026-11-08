@@ -4474,6 +4474,10 @@ impl OptionsUi {
         }
     }
     pub fn release(&mut self) -> Vec<Event> {
+        if voicechat_menu::shows(self) {
+            voicechat_menu::release();
+            return Vec::new();
+        }
         self.scrollbar_drag_y = None;
         if let Some(p) = &mut self.pack_screen {
             p.release();
@@ -4670,6 +4674,10 @@ impl OptionsUi {
         amount: f32,
     ) {
         self.touch_start();
+        if voicechat_menu::shows(self) {
+            voicechat_menu::wheel(amount);
+            return;
+        }
         self.scroll_at(s, size, cursor, amount);
     }
     /// The mouse wheel at the cursor.

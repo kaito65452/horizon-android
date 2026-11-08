@@ -290,8 +290,13 @@ impl EnvelopeEchoCanceler {
                     *w *= scale;
                 }
             }
-            let obs_ratio = (mic_rms / peak_tap).clamp(0.12, 1.4);
-            self.coupling_floor = (self.coupling_floor * 0.92 + obs_ratio * 0.08).clamp(0.25, 0.80);
+            let obs_ratio = (mic_rms / peak_tap).clamp(0.12, 0.55);
+            self.coupling_floor = (self.coupling_floor * 0.92 + obs_ratio * 0.08).clamp(0.20, 0.50);
+        } else {
+            self.coupling_floor = (self.coupling_floor * 0.998 + 0.25 * 0.002).max(0.20);
+            for w in &mut self.weights {
+                *w *= 0.9995;
+            }
         }
 
         // Use the recent 200 ms peak rather than the whole 400 ms window so an old loud remote
@@ -356,6 +361,20 @@ impl MicFilter {
         }
     }
 
+    /// Resets all adaptive filter weights, AEC envelopes, and hangover state.
+    pub fn reset(&mut self) {
+        #[cfg(feature = "rnnoise")]
+        {
+            self.denoiser = nnnoiseless::DenoiseState::new();
+        }
+        self.voice_aec = EnvelopeEchoCanceler::default();
+        self.game_bleed_ratio = 0.30;
+        self.hp_prev_in = 0.0;
+        self.hp_prev_out = 0.0;
+        self.hangover_left = 0;
+        self.duck_streak = 0;
+    }
+
     /// Processes a 960-sample 48 kHz mono frame:
     /// 1. 80 Hz high-pass filter to remove DC offset and low-frequency hand/grip rumble.
     /// 2. 400 ms delay-aligned envelope echo suppression for remote voice chat (`voice_aec`).
@@ -417,7 +436,7 @@ impl MicFilter {
         let boosted_raw_rms = raw_rms * user_boost;
         let voice_breakout_rms = (voice_echo_rms * 2.1)
             .max(voice_ref_rms * hw_mult * 1.8)
-            .max(0.042);
+            .max(0.018);
 
         let wants_duck = remote_talking && boosted_raw_rms < voice_breakout_rms;
         // Mid-sentence, a brief remote blip must not chop the player's own words: only the echo
@@ -497,8 +516,10 @@ impl MicFilter {
             && (!rnnoise_enabled || vad_prob < 0.35)
             && raw_rms <= scaled_game_rms * 1.5
         {
-            let obs = (raw_rms / scaled_game_rms.max(1e-4)).clamp(0.10, 0.85);
-            self.game_bleed_ratio = (self.game_bleed_ratio * 0.90 + obs * 0.10).clamp(0.15, 0.75);
+            let obs = (raw_rms / scaled_game_rms.max(1e-4)).clamp(0.10, 0.50);
+            self.game_bleed_ratio = (self.game_bleed_ratio * 0.90 + obs * 0.10).clamp(0.15, 0.45);
+        } else if !game_playing {
+            self.game_bleed_ratio = (self.game_bleed_ratio * 0.998 + 0.25 * 0.002).max(0.15);
         }
         let expected_game_bleed = scaled_game_rms * self.game_bleed_ratio;
 
@@ -508,34 +529,17 @@ impl MicFilter {
         let is_clear_speech = if rnnoise_enabled {
             vad_prob >= 0.45 && boosted_raw_rms > expected_game_bleed * 1.15
         } else {
-            boosted_raw_rms > (expected_game_bleed * 1.8).max(0.022)
+            boosted_raw_rms > (expected_game_bleed * 1.8).max(0.018)
         };
         // While the gate is held open after speech, never duck for game bleed: VAD dips between
         // syllables would otherwise chop the sentence after two or three words.
-        let in_speech = self.hangover_left > 0;
-        let music_ducked = !voice_ducked && game_playing && !is_clear_speech && !in_speech;
-        if music_ducked {
-            for s in &mut working {
-                *s *= GAME_BLEED_ATTENUATION;
-            }
-        }
+        let was_in_speech = self.hangover_left > 0;
 
-        let ducked = voice_ducked || music_ducked;
-
-        // Step 6: Remaining post-filter user gain + soft limiter.
-        let post_gain = if voice_ducked || music_ducked {
-            1.0
-        } else {
-            (user_gain.clamp(0.0, 4.0) / user_boost.sqrt()).clamp(0.5, 2.5)
-        };
-        for s in &mut working {
-            *s = (*s * post_gain).tanh();
-        }
-
-        let post_rms =
-            (working.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / len as f64).sqrt();
-        let level_db = if post_rms > 0.0 {
-            (20.0 * post_rms.log10()) as f32
+        let voice_scale = (user_gain.clamp(0.0, 4.0) / user_boost.sqrt()).clamp(0.5, 2.5);
+        let pre_voice_rms =
+            (working.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / len as f64).sqrt() as f32;
+        let pre_level_db = if pre_voice_rms > 0.0 {
+            20.0 * (pre_voice_rms * voice_scale).log10()
         } else {
             -100.0
         };
@@ -545,7 +549,7 @@ impl MicFilter {
         } else {
             -100.0
         };
-        let sustain_db = if in_speech {
+        let sustain_db = if was_in_speech {
             SUSTAIN_HYSTERESIS_DB
         } else {
             0.0
@@ -564,7 +568,7 @@ impl MicFilter {
         );
         let min_vad = if !rnnoise_enabled {
             0.0
-        } else if in_speech {
+        } else if was_in_speech {
             0.0
         } else if remote_talking {
             0.78
@@ -574,12 +578,45 @@ impl MicFilter {
             0.35
         };
 
-        if !ducked && level_db > effective_threshold && vad_prob >= min_vad {
+        let should_trigger_speech = !voice_ducked
+            && (is_clear_speech || was_in_speech || !game_playing)
+            && pre_level_db > effective_threshold
+            && vad_prob >= min_vad;
+
+        if should_trigger_speech {
             self.hangover_left = HANGOVER_FRAMES;
         } else if self.hangover_left > 0 {
             self.hangover_left -= 1;
         }
-        let speaking = !voice_ducked && self.hangover_left > 0;
+        let in_speech = self.hangover_left > 0;
+
+        let music_ducked = !voice_ducked && game_playing && !is_clear_speech && !in_speech;
+        if music_ducked {
+            for s in &mut working {
+                *s *= GAME_BLEED_ATTENUATION;
+            }
+        }
+
+        let ducked = voice_ducked || music_ducked;
+
+        // Step 6: Remaining post-filter user gain + soft limiter.
+        let post_gain = if voice_ducked || music_ducked {
+            1.0
+        } else {
+            voice_scale
+        };
+        for s in &mut working {
+            *s = (*s * post_gain).tanh();
+        }
+
+        let post_rms =
+            (working.iter().map(|&v| (v as f64).powi(2)).sum::<f64>() / len as f64).sqrt();
+        let level_db = if post_rms > 0.0 {
+            (20.0 * post_rms.log10()) as f32
+        } else {
+            -100.0
+        };
+        let speaking = !voice_ducked && in_speech;
 
         FilterOutput {
             samples: working,

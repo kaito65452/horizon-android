@@ -661,6 +661,7 @@ fn microphone(frames: Receiver<Vec<f32>>) {
             last_on = Some(Arc::as_ptr(&s));
             sequence = 0;
             encoder = None;
+            filter.reset();
         }
         if encoder
             .as_ref()

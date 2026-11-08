@@ -604,8 +604,8 @@ pub(super) fn tick(game: &mut crate::game::Game<'_>) {
         let game = &*game;
         settings(|k| game.native_setting(ID, k))
     };
-    let server = match (&game.remote, &game.player) {
-        (Some(r), Some(_)) if on && r.session.address != "local" => {
+    let server = match &game.remote {
+        Some(r) if on && r.session.address != "local" => {
             Some((r.session.address.clone(), r.profile()))
         }
         _ => None,
