@@ -16,7 +16,7 @@ on:
         default: 'arm64-v8a'
 
       build_type:
-        description: 'Build type (--public is clean distribution APK with generated tables only)'
+        description: 'Build Type (--public is clean distribution APK with generated tables only)'
         type: choice
         required: true
         options:
@@ -24,11 +24,43 @@ on:
           - dev
         default: 'public'
 
+      profile:
+        description: 'Cargo optimization profile'
+        type: choice
+        required: true
+        options:
+          - release
+          - fast
+          - dev
+        default: 'release'
+
   push:
     branches:
+      - 'exp/zalith-1-port'
+      - 'android'
       - 'build-apk*'
       - 'feat/build-apk*'
-      - 'feat/experimental-svc*'
+    paths:
+      - 'crates/**'
+      - 'packaging/android/**'
+      - 'tools/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/build-apk.yml'
+
+  pull_request:
+    branches:
+      - 'exp/zalith-1-port'
+      - 'android'
+    paths:
+      - 'crates/**'
+      - 'packaging/android/**'
+      - 'tools/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read
@@ -40,45 +72,43 @@ concurrency:
 jobs:
   configure:
     name: Select Target ABIs
-
-    # Guard: only run on fork, never in upstream repository (Vasysik/horizon-android)
-    if: github.repository != 'Vasysik/horizon-android'
-
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.select.outputs.targets }}
+      build_type: ${{ steps.select.outputs.build_type }}
+      profile: ${{ steps.select.outputs.profile }}
 
     steps:
       - id: select
         run: |
           ABI="${{ github.event.inputs.abi || 'arm64-v8a' }}"
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'public' }}"
+          PROFILE="${{ github.event.inputs.profile || 'release' }}"
 
           echo "Selected ABI: $ABI"
+          echo "Selected Build Type: $BUILD_TYPE"
+          echo "Selected Profile: $PROFILE"
+
+          echo "build_type=$BUILD_TYPE" >> "$GITHUB_OUTPUT"
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
 
           if [ "$ABI" = "all" ]; then
             echo 'targets=[{"abi":"arm64-v8a","target":"aarch64-linux-android"},{"abi":"armeabi-v7a","target":"armv7-linux-androideabi"},{"abi":"x86_64","target":"x86_64-linux-android"},{"abi":"x86","target":"i686-linux-android"}]' >> "$GITHUB_OUTPUT"
-
           elif [ "$ABI" = "armeabi-v7a" ]; then
             echo 'targets=[{"abi":"armeabi-v7a","target":"armv7-linux-androideabi"}]' >> "$GITHUB_OUTPUT"
-
           elif [ "$ABI" = "x86_64" ]; then
             echo 'targets=[{"abi":"x86_64","target":"x86_64-linux-android"}]' >> "$GITHUB_OUTPUT"
-
           elif [ "$ABI" = "x86" ]; then
             echo 'targets=[{"abi":"x86","target":"i686-linux-android"}]' >> "$GITHUB_OUTPUT"
-
           else
             echo 'targets=[{"abi":"arm64-v8a","target":"aarch64-linux-android"}]' >> "$GITHUB_OUTPUT"
           fi
 
   build:
     name: Build APK (${{ matrix.abi }})
-
     needs: configure
-
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
 
     strategy:
       fail-fast: false
@@ -87,6 +117,8 @@ jobs:
 
     env:
       CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.local/ci-target
       HORIZON_TELEMETRY_URL: "off"
       CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
@@ -101,7 +133,13 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost || true
 
-      - name: Setup Java 17
+      - name: Setup Java 25 (for Mojang data generators & horizon-prepare)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Setup Java 17 (for Android Gradle Plugin 8.11 & build tooling)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -111,11 +149,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14'
+          cache-read-only: false
 
-      - name: Install Android SDK platform and NDK
+      - name: Install Android SDK platform and NDK 28.2
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
           if [ ! -x "$SDKMANAGER" ]; then
             SDKMANAGER="$(which sdkmanager)"
           fi
@@ -127,11 +165,55 @@ jobs:
             "build-tools;35.0.0" \
             "platforms;android-35"
 
-      - name: Add Rust target
+      - name: Setup Rust toolchain
         run: |
+          rustup show
           rustup target add "${{ matrix.target }}"
 
-      - name: Prepare engine data tables
+      - name: Restore Dedicated Keystore (if secret present)
+        env:
+          DEV_KEYSTORE: ${{ secrets.ANDROID_DEV_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$DEV_KEYSTORE" ]; then
+            python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          value = os.environ.get('DEV_KEYSTORE', '')
+          if value:
+              path = Path('.local/android/debug.keystore')
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(base64.b64decode(value, validate=True))
+              path.chmod(0o600)
+              print("Restored signing keystore from secret.")
+          PY
+          else
+            echo "No signing secret provided; tools/android_build.py will generate an ephemeral development keystore."
+          fi
+
+      - name: Cargo Dependency & Build Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            .local/ci-target
+          key: cargo-android-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-android-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'packaging/android/build.gradle') }}-
+            cargo-android-${{ runner.os }}-${{ matrix.abi }}-
+
+      - name: Cache Engine Data Tables
+        id: cache-engine-data
+        uses: actions/cache@v4
+        with:
+          path: |
+            .local/horizon-client/26.3
+            .local/android/engine-data*.zip
+          key: engine-data-26.3-${{ hashFiles('research-lock.json') }}
+
+      - name: Prepare Engine Data Tables
+        if: steps.cache-engine-data.outputs.cache-hit != 'true'
         run: |
           mkdir -p .local/minecraft/26.3
           mkdir -p .local/android/minecraft/versions/26.3
@@ -143,45 +225,138 @@ jobs:
           python3 - << 'PY'
           p = "tools/android_prepare.py"
           t = open(p).read()
-
           t = t.replace(
               "lab.download(entry['url'], manifest_path, entry['sha1'])",
               "import shutil; manifest_path.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile('.local/minecraft/26.3/manifest.json', manifest_path)"
           )
-
           open(p, "w").write(t)
           PY
 
-          python3 tools/android_prepare.py
+          python3 tools/android_prepare.py ${JAVA_HOME_25_X64:+--java-home "$JAVA_HOME_25_X64"}
 
-      - name: Build Android APK
+      - name: Build Android APK with Native Engine
+        env:
+          ABI: ${{ matrix.abi }}
+          BUILD_TYPE: ${{ needs.configure.outputs.build_type }}
+          PROFILE: ${{ needs.configure.outputs.profile }}
         run: |
-          BUILD_FLAG="--public"
-
-          if [ "${{ github.event.inputs.build_type }}" = "dev" ]; then
-            BUILD_FLAG="--profile dev"
+          echo "=== Building Horizon-Android native engine for $ABI ($BUILD_TYPE, profile: $PROFILE) ==="
+          
+          FLAGS=""
+          if [ "$BUILD_TYPE" = "public" ]; then
+            FLAGS="--public"
           fi
 
           python3 tools/android_build.py \
-            --abi "${{ matrix.abi }}" \
-            $BUILD_FLAG \
+            --abi "$ABI" \
+            --profile "$PROFILE" \
+            $FLAGS \
             --sdk "$ANDROID_HOME" \
-            --java-home "$JAVA_HOME" \
-            --gradle "$(which gradle)"
+            --java-home "$JAVA_HOME_17_X64" \
+            --gradle "$(which gradle)" \
+            --ndk-version "28.2.13676358" \
+            --build-tools-version "35.0.0"
 
-      - name: Generate Checksums
+      - name: Validate Packaged APK
+        env:
+          ABI: ${{ matrix.abi }}
+          TARGET: ${{ matrix.target }}
         run: |
-          cd ".local/android/apk/${{ matrix.abi }}"
+          echo "=== 1. Verify APK File Existence ==="
+          APK_PATH=$(ls .local/android/apk/$ABI/*.apk 2>/dev/null | head -n 1)
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "::error::Built APK was not found in .local/android/apk/$ABI/"
+            exit 1
+          fi
+          echo "Found APK: $APK_PATH"
 
-          sha256sum *.apk > SHA256SUMS.txt
+          echo "=== 2. Verify APK Zip Structural Integrity ==="
+          unzip -t "$APK_PATH" > /dev/null || {
+            echo "::error::APK zip archive is structurally corrupted or incomplete!"
+            exit 1
+          }
+          echo "APK zip structure is valid."
 
+          echo "=== 3. Verify Native Shared Library (.so) Packaging ==="
+          SO_ENTRY="lib/$ABI/libhorizon_android.so"
+          if ! unzip -l "$APK_PATH" | grep -q "$SO_ENTRY"; then
+            echo "::error::Native shared library '$SO_ENTRY' is missing from the APK!"
+            unzip -l "$APK_PATH" | grep "lib/" || true
+            exit 1
+          fi
+          echo "Verified: $SO_ENTRY is properly packaged inside APK."
+
+          echo "=== 4. Verify Manifest and Engine Data Tables ==="
+          unzip -l "$APK_PATH" | grep -E "AndroidManifest\.xml|classes\.dex|assets/engine-data\.zip"
+
+          echo "=== 5. Report APK Size ==="
+          APK_SIZE_HUMAN=$(ls -lh "$APK_PATH" | awk '{print $5}')
+          APK_BYTES=$(stat -c%s "$APK_PATH" 2>/dev/null || stat -f%z "$APK_PATH")
+          echo "APK Size: $APK_SIZE_HUMAN ($APK_BYTES bytes)"
+
+      - name: Stage Artifacts & Generate Build Metadata
+        env:
+          ABI: ${{ matrix.abi }}
+          TARGET: ${{ matrix.target }}
+          BUILD_TYPE: ${{ needs.configure.outputs.build_type }}
+          PROFILE: ${{ needs.configure.outputs.profile }}
+        run: |
+          DIST_DIR="dist"
+          mkdir -p "$DIST_DIR"
+
+          APK_PATH=$(ls .local/android/apk/$ABI/*.apk 2>/dev/null | head -n 1)
+          APK_NAME="horizon-android-${ABI}-${BUILD_TYPE}.apk"
+          cp "$APK_PATH" "$DIST_DIR/$APK_NAME"
+
+          cd "$DIST_DIR"
+          sha256sum "$APK_NAME" > SHA256SUMS.txt
           cat SHA256SUMS.txt
+          cd - > /dev/null
+
+          APK_BYTES=$(stat -c%s "$DIST_DIR/$APK_NAME" 2>/dev/null || stat -f%z "$DIST_DIR/$APK_NAME")
+          APK_SIZE_HUMAN=$(ls -lh "$DIST_DIR/$APK_NAME" | awk '{print $5}')
+
+          python3 - << PY
+          import json, os, datetime
+          metadata = {
+              "application_id": "dev.horizon.android",
+              "git_commit": "${{ github.sha }}",
+              "git_ref": "${{ github.ref }}",
+              "git_branch": "${{ github.ref_name }}",
+              "build_timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              "target_abi": "${ABI}",
+              "rust_target": "${TARGET}",
+              "build_type": "${BUILD_TYPE}",
+              "profile": "${PROFILE}",
+              "apk_filename": "${APK_NAME}",
+              "apk_size_bytes": int("${APK_BYTES}"),
+              "apk_size_human": "${APK_SIZE_HUMAN}",
+              "github_run_id": "${{ github.run_id }}",
+              "github_run_number": "${{ github.run_number }}",
+              "github_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          with open("dist/BUILD_METADATA.json", "w") as f:
+              json.dump(metadata, f, indent=2)
+          print("=== Staged BUILD_METADATA.json ===")
+          print(json.dumps(metadata, indent=2))
+          PY
+
+          echo "### Horizon-Android APK Build: $ABI" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **File**: \`$APK_NAME\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Size**: $APK_SIZE_HUMAN ($APK_BYTES bytes)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **ABI**: \`$ABI\` (\`$TARGET\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Build Type**: \`$BUILD_TYPE\` (profile: \`$PROFILE\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Native Library**: \`lib/$ABI/libhorizon_android.so\` (Verified)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **SHA-256**: \`$(awk '{print $1}' dist/SHA256SUMS.txt)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit**: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: horizon-android-${{ matrix.abi }}-${{ github.event.inputs.build_type || 'public' }}
+          name: ${{ (matrix.abi == 'arm64-v8a' && (github.event.inputs.abi == 'arm64-v8a' || github.event.inputs.abi == null)) && 'horizon-android-apk' || format('horizon-android-apk-{0}', matrix.abi) }}
           path: |
-            .local/android/apk/${{ matrix.abi }}/*.apk
-            .local/android/apk/${{ matrix.abi }}/SHA256SUMS.txt
+            dist/*.apk
+            dist/SHA256SUMS.txt
+            dist/BUILD_METADATA.json
           if-no-files-found: error
+          retention-days: 14
