@@ -35,6 +35,7 @@
 /horizon-touch.json
 /horizon-touch.json.tmp
 # Android build outputs, signing material and local account/session state.
+/Horizon-Mods-REA-Project/
 **/.gradle/
 **/node_modules/
 **/local.properties
