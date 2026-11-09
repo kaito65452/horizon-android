@@ -214,12 +214,20 @@ pub unsafe extern "C" fn horizon_on_create(
             saved: *mut std::ffi::c_void,
             saved_size: usize,
         );
-        fn dlopen(filename: *const std::ffi::c_char, flag: std::ffi::c_int) -> *mut std::ffi::c_void;
-        fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+        fn dlopen(
+            filename: *const std::ffi::c_char,
+            flag: std::ffi::c_int,
+        ) -> *mut std::ffi::c_void;
+        fn dlsym(
+            handle: *mut std::ffi::c_void,
+            symbol: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_void;
     }
     type OnCreate = unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize);
     let own: OnCreate = ANativeActivity_onCreate;
-    if let Some(path) = std::env::var_os("HORIZON_GAME_LIBRARY").or_else(|| std::env::var_os("STARLING_GAME_LIBRARY")) {
+    if let Some(path) = std::env::var_os("HORIZON_GAME_LIBRARY")
+        .or_else(|| std::env::var_os("STARLING_GAME_LIBRARY"))
+    {
         use std::os::unix::ffi::OsStrExt;
         let path = std::ffi::CString::new(path.as_bytes()).unwrap_or_default();
         let entry = unsafe {
