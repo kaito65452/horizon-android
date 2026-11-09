@@ -14855,12 +14855,9 @@ impl Game<'_> {
         self.pad.touch.viewport(size[0], size[1]);
         let raw_menu_blur = self.menu_blur();
         #[cfg(target_os = "android")]
-        let player_hurt = self.player.as_ref().is_some_and(|p| p.hurt_time > 0);
-        #[cfg(target_os = "android")]
         let in_world_stationary_overlay = !self.shows_panorama()
             && self.player.is_some()
             && !self.pad.touch_ui.floating_menu
-            && !player_hurt
             && (self.singleplayer_paused()
                 || matches!(self.screen, Screen::Inventory | Screen::Creative)
                 || self.pad.touch.editor.is_some());
