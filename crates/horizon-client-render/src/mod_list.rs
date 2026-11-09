@@ -86,6 +86,7 @@ pub struct NativePage {
 
 impl ModList {
     pub fn load(dir: &Path) -> Self {
+        #[allow(unused_mut)]
         let mut list = Self::parse(&fs::read_to_string(dir.join(FILE)).unwrap_or_default());
         #[cfg(target_os = "android")]
         for (id, _, _) in ANDROID_BUNDLED {

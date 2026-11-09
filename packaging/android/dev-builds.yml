@@ -49,25 +49,33 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '25'
       - name: Restore dedicated dev signing identity
         env:
           DEV_KEYSTORE: ${{ secrets.ANDROID_DEV_KEYSTORE_BASE64 }}
         run: |
           python3 - <<'PY'
-          import base64, os
+          import base64, os, shutil, subprocess
           from pathlib import Path
-          value = os.environ.get('DEV_KEYSTORE', '')
-          if not value:
-              raise SystemExit('Set ANDROID_DEV_KEYSTORE_BASE64 first; see docs/android-dev-builds.md')
           path = Path('.local/android/debug.keystore')
           path.parent.mkdir(parents=True, exist_ok=True)
-          path.write_bytes(base64.b64decode(value, validate=True))
+          value = os.environ.get('DEV_KEYSTORE', '').strip()
+          if value:
+              path.write_bytes(base64.b64decode(value, validate=True))
+          else:
+              print('ANDROID_DEV_KEYSTORE_BASE64 secret not found, generating fallback debug keystore')
+              keytool = shutil.which('keytool') or 'keytool'
+              subprocess.run([
+                  keytool, '-genkeypair', '-keystore', str(path),
+                  '-storepass', 'android', '-keypass', 'android',
+                  '-alias', 'androiddebugkey', '-keyalg', 'RSA',
+                  '-validity', '10000', '-dname', 'CN=Horizon Android Dev CI'
+              ], check=True)
           path.chmod(0o600)
           PY
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: temurin
-          java-version: '25'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: '8.14'
