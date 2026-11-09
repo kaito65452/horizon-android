@@ -9,9 +9,21 @@ import sys
 PRIVATE_ROOTS = {".local", "decompiled", "minecraft", "assets", "run", "logs"}
 PRIVATE_EXTENSIONS = {".jar", ".class", ".jfr", ".hprof", ".java", ".apk", ".aab", ".keystore", ".jks"}
 ORIGINAL_JDK_TOOLS = {"tools/JfrSummary.java", "tests/java/JfrFixture.java"}
-# Owner-approved, original NativeActivity result callback; not recovered game code.
-ANDROID_RESULT_BRIDGE = "packaging/android/java/dev/horizon/android/HorizonActivity.java"
-ANDROID_DOCUMENTS_BRIDGE = "packaging/android/java/dev/horizon/android/HorizonDocumentsProvider.java"
+# The Android app's own classes (packaging/android/build_apk.py), Horizon's code like the above.
+ORIGINAL_ANDROID = {
+    "packaging/android/java/io/github/juanluci/starling/StarlingActivity.java",
+    "packaging/android/java/io/github/juanluci/starling/GameActivity.java",
+    "packaging/android/java/io/github/juanluci/starling/LauncherActivity.java",
+    "packaging/android/java/io/github/juanluci/starling/DiagnosticsActivity.java",
+    "packaging/android/java/io/github/juanluci/starling/StartupRecovery.java",
+    "packaging/android/java/io/github/juanluci/starling/TextMirror.java",
+    "packaging/android/java/io/github/juanluci/starling/UpdateProvider.java",
+    "packaging/android/java/io/github/juanluci/starling/NativeMods.java",
+    "packaging/android/java/io/github/juanluci/starling/WorkService.java",
+    "packaging/android/java/io/github/juanluci/starling/HorizonImport.java",
+    "packaging/android/java/dev/horizon/android/HorizonActivity.java",
+    "packaging/android/java/dev/horizon/android/HorizonDocumentsProvider.java",
+}
 
 
 def prohibited(path):
@@ -24,7 +36,7 @@ def prohibited(path):
     if any(part in {".local", ".gradle", "node_modules", "__pycache__"} for part in parsed.parts):
         return True
     # Original JDK-only tools are an exact allowlist; recovered game Java stays private.
-    if path in ORIGINAL_JDK_TOOLS or path in {ANDROID_RESULT_BRIDGE, ANDROID_DOCUMENTS_BRIDGE}:
+    if path in ORIGINAL_JDK_TOOLS or path in ORIGINAL_ANDROID:
         return False
     # Original Horizon mod sources may also be tracked.
     if parsed.suffix == ".java" and path.startswith(("mods/horizon/src/", "mods/horizon-lab/src/")):
