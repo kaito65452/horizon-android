@@ -196,6 +196,58 @@ fn init_logging() {
     }
 }
 
+/// NativeActivity's entry point (`android.app.func_name`): the game of this library, or of
+/// the build with native mods HorizonActivity loaded in its place (`HORIZON_GAME_LIBRARY`).
+///
+/// # Safety
+///
+/// NativeActivity's call: an `ANativeActivity` and its saved state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn horizon_on_create(
+    activity: *mut std::ffi::c_void,
+    saved: *mut std::ffi::c_void,
+    saved_size: usize,
+) {
+    unsafe extern "C" {
+        fn ANativeActivity_onCreate(
+            activity: *mut std::ffi::c_void,
+            saved: *mut std::ffi::c_void,
+            saved_size: usize,
+        );
+        fn dlopen(filename: *const std::ffi::c_char, flag: std::ffi::c_int) -> *mut std::ffi::c_void;
+        fn dlsym(handle: *mut std::ffi::c_void, symbol: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+    }
+    type OnCreate = unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize);
+    let own: OnCreate = ANativeActivity_onCreate;
+    if let Some(path) = std::env::var_os("HORIZON_GAME_LIBRARY").or_else(|| std::env::var_os("STARLING_GAME_LIBRARY")) {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::ffi::CString::new(path.as_bytes()).unwrap_or_default();
+        let entry = unsafe {
+            let build = dlopen(path.as_ptr(), 2);
+            if build.is_null() {
+                std::ptr::null_mut()
+            } else {
+                dlsym(build, c"ANativeActivity_onCreate".as_ptr())
+            }
+        };
+        if !entry.is_null() && entry != own as *mut std::ffi::c_void {
+            let entry = unsafe { std::mem::transmute::<*mut std::ffi::c_void, OnCreate>(entry) };
+            return unsafe { entry(activity, saved, saved_size) };
+        }
+        log::error!("the build with native mods has no entry point: playing the APK's own game");
+    }
+    unsafe { ANativeActivity_onCreate(activity, saved, saved_size) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn starling_on_create(
+    activity: *mut std::ffi::c_void,
+    saved: *mut std::ffi::c_void,
+    saved_size: usize,
+) {
+    unsafe { horizon_on_create(activity, saved, saved_size) }
+}
+
 #[unsafe(no_mangle)]
 fn android_main(app: AndroidApp) {
     use winit::platform::android::activity::input::Axis;

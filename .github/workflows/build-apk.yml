@@ -29,6 +29,7 @@ on:
       - 'build-apk*'
       - 'feat/build-apk*'
       - 'feat/experimental-svc*'
+      - 'exp/*'
 
 permissions:
   contents: read
