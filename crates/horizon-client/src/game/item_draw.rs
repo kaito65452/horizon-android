@@ -303,10 +303,37 @@ impl Game<'_> {
             &self.item_env(),
         )
     }
+    /// `ItemModelResolver.updateForTopItem` cached for GUI elements when unchanged.
+    pub(super) fn resolve_gui_item_cached(
+        &self,
+        stack: &ItemStack,
+        owner: &OwnerState,
+    ) -> ItemRenderState {
+        let is_selected = owner.is_selected;
+        let is_using = owner.using_this_item;
+        if !is_using {
+            let cache = self.gui_item_cache.borrow();
+            if let Some((_, _, state)) = cache
+                .iter()
+                .find(|(s, sel, _)| s == stack && *sel == is_selected)
+            {
+                return state.clone();
+            }
+        }
+        let state = self.resolve_item(stack, DisplayContext::Gui, Some(owner), 0);
+        if !is_using {
+            let mut cache = self.gui_item_cache.borrow_mut();
+            if cache.len() >= 128 {
+                cache.remove(0);
+            }
+            cache.push((stack.clone(), is_selected, state.clone()));
+        }
+        state
+    }
     /// `GuiGraphics.renderItem(player, level, stack, x, y, 0)`.
     pub(super) fn draw_item_model(&self, batch: &mut HudBatch, stack: &ItemStack, x: f32, y: f32) {
         let owner = self.player_owner(Some(stack));
-        let state = self.resolve_item(stack, DisplayContext::Gui, Some(&owner), 0);
+        let state = self.resolve_gui_item_cached(stack, &owner);
         item_render::gui::draw(
             &state,
             &self.pack.item_renderer,

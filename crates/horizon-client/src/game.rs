@@ -2321,6 +2321,14 @@ struct Game<'a> {
             horizon_assets::item_model::LevelState,
         )>,
     >,
+    /// Cached resolved GUI item render states: (stack, is_selected) -> state.
+    pub(super) gui_item_cache: std::cell::RefCell<
+        Vec<(
+            ItemStack,
+            bool,
+            horizon_client::item_render::ItemRenderState,
+        )>,
+    >,
     /// Frames drawn with the player in the world, for `--world-frames`.
     world_frames: u64,
     fps: f32,
@@ -14845,9 +14853,28 @@ impl Game<'_> {
         // Load the profile's scheme before drawing the first frame or outline.
         #[cfg(target_os = "android")]
         self.pad.touch.viewport(size[0], size[1]);
-        let menu_blur = self.menu_blur();
-        let menu_blur_cache =
-            self.singleplayer_paused() && !self.shows_panorama() && menu_blur.is_some();
+        let raw_menu_blur = self.menu_blur();
+        #[cfg(target_os = "android")]
+        let player_hurt = self.player.as_ref().is_some_and(|p| p.hurt_time > 0);
+        #[cfg(target_os = "android")]
+        let in_world_stationary_overlay = !self.shows_panorama()
+            && self.player.is_some()
+            && !self.pad.touch_ui.floating_menu
+            && !player_hurt
+            && (self.singleplayer_paused()
+                || matches!(self.screen, Screen::Inventory | Screen::Creative)
+                || self.pad.touch.editor.is_some());
+        #[cfg(not(target_os = "android"))]
+        let in_world_stationary_overlay = false;
+        let menu_blur = if in_world_stationary_overlay {
+            raw_menu_blur.or(Some(0.0))
+        } else {
+            raw_menu_blur
+        };
+        let menu_blur_cache = ((self.singleplayer_paused() || self.screen == Screen::Options)
+            && !self.shows_panorama()
+            && menu_blur.is_some())
+            || in_world_stationary_overlay;
         if !menu_blur_cache || !self.was_menu_blurred {
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.invalidate_menu_blur();
@@ -18617,6 +18644,7 @@ impl<'a> Game<'a> {
             glint_frame: Default::default(),
             kept_block_entities: Default::default(),
             item_level_cache: Default::default(),
+            gui_item_cache: Default::default(),
             world_frames: 0,
             fps: 0.0,
             fps_frames: 0,
