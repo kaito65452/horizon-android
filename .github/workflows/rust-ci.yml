@@ -74,13 +74,13 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --exclude horizon-android --lib --bins --tests -- -D warnings -A clippy::all
       - name: Tests
-        run: cargo test --workspace --exclude horizon-android --lib --bins --tests
+        run: cargo test --workspace --exclude horizon-android --exclude horizon-mods --lib --bins --tests && cargo test -p horizon-mods --lib
       - name: Summary
         if: always()
         run: |
           echo '### Rust checks (${{ matrix.toolchain }})' >> "$GITHUB_STEP_SUMMARY"
           rustc --version >> "$GITHUB_STEP_SUMMARY"
-          echo 'Commands: `cargo clippy --workspace --exclude horizon-android --lib --bins --tests -- -D warnings -A clippy::all`, `cargo test --workspace --exclude horizon-android --lib --bins --tests`' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Commands: `cargo clippy --workspace --exclude horizon-android --lib --bins --tests -- -D warnings -A clippy::all`, `cargo test --workspace --exclude horizon-android --exclude horizon-mods --lib --bins --tests && cargo test -p horizon-mods --lib`' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload failure log
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
