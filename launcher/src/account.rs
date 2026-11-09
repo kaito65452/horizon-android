@@ -1958,7 +1958,7 @@ pub fn java_player() -> Result<crate::java_launch::Player, String> {
     player
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), test))]
 fn java_player_with(
     ep: &Endpoints,
     client_id: Option<&str>,

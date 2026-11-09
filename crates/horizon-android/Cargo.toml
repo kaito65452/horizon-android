@@ -9,12 +9,14 @@ path = "../horizon-client/src/android_main.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
+self_cell = "1.3"
 horizon-client-render = { path = "../horizon-client-render" }
 horizon-chat-filter = { path = "../horizon-chat-filter" }
 horizon-narrator = { path = "../horizon-narrator" }
 horizon-client-input = { path = "../horizon-client-input" }
 horizon-anticheat = { path = "../horizon-anticheat" }
 horizon-client = { path = "../horizon-client", default-features = false }
+voicechat_engine = { path = "../voicechat-engine" }
 android_logger = "0.15"
 regex = "1"
 horizon-hdr = { path = "../horizon-hdr" }

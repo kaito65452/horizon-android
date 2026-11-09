@@ -158,6 +158,21 @@ struct PendingShaderJob {
 
 static PENDING_SHADER_JOB: std::sync::Mutex<Option<PendingShaderJob>> = std::sync::Mutex::new(None);
 
+pub fn pending_shader_pack_status() -> Option<String> {
+    let slot = PENDING_SHADER_JOB.lock().ok()?;
+    let job = slot.as_ref()?;
+    let stage = match job.stage {
+        ShaderJobStage::Cpu(_) => "translating",
+        ShaderJobStage::Gpu(_) => "building pipelines",
+    };
+    Some(format!(
+        "Compiling Shader Pack: {} ({}, {:.1}s)...",
+        job.name,
+        stage,
+        job.started.elapsed().as_secs_f32()
+    ))
+}
+
 fn clear_pending_shader_job() {
     if let Ok(mut slot) = PENDING_SHADER_JOB.lock() {
         *slot = None;
@@ -841,6 +856,7 @@ mod native_pack_tests {
             dev: false,
             has_settings: false,
             native: Some(NativePage::default()),
+            has_settings: false,
         });
         let owned = "native-horizon_better_visuals";
         assert_eq!(active_pack(owned, &mods), owned);

@@ -30,9 +30,8 @@ glam = "0.30"
         f'#[path = "{(ROOT / "crates/horizon-client-render/src/gfx" / (name + ".rs")).as_posix()}"] pub mod {name};'
         for name in ('arena', 'upload', 'timing', 'frame_timing', 'opaque_output', 'terrain_source', 'entity_source')
     )
-    (work / 'src/lib.rs').write_text('''#![allow(dead_code)]
-#[path = " + (ROOT / "crates/horizon-client-render/src/overlay.rs").as_posix() + "] pub mod overlay;
-mod android_runtime {
+    overlay_path = (ROOT / "crates/horizon-client-render/src/overlay.rs").as_posix()
+    (work / 'src/lib.rs').write_text('#![allow(dead_code)]\n#[path = "' + overlay_path + '"] pub mod overlay;\n' + '''mod android_runtime {
     use std::sync::atomic::{AtomicBool, Ordering};
     static GPU_BATCHING: AtomicBool = AtomicBool::new(false);
     pub fn configure_gpu(batching: bool) {

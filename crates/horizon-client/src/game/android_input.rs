@@ -480,7 +480,7 @@ impl Game<'_> {
     }
 
     pub(super) fn android_touch_haptic(&self, millis: u32) {
-        if self.pad.touch.settings.vibrate {
+        if self.pad.touch.settings.ui_vibrate {
             crate::platform::vibrate(horizon_client::gamepad::Pulse {
                 strong: 0.30,
                 weak: 0.55,
@@ -850,12 +850,18 @@ impl Game<'_> {
                     self.settings.touch = self.pad.touch.settings.clone();
                     self.android_sync_pointer();
                 }
-                InGameMenuAction::ToggleVibrate => {
-                    let next = !self.pad.touch.settings.vibrate;
-                    self.pad.touch.settings.vibrate = next;
+                InGameMenuAction::ToggleVibrate | InGameMenuAction::ToggleUiVibrate => {
+                    let ui = matches!(menu_act, InGameMenuAction::ToggleUiVibrate);
+                    let value = if ui {
+                        &mut self.pad.touch.settings.ui_vibrate
+                    } else {
+                        &mut self.pad.touch.settings.vibrate
+                    };
+                    *value = !*value;
+                    let next = *value;
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
-                    if next {
+                    if next && ui {
                         self.android_touch_haptic(22);
                     } else {
                         crate::platform::cancel_vibration();
@@ -905,6 +911,11 @@ impl Game<'_> {
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
                 }
+                InGameMenuAction::SetGyroSensitivity(val) => {
+                    self.pad.touch.settings.gyro_sensitivity = val.clamp(0.10, 3.00);
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                }
                 InGameMenuAction::StepGyroSensitivity(dir) => {
                     self.pad.touch.settings.gyro_sensitivity =
                         (self.pad.touch.settings.gyro_sensitivity + dir as f32 * 0.20)
@@ -920,6 +931,11 @@ impl Game<'_> {
                 InGameMenuAction::StepTouchSensitivity(dir) => {
                     self.pad.touch.settings.sensitivity =
                         (self.pad.touch.settings.sensitivity + dir as f32 * 0.15).clamp(0.10, 3.0);
+                    let _ = self.pad.touch.settings.save();
+                    self.settings.touch = self.pad.touch.settings.clone();
+                }
+                InGameMenuAction::SetButtonScale(val) => {
+                    self.pad.touch.settings.button_scale = val.clamp(0.50, 2.00);
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
                 }
@@ -1002,10 +1018,10 @@ impl Game<'_> {
                     self.pad.touch.settings.svc_enabled = next;
                     let _ = self.pad.touch.settings.save();
                     self.settings.touch = self.pad.touch.settings.clone();
-                    self.voice.set_feature_enabled(next);
-                    if next && self.remote.is_some() {
-                        self.initiate_voice_handshake();
-                    }
+                    horizon_client::android_runtime::set_experimental_svc(
+                        next,
+                        horizon_client::android_runtime::experimental_svc_rnnoise(),
+                    );
                 }
                 InGameMenuAction::SendCustomInput(token) => {
                     self.android_sync_pointer();
@@ -1365,10 +1381,6 @@ impl Game<'_> {
             crate::platform::cancel_vibration();
             self.pad.touch.clear();
             self.pad.touch_aim = None;
-            if self.pad.touch.editor.is_some() {
-                self.pad.touch.cancel_editor();
-                self.pause = false;
-            }
         }
         self.android_custom_events();
         for key in self.pad.touch_ui.release_keys() {

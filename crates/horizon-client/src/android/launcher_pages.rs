@@ -11,6 +11,11 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
+thread_local! {
+    static ACTIVE_SLIDER_DRAG: std::cell::Cell<Option<(Action, f32, f32)>> = const { std::cell::Cell::new(None) };
+    static SLIDER_TRACK_TARGETS: std::cell::RefCell<Vec<([f32; 4], Action, f32, f32)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// Centralized dynamic theme accessors backed by `horizon_client::ui_theme::active_theme()`.
 #[inline]
 fn my3_bg() -> u32 {
@@ -307,6 +312,7 @@ pub(super) enum Action {
     ToggleBundled(&'static str),
     WorldFiles,
     GameFiles,
+    StarlingDownload,
     WorkerLimit,
     ChooseWorkerLimit(u32),
     PerformanceHints,
@@ -333,8 +339,9 @@ pub(super) enum Action {
     ToggleMaxFpsMode,
     ToggleZeroLatencyTouch,
     ToggleFastChunkUpload,
-    ToggleSvcFeature,
-    ToggleSvcRnnoise,
+    ToggleExperimentalLeaves,
+    ToggleExperimentalSvc,
+    ToggleExperimentalSvcRnnoise,
     // Controls & Control Editor actions
     OpenControlEditor,
     CloseControlEditor,
@@ -361,6 +368,8 @@ pub(super) enum Action {
     PointerSizeDelta(f32),
     CycleJoystickZone,
     ToggleTouchVibrate,
+    ToggleTouchUiVibrate,
+    ToggleControlHub,
     ToggleAutoJump,
     ToggleInventoryControls,
     // Theme customization actions (Settings -> Launcher Settings -> Theme)
@@ -711,6 +720,9 @@ fn draw_setting_card(
 
             let left_half = [track_x, pill_y, track_w * 0.5, 36.0];
             let right_half = [track_x + track_w * 0.5, pill_y, track_w * 0.5, 36.0];
+            if let Some(c) = ui.clip_rect([track_x, pill_y, track_w, 36.0]) {
+                SLIDER_TRACK_TARGETS.with(|t| t.borrow_mut().push((c, minus_action, bar_x, bar_w)));
+            }
             if let Some(c) = ui.clip_rect(left_half) {
                 targets.push((c, minus_action));
             }
@@ -1055,6 +1067,7 @@ impl Launcher {
             return Ok(());
         }
         self.targets.clear();
+        SLIDER_TRACK_TARGETS.with(|t| t.borrow_mut().clear());
         self.list_targets.clear();
         self.list_view = None;
 
@@ -1377,7 +1390,7 @@ impl Launcher {
                 );
             } else {
                 let card_y = 66.0 + slide_y;
-                let card_h = (h - 178.0).clamp(148.0, 236.0);
+                let card_h = (h - 178.0).clamp(220.0, 280.0);
                 ui.rounded(content_x, card_y, content_w, card_h, 20.0, my3_surface());
                 ui.border(content_x, card_y, content_w, card_h, 20.0, my3_border());
 
@@ -1408,32 +1421,76 @@ impl Launcher {
                     ),
                 );
 
-                let rows = if installed {
-                    [
-                        "• Native Rust client with hardware Vulkan & OpenGL ES rendering",
-                        "• Browse Mods, Resource Packs & Shaders with Modrinth previews",
-                        "• Customize MCPE & GoyControl HUD layouts in Settings → Controls",
-                    ]
-                } else {
-                    [
-                        "• Downloads official Minecraft 26.3 assets directly from Mojang",
-                        "• Live download speed, ETA and 6-step verification",
-                        "• Play offline or sign in with your Microsoft account",
-                    ]
-                };
-                for (index, line) in rows.iter().enumerate() {
-                    let fitted =
-                        ui.fit_text(Face::Regular, 13.5, line, (content_w - 44.0).max(80.0));
+                ui.text(
+                    Face::SemiBold,
+                    15.0,
+                    content_x + 22.0,
+                    card_y + 84.0,
+                    my3_text(),
+                    "Horizon Android is becoming Starling",
+                );
+                let notice = "Some Horizon Android features are still being transferred and merged. Export your worlds through Android Files (SAF) before moving.";
+                let mut line_y = card_y + 108.0;
+                let font_size = 11.5;
+                let mut line = String::new();
+                for word in notice.split_whitespace() {
+                    let candidate = if line.is_empty() {
+                        word.to_owned()
+                    } else {
+                        format!("{line} {word}")
+                    };
+                    if !line.is_empty()
+                        && ui.measure(Face::Regular, font_size, &candidate) > content_w - 44.0
+                    {
+                        ui.text(
+                            Face::Regular,
+                            font_size,
+                            content_x + 22.0,
+                            line_y,
+                            my3_muted(),
+                            &line,
+                        );
+                        line_y += 15.0;
+                        line.clear();
+                    }
+                    if !line.is_empty() {
+                        line.push(' ');
+                    }
+                    line.push_str(word);
+                }
+                if !line.is_empty() {
                     ui.text(
                         Face::Regular,
-                        13.5,
+                        font_size,
                         content_x + 22.0,
-                        card_y + 86.0 + index as f32 * 25.0,
+                        line_y,
                         my3_muted(),
-                        &fitted,
+                        &line,
                     );
                 }
-
+                let migration_y = line_y + 24.0;
+                let migration_w = (content_w - 52.0) * 0.5;
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [content_x + 22.0, migration_y, migration_w, 34.0],
+                    "Download Starling",
+                    Action::StarlingDownload,
+                    false,
+                );
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [
+                        content_x + 30.0 + migration_w,
+                        migration_y,
+                        migration_w,
+                        34.0,
+                    ],
+                    "Export worlds (SAF)",
+                    Action::WorldFiles,
+                    false,
+                );
                 let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
                 let play_w = content_w.min(256.0);
                 let is_launching = self.launching || self.session_worker.is_some();
@@ -1792,11 +1849,14 @@ impl Launcher {
 
                 let text_max = (content_w - 190.0).max(80.0);
                 let title = ui.fit_text(Face::SemiBold, 15.0, &p.title, text_max);
-                let rich_summary = self
-                    .catalog
-                    .enriched_summaries
-                    .get(&p.id)
-                    .map_or(p.summary.as_str(), String::as_str);
+                let rich_summary = if crate::catalog::source_only_mod(p) {
+                    "Native .hnmod temporarily unsupported on Android; built-in mods are available."
+                } else {
+                    self.catalog
+                        .enriched_summaries
+                        .get(&p.id)
+                        .map_or(p.summary.as_str(), String::as_str)
+                };
                 let summary = ui.fit_text(Face::Regular, 12.5, rich_summary, text_max);
                 ui.text(
                     Face::SemiBold,
@@ -3183,6 +3243,8 @@ impl Launcher {
                 } else {
                     format!("Enable Built-in ({version})")
                 }
+            } else if crate::catalog::source_only_mod(&modal.project) {
+                "Native .hnmod temporarily unsupported on Android".to_owned()
             } else if let Some(state) = self.catalog.download_label(&modal.project) {
                 state
             } else {
@@ -4044,9 +4106,7 @@ impl Launcher {
             }
             SettingsCategory::Launcher => {
                 let c = &self.catalog.config;
-                let svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
-                let count = 13;
+                let count = 12;
                 let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
                 let max_scroll =
                     (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
@@ -4083,7 +4143,7 @@ impl Launcher {
                 };
                 let game_anim_off = c.disable_game_animations || touch_cfg.disable_game_animations;
 
-                let rows: [(&str, &str, SettingControl<'_>); 13] = [
+                let rows: [(&str, &str, SettingControl<'_>); 12] = [
                     (
                         "APPEARANCE, DPI SCALING & MOTION",
                         "Material 3 Expressive theme studio, adaptive phone DPI scaling & animation toggles",
@@ -4156,11 +4216,6 @@ impl Launcher {
                         "Open game & world folders",
                         "Manage saves, resource packs and mods in Android Files",
                         SettingControl::Button("Open Files", Action::GameFiles, false),
-                    ),
-                    (
-                        "Simple Voice Chat (SVC)",
-                        "Enable built-in proximity voice chat, HUD indicator & 3D spatial audio in multiplayer",
-                        SettingControl::Toggle(svc_cfg.enabled, Action::ToggleSvcFeature),
                     ),
                 ];
 
@@ -4808,7 +4863,7 @@ impl Launcher {
                 let invert_y_active = opts.invert_y || touch_cfg.invert_y;
                 let sprint_latch_active = opts.toggle_sprint || touch_cfg.sprint_toggle;
 
-                let rows: [(&str, &str, SettingControl<'_>); 25] = [
+                let rows: [(&str, &str, SettingControl<'_>); 27] = [
                     (
                         "LAYOUT EDITOR & PRESET PROFILES",
                         "Visual HUD canvas editor, multi-profile switcher, duplication & JSON export",
@@ -4951,8 +5006,21 @@ impl Launcher {
                         SettingControl::Toggle(opts.auto_jump, Action::ToggleAutoJump),
                     ),
                     (
-                        "Haptic Touch Vibration",
-                        "Tactile vibration feedback when pressing HUD buttons and breaking blocks",
+                        "Control Hub Button",
+                        "Show the top-left control menu button",
+                        SettingControl::Toggle(
+                            touch_cfg.show_control_hub,
+                            Action::ToggleControlHub,
+                        ),
+                    ),
+                    (
+                        "UI Vibration",
+                        "Vibration when pressing interface buttons",
+                        SettingControl::Toggle(touch_cfg.ui_vibrate, Action::ToggleTouchUiVibrate),
+                    ),
+                    (
+                        "Gameplay Vibration",
+                        "Vibration for damage and block breaking",
                         SettingControl::Toggle(touch_cfg.vibrate, Action::ToggleTouchVibrate),
                     ),
                     (
@@ -5141,9 +5209,7 @@ impl Launcher {
             }
             SettingsCategory::Experimental => {
                 let c = &self.catalog.config;
-                let svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
-                let count = 12;
+                let count = 13;
                 let max_scroll = (count as f32 * step_y - (list_bottom - list_top)).max(0.0);
                 self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
                 self.list_view = Some([list_top, list_bottom, max_scroll]);
@@ -5157,13 +5223,13 @@ impl Launcher {
                 } else {
                     "Balanced Default"
                 };
-                let svc_badge = if svc_cfg.enabled {
+                let svc_badge = if c.svc_enabled {
                     "SVC Enabled"
                 } else {
                     "SVC Disabled"
                 };
 
-                let rows: [(&str, &str, SettingControl<'_>); 12] = [
+                let rows: [(&str, &str, SettingControl<'_>); 13] = [
                     (
                         "PERFORMANCE PROFILES & GPU PIPELINE",
                         "Hardware-tuned presets for Mali-G52 / Adreno GPUs and high-refresh displays",
@@ -5216,19 +5282,29 @@ impl Launcher {
                         SettingControl::Toggle(c.device.gpu_profile, Action::GpuProfile),
                     ),
                     (
-                        "SIMPLE VOICE CHAT (SVC) ENGINE",
-                        "Built-in 48kHz Opus VOIP, RNNoise neural denoiser, Voice-Gated AGC & 3D spatial audio",
+                    (
+                        "Experimental Leaf Culling",
+                        "Simplifies dense foliage and changes its appearance; applies on next Play",
+                        SettingControl::Toggle(
+                            c.experimental_leaf_culling,
+                            Action::ToggleExperimentalLeaves,
+                        ),
+                    ),
+                    (
+                        "VOICE CHAT & ACOUSTIC CONDITIONING",
+                        "Built-in Simple Voice Chat 2.6.x (Complex Voice Chat v2.0.0) & RNNoise filter",
                         SettingControl::SectionHeader(svc_badge, Icon::Flask),
                     ),
                     (
-                        "Simple Voice Chat (SVC)",
-                        "Enable built-in proximity voice chat, HUD indicator & UDP audio engine in multiplayer",
-                        SettingControl::Toggle(svc_cfg.enabled, Action::ToggleSvcFeature),
+                        "Built-in Simple Voice Chat (SVC)",
+                        "Enables proximity voice chat, groups, V-menu & UDP Opus audio on SVC servers",
+                        SettingControl::Toggle(c.svc_enabled, Action::ToggleExperimentalSvc),
                     ),
                     (
-                        "SVC RNNoise Neural Denoiser",
-                        "Suppress background noise with dual 10ms RNNoise neural sub-frames & Voice-Gated AGC",
-                        SettingControl::Toggle(svc_cfg.rnnoise_enabled, Action::ToggleSvcRnnoise),
+                        "SVC RNNoise & Echo Suppression",
+                        "Post-AEC RNNoise neural denoiser, NLMS echo filter & smart speaker ducking",
+                        SettingControl::Toggle(c.svc_rnnoise, Action::ToggleExperimentalSvcRnnoise),
+                    ),
                     ),
                 ];
 
@@ -5619,6 +5695,38 @@ impl Launcher {
                 }
                 .into();
             }
+            Some(Action::ToggleExperimentalLeaves) => {
+                self.catalog.config.experimental_leaf_culling ^= true;
+                self.catalog.config.save(&self.home)?;
+            }
+            Some(Action::ToggleExperimentalSvc) => {
+                self.catalog.config.svc_enabled ^= true;
+                self.catalog.config.save(&self.home)?;
+                horizon_client::android_runtime::set_experimental_svc(
+                    self.catalog.config.svc_enabled,
+                    self.catalog.config.svc_rnnoise,
+                );
+                self.catalog.status = if self.catalog.config.svc_enabled {
+                    "Built-in Simple Voice Chat enabled."
+                } else {
+                    "Built-in Simple Voice Chat disabled."
+                }
+                .into();
+            }
+            Some(Action::ToggleExperimentalSvcRnnoise) => {
+                self.catalog.config.svc_rnnoise ^= true;
+                self.catalog.config.save(&self.home)?;
+                horizon_client::android_runtime::set_experimental_svc(
+                    self.catalog.config.svc_enabled,
+                    self.catalog.config.svc_rnnoise,
+                );
+                self.catalog.status = if self.catalog.config.svc_rnnoise {
+                    "SVC RNNoise & echo suppression filter enabled."
+                } else {
+                    "SVC RNNoise & echo suppression filter disabled."
+                }
+                .into();
+            }
             Some(Action::ToggleFastChunkUpload) => {
                 self.catalog.config.fast_chunk_upload = !self.catalog.config.fast_chunk_upload;
                 self.catalog.config.save(&self.home)?;
@@ -5627,36 +5735,6 @@ impl Launcher {
                     "Fast Chunk Mesh Upload Boost active."
                 } else {
                     "Standard chunk mesh upload active."
-                }
-                .into();
-            }
-            Some(Action::ToggleSvcFeature) => {
-                let game_home = self.catalog.config.game_home(&self.home);
-                let mut svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
-                svc_cfg.enabled = !svc_cfg.enabled;
-                let _ = svc_cfg.save_to_dir(&game_home);
-                let _ = svc_cfg.save_to_dir(&self.home);
-                let enabled = svc_cfg.enabled;
-                self.modify_touch_settings(|t| t.svc_enabled = enabled);
-                self.catalog.status = if enabled {
-                    "Simple Voice Chat (SVC) enabled."
-                } else {
-                    "Simple Voice Chat (SVC) disabled."
-                }
-                .into();
-            }
-            Some(Action::ToggleSvcRnnoise) => {
-                let game_home = self.catalog.config.game_home(&self.home);
-                let mut svc_cfg =
-                    horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&game_home);
-                svc_cfg.rnnoise_enabled = !svc_cfg.rnnoise_enabled;
-                let _ = svc_cfg.save_to_dir(&game_home);
-                let _ = svc_cfg.save_to_dir(&self.home);
-                self.catalog.status = if svc_cfg.rnnoise_enabled {
-                    "SVC RNNoise Neural Denoiser & Voice-Gated AGC enabled."
-                } else {
-                    "SVC RNNoise Neural Denoiser disabled."
                 }
                 .into();
             }
@@ -5881,6 +5959,12 @@ impl Launcher {
                     t.joystick_style.move_area = t.joystick_style.move_area.next();
                 });
             }
+            Some(Action::ToggleTouchUiVibrate) => {
+                self.modify_touch_settings(|t| t.ui_vibrate = !t.ui_vibrate);
+            }
+            Some(Action::ToggleControlHub) => {
+                self.modify_touch_settings(|t| t.show_control_hub = !t.show_control_hub);
+            }
             Some(Action::ToggleTouchVibrate) => {
                 self.modify_touch_settings(|t| t.vibrate = !t.vibrate);
             }
@@ -5917,6 +6001,14 @@ impl Launcher {
             Some(Action::ToggleBundled(id)) => {
                 self.toggle_bundled_mod(id)?;
             }
+            Some(Action::StarlingDownload) => {
+                if !crate::platform::open_url(
+                    "https://github.com/JuanLuci/starling/releases/latest",
+                ) {
+                    self.catalog.status =
+                        "Open github.com/JuanLuci/starling/releases to download Starling.".into();
+                }
+            }
             Some(Action::GameFiles) => {
                 self.catalog.status = if crate::platform::open_documents(crate::document_store::ROOT) {
                     "Game files opened. Worlds, mods, packs, shaders and reports are available here."
@@ -5925,7 +6017,7 @@ impl Launcher {
             Some(Action::WorldFiles) => {
                 let id = crate::document_store::folder_id(self.catalog.config.profile, "worlds");
                 self.catalog.status = if crate::platform::open_documents(&id) {
-                    "Copy a complete world folder to back up or import. Finish copying before Play; never replace an existing world silently."
+                    "In Android Files, select a complete world folder, then Copy to a folder you choose. Keep Horizon Android installed until you verify your worlds in Starling."
                 } else { "Open system Files > Horizon Android > Worlds. Copy complete world folders while the game is closed." }.into();
             }
             Some(Action::WorkerLimit) => self.open_chooser(chooser::Kind::WorkerLimit),
@@ -6811,6 +6903,60 @@ impl Launcher {
         }
     }
 
+    fn apply_slider_fraction(&mut self, action: Action, frac: f32) {
+        let t = frac.clamp(0.0, 1.0);
+        match action {
+            Action::RenderScaleDelta(_) => {
+                let next_pct = (25.0 + t * 75.0).round() as u32;
+                let scale = crate::display::RenderScale::new(next_pct);
+                self.catalog.config.render_scale = scale;
+                let _ = self.catalog.config.save(&self.home);
+                crate::display::set_scale(scale);
+                self.modify_game_settings(|s| {
+                    s.horizon.resolution_scale = next_pct;
+                });
+                self.modify_touch_settings(|ts| {
+                    ts.resolution_scale_percent = next_pct;
+                });
+            }
+            Action::RenderDistDelta(_) => {
+                let rd = (2.0 + t * 30.0).round() as i32;
+                self.modify_game_settings(|s| s.render_distance = rd.clamp(2, 32));
+            }
+            Action::SimDistDelta(_) => {
+                let sd = (5.0 + t * 27.0).round() as i32;
+                self.modify_game_settings(|s| s.simulation_distance = sd.clamp(5, 32));
+            }
+            Action::FovDelta(_) => {
+                let fov = (30.0 + t * 80.0).round();
+                self.modify_game_settings(|s| s.fov = fov.clamp(30.0, 110.0));
+            }
+            Action::TouchSensDelta(_) => {
+                let v = ((0.10 + t * 2.90) * 100.0).round() / 100.0;
+                self.modify_touch_settings(|ts| ts.sensitivity = v.clamp(0.10, 3.0));
+            }
+            Action::MouseSensDelta(_) => {
+                let v = ((0.05 + t * 0.95) * 100.0).round() / 100.0;
+                self.modify_game_settings(|s| s.sensitivity = v.clamp(0.05, 1.0));
+            }
+            Action::ButtonScaleDelta(_) => {
+                let v = ((0.60 + t * 1.00) * 100.0).round() / 100.0;
+                self.modify_touch_settings(|ts| ts.button_scale = v.clamp(0.60, 1.60));
+            }
+            Action::PointerSizeDelta(_) => {
+                let v = ((0.50 + t * 1.50) * 100.0).round() / 100.0;
+                self.modify_touch_settings(|ts| {
+                    ts.virtual_mouse_pointer_scale = v.clamp(0.50, 2.0)
+                });
+            }
+            Action::GyroSensDelta(_) => {
+                let v = ((0.10 + t * 2.90) * 100.0).round() / 100.0;
+                self.modify_touch_settings(|ts| ts.gyro_sensitivity = v.clamp(0.10, 3.0));
+            }
+            _ => {}
+        }
+    }
+
     pub(super) fn ui_density(&self) -> f32 {
         let (Some(r), Some(gui)) = (&self.renderer, &self.gui) else {
             return 1.0;
@@ -6892,34 +7038,62 @@ impl Launcher {
             return Ok(());
         }
 
+        let density = self.ui_density();
+        let px = t.location.x as f32 / density;
+        let py = t.location.y as f32 / density;
         match t.phase {
             TouchPhase::Started => {
-                self.drag = Some(super::gesture::Drag::new(t.location.x, t.location.y));
+                let hit_slider = SLIDER_TRACK_TARGETS.with(|list| {
+                    list.borrow()
+                        .iter()
+                        .rev()
+                        .find(|([x, y, w, h], _, _, _)| {
+                            (*x..*x + *w).contains(&px) && (*y..*y + *h).contains(&py)
+                        })
+                        .map(|(_, action, bar_x, bar_w)| (*action, *bar_x, *bar_w))
+                });
+                if let Some((action, bar_x, bar_w)) = hit_slider {
+                    ACTIVE_SLIDER_DRAG.with(|c| c.set(Some((action, bar_x, bar_w))));
+                    self.drag = None;
+                    let frac = ((px - bar_x) / bar_w.max(1.0)).clamp(0.0, 1.0);
+                    self.apply_slider_fraction(action, frac);
+                } else {
+                    ACTIVE_SLIDER_DRAG.with(|c| c.set(None));
+                    self.drag = Some(super::gesture::Drag::new(t.location.x, t.location.y));
+                }
             }
             TouchPhase::Moved => {
-                let density = self.ui_density() as f64;
-                if let Some(drag) = &mut self.drag {
-                    let delta = drag.update(t.location.x, t.location.y, density);
-                    if drag.moved {
-                        if let Some(chooser) = &mut self.chooser {
-                            chooser.scroll = (chooser.scroll + delta).max(0.0);
-                        } else if let Some(modal) = &mut self.catalog.project_modal {
-                            modal.scroll = (modal.scroll + delta).max(0.0);
-                        } else if self
-                            .list_view
-                            .is_some_and(|view| drag.origin_y() / density >= view[0] as f64)
-                        {
-                            self.catalog.scroll = (self.catalog.scroll + delta).max(0.0);
+                if let Some((action, bar_x, bar_w)) = ACTIVE_SLIDER_DRAG.with(|c| c.get()) {
+                    let frac = ((px - bar_x) / bar_w.max(1.0)).clamp(0.0, 1.0);
+                    self.apply_slider_fraction(action, frac);
+                } else {
+                    let density_f64 = density as f64;
+                    if let Some(drag) = &mut self.drag {
+                        let delta = drag.update(t.location.x, t.location.y, density_f64);
+                        if drag.moved {
+                            if let Some(chooser) = &mut self.chooser {
+                                chooser.scroll = (chooser.scroll + delta).max(0.0);
+                            } else if let Some(modal) = &mut self.catalog.project_modal {
+                                modal.scroll = (modal.scroll + delta).max(0.0);
+                            } else if self
+                                .list_view
+                                .is_some_and(|view| drag.origin_y() / density_f64 >= view[0] as f64)
+                            {
+                                self.catalog.scroll = (self.catalog.scroll + delta).max(0.0);
+                            }
                         }
                     }
                 }
             }
             TouchPhase::Ended => {
-                if self.drag.take().is_some_and(|drag| !drag.moved) {
+                if ACTIVE_SLIDER_DRAG.with(|c| c.take()).is_some() {
+                    self.drag = None;
+                } else if self.drag.take().is_some_and(|drag| !drag.moved) {
                     self.activate(events)?;
                 }
             }
             TouchPhase::Cancelled => {
+                ACTIVE_SLIDER_DRAG.with(|c| c.set(None));
                 self.drag = None;
             }
         }

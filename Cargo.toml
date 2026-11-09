@@ -2,6 +2,7 @@
 exclude = ["launcher", "crates/horizon-telemetry-server", "crates/horizon-mod-registry", "third_party/wgpu-hal", "third_party/winit", "third_party/naga"]
 members = [
     "crates/horizon-android",
+    "crates/voicechat-engine",
     "crates/horizon-core",
     "crates/horizon-dualsense",
     "crates/horizon-narrator",
@@ -58,6 +59,8 @@ rust-version = "1.85"
 
 [workspace.lints.rust]
 unknown_lints = "allow"
+private_interfaces = "allow"
+dead_code = "allow"
 
 # Ports mirror vanilla's Java signatures, index loops and nested generic types
 # one to one so they can be checked against the decompiled sources.

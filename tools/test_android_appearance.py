@@ -53,6 +53,15 @@ mod java_launch {
     #[derive(Debug)]
     pub struct Player { pub name: String, pub uuid: String, pub token: String, pub xuid: String }
 }
+pub mod secure_store {
+    pub struct AndroidStore;
+    impl crate::account::SecretStore for AndroidStore {
+        fn get(&self, _: &str) -> Result<Option<String>, String> { Ok(None) }
+        fn set(&self, _: &str, _: &str) -> Result<(), String> { Ok(()) }
+        fn delete(&self, _: &str) -> Result<(), String> { Ok(()) }
+        fn persistent(&self) -> bool { false }
+    }
+}
 '''
     for name in ('account', 'skins'):
         source += f'#[path = "{(ROOT / "launcher/src" / (name + ".rs")).as_posix()}"] pub mod {name};\n'

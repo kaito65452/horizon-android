@@ -86,7 +86,14 @@ pub struct NativePage {
 
 impl ModList {
     pub fn load(dir: &Path) -> Self {
-        Self::parse(&fs::read_to_string(dir.join(FILE)).unwrap_or_default())
+        let mut list = Self::parse(&fs::read_to_string(dir.join(FILE)).unwrap_or_default());
+        #[cfg(target_os = "android")]
+        for (id, _, _) in ANDROID_BUNDLED {
+            if !list.enabled.contains(id) {
+                list.disabled.insert(id.to_owned());
+            }
+        }
+        list
     }
     pub fn parse(text: &str) -> Self {
         let ids = |value: &str| -> BTreeSet<String> {
@@ -98,16 +105,6 @@ impl ModList {
                 .collect()
         };
         let (enabled, disabled) = (ids("true"), ids("false"));
-        #[cfg(target_os = "android")]
-        let disabled = {
-            let mut disabled = disabled;
-            for (id, _, _) in ANDROID_BUNDLED {
-                if !enabled.contains(id) {
-                    disabled.insert(id.to_owned());
-                }
-            }
-            disabled
-        };
         let mut keys: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
         for (k, v) in text.lines().filter_map(|l| l.split_once(':')) {
             // Mod ids have no dots; a key's name may.

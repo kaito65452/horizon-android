@@ -92,6 +92,12 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub fast_chunk_upload: bool,
     #[serde(default)]
+    pub experimental_leaf_culling: bool,
+    #[serde(default = "default_true")]
+    pub svc_enabled: bool,
+    #[serde(default = "default_true")]
+    pub svc_rnnoise: bool,
+    #[serde(default)]
     pub disable_launcher_animations: bool,
     #[serde(default)]
     pub disable_game_animations: bool,
@@ -174,6 +180,16 @@ impl Config {
         config.device.migrate_missing(&value, &legacy);
         config.name = truncate_player_name(&config.name);
         config.theme.sanitize();
+        if value.get("svc_enabled").is_none() {
+            config.svc_enabled = true;
+        }
+        if value.get("svc_rnnoise").is_none() {
+            config.svc_rnnoise = true;
+        }
+        horizon_client::android_runtime::set_experimental_svc(
+            config.svc_enabled,
+            config.svc_rnnoise,
+        );
         horizon_client::ui_theme::set_active_theme(config.theme.resolve());
         horizon_client::ui_theme::motion::set_reduced_motion(
             config.disable_launcher_animations
@@ -245,6 +261,10 @@ impl Config {
         }
     }
     pub fn apply_experimental_to_game(&self, home: &Path) {
+        horizon_client::android_runtime::set_experimental_leaf_culling(
+            self.experimental_leaf_culling,
+        );
+        horizon_client::android_runtime::set_experimental_svc(self.svc_enabled, self.svc_rnnoise);
         let game = self.game_home(home);
         let _ = std::fs::create_dir_all(&game);
         let options_path = game.join("options.txt");
@@ -806,11 +826,75 @@ impl Catalog {
                 kind: horizon_client::content_files::Kind::Mods,
                 file: e.file.clone(),
                 title: format!("{} ({})", e.title, e.version),
-                enabled: on.enabled.contains(mod_id),
+                enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
                 size_bytes,
                 badge: "MOD",
                 subtitle,
             });
+        }
+        // Also scan horizon-native-mods/ for any .hnmod or .hmod files on disk.
+        let native_dir = game.join("horizon-native-mods");
+        if std::fs::symlink_metadata(&native_dir).is_ok_and(|m| !m.file_type().is_symlink()) {
+            for entry in std::fs::read_dir(&native_dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                if !entry.file_type().is_ok_and(|t| t.is_file()) {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !horizon_client::content_files::plain_name(&name)
+                    || (!name.ends_with(".hnmod")
+                        && !name.ends_with(".hmod")
+                        && !name.ends_with(".jar"))
+                {
+                    continue;
+                }
+                let rel = format!("horizon-native-mods/{name}");
+                if self
+                    .local
+                    .iter()
+                    .any(|item| item.file == name || item.file == rel)
+                {
+                    continue;
+                }
+                let mod_id = name
+                    .strip_suffix(".hnmod")
+                    .or_else(|| name.strip_suffix(".hmod"))
+                    .or_else(|| name.strip_suffix(".jar"))
+                    .unwrap_or(&name);
+                let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                self.local.push(LocalItem {
+                    kind: horizon_client::content_files::Kind::Mods,
+                    file: rel,
+                    title: mod_id.to_owned(),
+                    enabled: on.enabled.contains(mod_id) && !on.disabled.contains(mod_id),
+                    size_bytes,
+                    badge: "MOD",
+                    subtitle: format!(
+                        "Horizon Native Mod (.hnmod)  •  {}  •  {name}",
+                        format_file_size(size_bytes)
+                    ),
+                });
+            }
+        }
+        // Include enabled built-in Horizon mods (ANDROID_BUNDLED) in Installed > Mods.
+        for &(b_id, b_title, b_desc) in &horizon_client::mod_list::ANDROID_BUNDLED {
+            if on.enabled.contains(b_id) && !on.disabled.contains(b_id) {
+                let b_file = format!("builtin:{b_id}");
+                if !self.local.iter().any(|item| item.file == b_file) {
+                    self.local.push(LocalItem {
+                        kind: horizon_client::content_files::Kind::Mods,
+                        file: b_file,
+                        title: b_title.to_owned(),
+                        enabled: true,
+                        size_bytes: 0,
+                        badge: "MOD",
+                        subtitle: format!("Built-in Horizon Mod  •  {b_desc}  •  {b_id}"),
+                    });
+                }
+            }
         }
         self.sort_local_items();
         self.refresh_fm(home);
@@ -1055,6 +1139,9 @@ impl Catalog {
         self.status = "Download cancelled.".into();
     }
     pub fn download_label(&self, project: &Project) -> Option<String> {
+        if source_only_mod(project) {
+            return Some("Unsupported".into());
+        }
         if self
             .downloading
             .as_ref()
@@ -1194,7 +1281,10 @@ impl Catalog {
                     self.status = s;
                     self.show_installed(Some(kind));
                 }
-                Err(e) => self.status = e,
+                Err(e) => {
+                    log::warn!("Add-on operation failed: {e}");
+                    self.status = e;
+                }
             }
             self.refresh(home);
         }
@@ -1504,11 +1594,9 @@ impl Catalog {
                 items.len()
             )
         } else if self.page == Page::Mods {
-            let source_only = items.iter().filter(|p| source_only_mod(p)).count();
             format!(
-                "{} .hmod / {} source-only .hnmod (not supported yet)",
-                items.len().saturating_sub(source_only),
-                source_only
+                "{} Horizon mods available (playhorizon.dev/mods) - select Install to download",
+                items.len()
             )
         } else {
             format!("{} results - select Install to download", items.len())
@@ -1532,7 +1620,8 @@ impl Catalog {
             };
             let mut query = Query::new(&text, kind);
             query.offset = offset;
-            query.limit = 12;
+            query.limit = 100;
+            query.everything = true;
             let result = if page == Page::Shaders && source == browser::SourceId::Modrinth {
                 query.everything = true;
                 browser::modrinth::search_shader_packs(&query)
@@ -1605,12 +1694,9 @@ impl Catalog {
         let Some(project) = self.results.get(index).cloned() else {
             return;
         };
+
         if source_only_mod(&project) {
-            self.status = "This .hnmod needs a separately compiled client. Android support is planned; sandboxed .hmod mods can be installed now.".into();
-            return;
-        }
-        if project.kind == Kind::Mod && project.source == browser::SourceId::Modrinth {
-            self.status = "Modrinth Java mods are not supported on Android; this list is for browsing. Horizon .hmod mods install normally.".into();
+            self.status = "Native .hnmod mods are temporarily unsupported on Android. Built-in mods remain available.".into();
             return;
         }
         if self.busy() || self.download_label(&project).is_some() {
@@ -1703,6 +1789,19 @@ impl Catalog {
                     return;
                 }
                 let mut on = horizon_client::mod_list::ModList::load(&game);
+                if let Some(bid) = item.file.strip_prefix("builtin:") {
+                    if item.enabled {
+                        on.enabled.remove(bid);
+                        on.disabled.insert(bid.to_owned());
+                    } else {
+                        on.disabled.remove(bid);
+                        on.enabled.insert(bid.to_owned());
+                    }
+                    on.save(&game);
+                    self.status = "Selection saved for the next game launch".into();
+                    self.refresh(home);
+                    return;
+                }
                 let id = item
                     .file
                     .strip_prefix("horizon-native-mods/")
@@ -1747,6 +1846,13 @@ impl Catalog {
         };
         let game = self.config.game_home(home);
         let result = (|| -> Result<(), String> {
+            if let Some(bid) = item.file.strip_prefix("builtin:") {
+                let mut on = horizon_client::mod_list::ModList::load(&game);
+                on.enabled.remove(bid);
+                on.disabled.insert(bid.to_owned());
+                on.save(&game);
+                return Ok(());
+            }
             if item.file.starts_with("horizon-mods/")
                 || item.file.starts_with("horizon-native-mods/")
             {

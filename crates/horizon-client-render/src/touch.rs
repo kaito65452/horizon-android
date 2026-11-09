@@ -194,6 +194,8 @@ pub struct TouchControls {
     pub inventory_mode: bool,
     /// True when a menu (Main Title Menu, Inventory, Pause, Options) is open so `visible_in_menu` controls apply.
     pub in_menu: bool,
+    /// True when an inventory or container screen (`Screen::Inventory | Screen::Creative`) is open.
+    pub in_inventory: bool,
     /// True when `touch_ui::draw_goy_hud` renders GoyControl with `Ui::mobile` so `TouchControls::draw` skips duplicate boxy drawing.
     pub goy_rendered_by_ui: bool,
     pub inventory_shift: bool,
@@ -219,6 +221,7 @@ pub struct TouchControls {
     pub swimming: bool,
     pub mounted: bool,
     pub sneaking: bool,
+    pub toggle_crouch: bool,
     /// Snapshotted by a world gesture; drift cannot turn eating into mining.
     pub hold_uses_item: bool,
     pub holding_use: bool,
@@ -241,6 +244,7 @@ impl Default for TouchControls {
             inventory_mode: false,
             inventory_shift: false,
             in_menu: false,
+            in_inventory: false,
             goy_rendered_by_ui: false,
             editor: None,
             fingers: BTreeMap::new(),
@@ -264,6 +268,7 @@ impl Default for TouchControls {
             swimming: false,
             mounted: false,
             sneaking: false,
+            toggle_crouch: false,
             hold_uses_item: false,
             holding_use: false,
             holding: false,
@@ -409,6 +414,20 @@ impl TouchControls {
     pub fn ignore(&mut self, id: u64) {
         self.fingers.insert(id, (Role::Ignore, [0.0; 2]));
     }
+    pub fn consume_ignored(&mut self, id: u64, ended: bool) -> bool {
+        if !self.custom_fingers.contains_key(&id)
+            && self
+                .fingers
+                .get(&id)
+                .is_some_and(|(role, _)| matches!(role, Role::Ignore))
+        {
+            if ended {
+                self.fingers.remove(&id);
+            }
+            return true;
+        }
+        false
+    }
     pub fn tap(&mut self, button: Button) {
         self.pending.set(button, true);
     }
@@ -421,15 +440,7 @@ impl TouchControls {
         if self.settings.control_style != ControlStyle::Mcpe {
             return false;
         }
-        if self.editor.is_some() || hide_gui || !touch_active {
-            return false;
-        }
-        if in_menu && !self.inventory_mode {
-            return Control::ALL
-                .into_iter()
-                .any(|c| self.visible_for_state(c, true));
-        }
-        if in_menu && self.inventory_mode {
+        if self.editor.is_some() || hide_gui || !touch_active || in_menu {
             return false;
         }
         Control::ALL
@@ -446,6 +457,12 @@ impl TouchControls {
         }
         let p = self.placement(c);
         if in_menu {
+            if self.in_inventory
+                && self.settings.control_style == ControlStyle::Mcpe
+                && matches!(c, Control::Sneak | Control::Inventory)
+            {
+                return true;
+            }
             p.visible_in_menu
         } else {
             p.visible_in_game
@@ -612,8 +629,11 @@ impl TouchControls {
                 && Self::inventory_token(control)
                     .is_some_and(|token| self.held_custom_tokens().any(|held| held == token)))
                 || (control == Control::Sneak
-                    && if self.inventory_mode {
+                    && if self.inventory_mode || self.in_inventory {
                         self.inventory_shift
+                            || self
+                                .held_custom_tokens()
+                                .any(|held| held == "key.keyboard.left.shift")
                     } else {
                         self.sneaking
                     })
@@ -886,17 +906,22 @@ impl TouchControls {
             let joy_zone_supported = self.settings.control_style == ControlStyle::GoyControl
                 || self.settings.mode != Mode::Dpad;
             if control.is_none() && !has_move && joy_zone_supported && self.visible(Control::Move) {
+                let zone_x = if self.settings.left_handed {
+                    1.0 - point[0]
+                } else {
+                    point[0]
+                };
                 match self.settings.joystick_style.move_area {
-                    JoystickMoveArea::MidBottomLeft if point[0] < 0.45 && point[1] > 0.35 => {
+                    JoystickMoveArea::MidBottomLeft if zone_x < 0.45 && point[1] > 0.35 => {
                         control = Some(Control::Move);
                     }
-                    JoystickMoveArea::RightSideAnywhere if point[0] >= 0.50 => {
+                    JoystickMoveArea::RightSideAnywhere if zone_x >= 0.50 => {
                         control = Some(Control::Move);
                     }
                     JoystickMoveArea::FollowFinger
                         if (!self.dynamic_joystick()
                             || self.settings.control_style == ControlStyle::GoyControl)
-                            && point[0] < 0.48
+                            && zone_x < 0.48
                             && point[1] > 0.25 =>
                     {
                         control = Some(Control::Move);
@@ -957,6 +982,7 @@ impl TouchControls {
                 }
                 Some(Control::Sneak)
                     if self.settings.mode == Mode::Dpad
+                        && self.toggle_crouch
                         && !self.vertical_movement
                         && !self.swimming
                         && !self.mounted =>
@@ -1054,6 +1080,7 @@ impl TouchControls {
         [0.0; 2]
     }
     pub fn clear(&mut self) {
+        self.cancel_editor_gesture();
         self.inventory_shift = false;
         self.clear_custom();
         self.fingers.clear();
@@ -1665,17 +1692,7 @@ pub fn draw_goy_static_button(
     } else {
         scale_alpha(p.stroke_color, opacity)
     };
-    if p.shadow_size > 0.2 {
-        let so = (p.shadow_size * 0.65).clamp(1.0, 8.0);
-        b.fill(
-            a,
-            x + so * 0.5,
-            y + so,
-            w,
-            h,
-            scale_alpha(p.shadow_color, opacity),
-        );
-    }
+    // Flat 2D GoyControl button: no 3D drop shadow pass
     b.fill(a, x, y, w, h, fill_c);
     if p.stroke_size > 0.1 {
         let sm = p.stroke_margin;
@@ -1916,6 +1933,37 @@ fn line(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn joystick_active_zones_mirror_with_left_handed_layouts() {
+        for (area, start) in [
+            (JoystickMoveArea::MidBottomLeft, [0.25, 0.42]),
+            (JoystickMoveArea::RightSideAnywhere, [0.70, 0.20]),
+            (JoystickMoveArea::FollowFinger, [0.25, 0.42]),
+        ] {
+            for left_handed in [false, true] {
+                let mut touch = TouchControls::default();
+                touch.viewport(1920, 1080);
+                touch.settings.control_style = ControlStyle::GoyControl;
+                touch.settings.mode = Mode::Crosshair;
+                touch.settings.left_handed = left_handed;
+                touch.settings.joystick_style.move_area = area;
+                let x = if left_handed {
+                    1.0 - start[0]
+                } else {
+                    start[0]
+                };
+                touch.update(1, [x, start[1]], true, false);
+                touch.update(1, [x + 0.05, start[1]], false, false);
+                assert!(
+                    touch.poll_state().left[0] > 0.0,
+                    "{area:?}, left_handed={left_handed}"
+                );
+                touch.update(1, [x + 0.05, start[1]], false, true);
+                assert_eq!(touch.poll_state().left, [0.0; 2]);
+            }
+        }
+    }
+
     #[test]
     fn factory_swap_stays_beside_inventory_without_covering_action_buttons() {
         for (w, h) in [(2560, 1600), (2400, 1080), (1080, 2400), (240, 320)] {
@@ -2643,8 +2691,29 @@ mod tests {
         assert!(t.settings.left_handed);
     }
     #[test]
+    fn hold_crouch_starts_on_first_touch_and_ends_on_release() {
+        for mode in [Mode::Crosshair, Mode::Dpad] {
+            let mut t = TouchControls::default();
+            t.settings.mode = mode;
+            t.toggle_crouch = false;
+            let point = t.settings.placement(Control::Sneak).center;
+            t.update(1, point, true, false);
+            assert!(t.poll_state().held(Button::RightStick), "{mode:?}");
+            t.update(1, point, false, true);
+            assert!(!t.poll_state().held(Button::RightStick), "{mode:?}");
+            t.update(2, point, true, false);
+            assert!(
+                t.poll_state().held(Button::RightStick),
+                "second hold {mode:?}"
+            );
+            t.clear();
+            assert!(!t.poll_state().held(Button::RightStick));
+        }
+    }
+    #[test]
     fn dpad_can_slide_between_directions_and_mirror() {
         let mut t = TouchControls::default();
+        t.toggle_crouch = true;
         t.settings.mode = Mode::Dpad;
         t.update(1, [0.13, 0.66], true, false);
         assert_eq!(t.state().left, [0.0, 1.0]);

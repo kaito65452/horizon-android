@@ -23,6 +23,8 @@ ureq = { version = "2", default-features = false, features = ["tls"] }
 miniz_oxide = "0.8"
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
+[target.'cfg(target_os = "android")'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 ''', encoding='utf-8')
     lock=tomllib.loads((ROOT / 'Cargo.lock').read_text(encoding='utf-8'))
     version=next(p['version'] for p in lock['package'] if p['name']=='zip' and p['version'].startswith('9.'))
@@ -40,6 +42,7 @@ mod android_runtime {
 #[path = "../../../../crates/horizon-client/src/ime_edit.rs"] mod ime_edit;
 #[path = "../../../../crates/horizon-client/src/content_files.rs"] mod content_files;
 #[path = "../../../../crates/horizon-client/src/official_install_cache.rs"] mod official_install_cache;
+#[path = "../../../../third_party/winit/src/platform_impl/android/mouse_state.rs"] mod mouse_state;
 #[path = "../../../../crates/horizon-client-render/src/gfx/upload_budget.rs"] mod upload_budget;
 #[path = "../../../../crates/horizon-client-render/src/zip.rs"] mod archive_reader;
 #[path = "../../../../crates/horizon-client/src/android/search_queue.rs"] mod search_queue;

@@ -202,7 +202,7 @@ mod native_entities;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
-mod voice_ui;
+pub(crate) mod voicechat;
 #[cfg(target_os = "android")]
 use android_bundled::{
     official_minimap, official_recipes, official_recipes_glue, official_zoom, smartf3,
@@ -273,6 +273,7 @@ mod server_links;
 mod server_mods;
 mod server_packs;
 mod server_travel;
+mod session;
 mod shader_packs;
 mod shelf;
 mod shield;
@@ -2120,6 +2121,10 @@ struct WorldIcon {
 
 struct Game<'a> {
     /// Shared with an integrated server; `collision` and `motion` borrow from it.
+    #[cfg(target_os = "android")]
+    backgrounded: bool,
+    #[cfg(target_os = "android")]
+    surface_lost: bool,
     res: Arc<Resources>,
     rest_loader: Option<WorldRestLoader>,
     pending_entry: Option<PendingWorldEntry>,
@@ -2269,7 +2274,6 @@ struct Game<'a> {
     pause: bool,
     debug: bool,
     screen: Screen,
-    pub voice: horizon_client::voice::VoiceChatClient,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// CPU geometry storage retained across frames, including empty/title frames.
@@ -7505,7 +7509,12 @@ impl Game<'_> {
         // repeat) flips them when toggling; only releases reach them
         // behind a screen (KeyboardHandler.keyPress).
         let toggle = match key {
-            KeyCode::ShiftLeft => Some((0, self.settings.toggle_crouch)),
+            KeyCode::ShiftLeft => {
+                let toggle = self.settings.toggle_crouch;
+                #[cfg(target_os = "android")]
+                let toggle = toggle && !(crate::touch_visible() && self.android_touch_descending());
+                Some((0, toggle))
+            }
             KeyCode::ControlLeft => Some((1, self.settings.toggle_sprint)),
             _ => None,
         };
@@ -7588,6 +7597,21 @@ impl Game<'_> {
             self.tutorial.mouse(xo, yo);
             let zoom = self.zoom_turn_scale();
             self.turn_player(xo * zoom, yo * zoom);
+        }
+    }
+    /// Publish pause before a lifecycle transition can prevent another frame.
+    fn sync_server_pause(&mut self) {
+        self.pause = self.pauses_game();
+        #[cfg(target_os = "android")]
+        if self.backgrounded || self.surface_lost {
+            self.pause = self.has_singleplayer_server() && !self.is_published();
+        }
+        if let Some(server) = self.integrated.as_ref().or_else(|| {
+            self.integrated_starting
+                .as_ref()
+                .map(|starting| &starting.handle)
+        }) {
+            server.set_paused(self.pause);
         }
     }
     pub(super) fn singleplayer_paused(&self) -> bool {
@@ -9977,7 +10001,8 @@ impl Game<'_> {
     /// cached key set is not vanilla's answer.
     pub(super) fn has_shift_down(&self) -> bool {
         #[cfg(target_os = "android")]
-        if (self.android_inventory_controls() && self.pad.touch.inventory_shift)
+        if (matches!(self.screen, Screen::Inventory | Screen::Creative)
+            && self.pad.touch.inventory_shift)
             || self.pad.touch_ui.modifier_latched(KeyCode::ShiftLeft)
             || self.pad.custom_keys.contains(&KeyCode::ShiftLeft)
             || self.pad.custom_keys.contains(&KeyCode::ShiftRight)
@@ -13581,11 +13606,23 @@ impl Game<'_> {
         // Options.biomeBlendRadius, ambientOcclusion and cutoutLeaves:
         // LevelExtractor.allChanged when they change.
         let (s, st) = (&self.settings, &self.streaming);
-        let remesh = (s.biome_blend, s.smooth_lighting, s.cutout_leaves)
-            != (st.biome_blend, st.smooth_lighting, st.cutout_leaves);
+        let leaf_culling = cfg!(target_os = "android")
+            && horizon_client::android_runtime::experimental_leaf_culling();
+        let remesh = (
+            s.biome_blend,
+            s.smooth_lighting,
+            s.cutout_leaves,
+            leaf_culling,
+        ) != (
+            st.biome_blend,
+            st.smooth_lighting,
+            st.cutout_leaves,
+            st.experimental_leaf_culling,
+        );
         self.streaming.biome_blend = self.settings.biome_blend;
         self.streaming.smooth_lighting = self.settings.smooth_lighting;
         self.streaming.cutout_leaves = self.settings.cutout_leaves;
+        self.streaming.experimental_leaf_culling = leaf_culling;
         if remesh {
             self.all_sections_changed();
         }
@@ -14798,28 +14835,9 @@ impl Game<'_> {
         // Load the profile's scheme before drawing the first frame or outline.
         #[cfg(target_os = "android")]
         self.pad.touch.viewport(size[0], size[1]);
-        let raw_menu_blur = self.menu_blur();
-        #[cfg(target_os = "android")]
-        let in_world_stationary_overlay = !self.shows_panorama()
-            && self.player.is_some()
-            && !self.pad.touch_ui.floating_menu
-            && (self.singleplayer_paused()
-                || self.screen != Screen::Playing
-                || self.pad.touch.editor.is_some())
-            && (self.singleplayer_paused()
-                || self.pad.touch.editor.is_some()
-                || self.pad.touch.state().left == [0.0, 0.0]);
-        #[cfg(not(target_os = "android"))]
-        let in_world_stationary_overlay = false;
-        let menu_blur = if in_world_stationary_overlay {
-            raw_menu_blur.or(Some(0.0))
-        } else {
-            raw_menu_blur
-        };
-        let menu_blur_cache = ((self.singleplayer_paused() || self.screen == Screen::Options)
-            && !self.shows_panorama()
-            && menu_blur.is_some())
-            || in_world_stationary_overlay;
+        let menu_blur = self.menu_blur();
+        let menu_blur_cache =
+            self.singleplayer_paused() && !self.shows_panorama() && menu_blur.is_some();
         if !menu_blur_cache || !self.was_menu_blurred {
             if let Some(renderer) = self.renderer.as_mut() {
                 renderer.invalidate_menu_blur();
@@ -15088,14 +15106,19 @@ impl Game<'_> {
             let waiting_for_key = self.screen == Screen::Options && self.options_waiting_for_key();
             let hud_in_menu = in_menu && !waiting_for_key;
             self.pad.touch.in_menu = hud_in_menu;
+            self.pad.touch.in_inventory =
+                matches!(self.screen, Screen::Inventory | Screen::Creative);
             self.pad.touch.goy_rendered_by_ui = true;
             if (in_menu || !self.ui.hide_gui)
                 && (self.player.is_some() || self.settings.keypad.enabled)
                 && (!hud_in_menu
                     || self.android_inventory_controls()
+                    || self.pad.touch.in_inventory
                     || self.pad.touch.settings.layouts[self.pad.touch.settings.mode.index()]
                         .iter()
-                        .any(|p| p.visible_in_menu))
+                        .any(|p| p.visible_in_menu)
+                    || (0..self.pad.touch.settings.custom_buttons.len())
+                        .any(|i| self.pad.touch.custom_visible_for_state(i, hud_in_menu)))
             {
                 self.pad.touch.context_use =
                     self.pad.touch.settings.contextual_interact && self.touch_context_use();
@@ -15131,6 +15154,26 @@ impl Game<'_> {
                     &self.gui.atlas,
                     &self.pad.touch.settings,
                 );
+                if let Some(status) = shader_packs::pending_shader_pack_status() {
+                    let mut ui =
+                        horizon_client::ui_theme::Ui::mobile(&self.gui.atlas, &mut hud, (0.0, 0.0));
+                    let theme = horizon_client::ui_theme::active_theme();
+                    let bw = (ui.measure(horizon_client::ui_theme::Face::SemiBold, 11.0, &status)
+                        + 28.0)
+                        .clamp(180.0, (ui.w - 24.0).max(180.0));
+                    let bx = (ui.w - bw) * 0.5;
+                    let by = 38.0;
+                    ui.rounded(bx, by, bw, 28.0, 14.0, theme.bg_solid);
+                    ui.border(bx, by, bw, 28.0, 14.0, theme.accent);
+                    ui.centered_fit(
+                        horizon_client::ui_theme::Face::SemiBold,
+                        10.5,
+                        [bx + 8.0, by, bw - 16.0, 28.0],
+                        theme.accent_text,
+                        &status,
+                    );
+                    ui.finish();
+                }
             }
         }
         self.flush_ime(&mut hud);
@@ -16157,6 +16200,7 @@ impl Game<'_> {
 impl ApplicationHandler for Game<'_> {
     #[cfg(target_os = "android")]
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.surface_lost = true;
         // Android may recreate the surface while the IME changes window size.
         // Preserve the text session; Android hides its window on real backgrounding.
         self.android_release_touch_keys(true);
@@ -16167,11 +16211,17 @@ impl ApplicationHandler for Game<'_> {
         if self.title.is_none() && self.screen == Screen::Playing {
             self.screen = Screen::Paused;
         }
+        self.sync_server_pause();
         if let Some(renderer) = &mut self.renderer {
             renderer.suspend_surface();
         }
     }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        {
+            self.surface_lost = false;
+            self.sync_server_pause();
+        }
         #[cfg(target_os = "android")]
         if let Some(renderer) = &mut self.renderer {
             if let Some(window) = &self.window {
@@ -16242,6 +16292,21 @@ impl ApplicationHandler for Game<'_> {
         self.handle_window_event(event_loop, id, event);
     }
     fn device_event(&mut self, _: &ActiveEventLoop, device: DeviceId, event: DeviceEvent) {
+        #[cfg(target_os = "android")]
+        if matches!(event, DeviceEvent::Removed) {
+            self.android_release_touch_keys(true);
+            self.physical_keys.clear();
+            self.physical_buttons.clear();
+            self.keys.clear();
+            self.modifiers = winit::keyboard::ModifiersState::empty();
+            self.toggles = Default::default();
+            self.left = false;
+            self.right = false;
+            horizon_client::android_runtime::clear_gamepads();
+            horizon_client::android_runtime::clear_keypad();
+            self.capture(false);
+            return;
+        }
         #[cfg(target_os = "android")]
         if self.focused
             && self.settings.controller.enabled
@@ -16550,24 +16615,24 @@ impl Game<'_> {
             self.pad.touch.viewport(size.width, size.height);
             if self.pad.touch.editor.is_some() {
                 if touch.phase == TouchPhase::Cancelled {
-                    self.pad.touch.cancel_editor();
+                    self.pad.touch.cancel_editor_gesture();
+                    return;
+                }
+                let ended = touch.phase == TouchPhase::Ended;
+                let mut b = HudBatch::new([size.width, size.height]);
+                if horizon_client::touch_ui::touch_hud_editor(
+                    &mut self.pad.touch,
+                    &mut b,
+                    &self.gui.atlas,
+                    touch.id,
+                    [
+                        touch.location.x as f32 / size.width.max(1) as f32,
+                        touch.location.y as f32 / size.height.max(1) as f32,
+                    ],
+                    touch.phase == TouchPhase::Started,
+                    ended,
+                ) {
                     self.pause = false;
-                } else {
-                    let mut b = HudBatch::new([size.width, size.height]);
-                    if horizon_client::touch_ui::touch_hud_editor(
-                        &mut self.pad.touch,
-                        &mut b,
-                        &self.gui.atlas,
-                        touch.id,
-                        [
-                            touch.location.x as f32 / size.width.max(1) as f32,
-                            touch.location.y as f32 / size.height.max(1) as f32,
-                        ],
-                        touch.phase == TouchPhase::Started,
-                        touch.phase == TouchPhase::Ended,
-                    ) {
-                        self.pause = false;
-                    }
                 }
                 self.settings.touch = self.pad.touch.settings.clone();
                 if std::mem::take(&mut self.pad.touch.clicked) {
@@ -16595,9 +16660,19 @@ impl Game<'_> {
             let in_menu = self.pad_in_menu();
             let waiting_for_key = self.screen == Screen::Options && self.options_waiting_for_key();
             self.pad.touch.in_menu = in_menu && !waiting_for_key;
+            self.pad.touch.in_inventory =
+                matches!(self.screen, Screen::Inventory | Screen::Creative);
             let touch_controls_hidden = !crate::touch_visible()
                 && self.pad.touch.hud_opacity_scale <= 0.01
                 && self.pad.touch.editor.is_none();
+            if in_menu
+                && self.pad.touch.consume_ignored(
+                    touch.id,
+                    matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled),
+                )
+            {
+                return;
+            }
             let menu_custom_hit = !touch_controls_hidden
                 && in_menu
                 && !self.settings.keypad.enabled
@@ -16605,7 +16680,7 @@ impl Game<'_> {
                     || (touch.phase == TouchPhase::Started
                         && self.pad.touch.custom_at(overlay_point).is_some()));
             let inventory_control = !touch_controls_hidden
-                && self.android_inventory_controls()
+                && (self.android_inventory_controls() || self.pad.touch.in_menu)
                 && (self.pad.touch.owns_pointer(touch.id)
                     || (touch.phase == TouchPhase::Started
                         && self.pad.touch.control_at_point(overlay_point)));
@@ -16616,6 +16691,8 @@ impl Game<'_> {
                     == Some(horizon_client::touch::Control::Sneak)
             {
                 self.pad.touch.inventory_shift ^= true;
+                self.audio.play_button_click();
+                self.android_touch_haptic(10);
                 self.pad.touch.ignore(touch.id);
                 return;
             }
@@ -16655,7 +16732,7 @@ impl Game<'_> {
                 }
                 return;
             }
-            if !self.pad_in_menu() || inventory_control {
+            if !self.pad_in_menu() || (inventory_control && self.android_inventory_controls()) {
                 if touch_controls_hidden
                     || (!crate::touch_visible() && !self.settings.keypad.enabled)
                 {
@@ -16664,6 +16741,23 @@ impl Game<'_> {
                 self.pad.in_use = true;
                 if !self.pad_in_menu() && !self.captured && self.focused {
                     self.capture(true);
+                }
+                {
+                    let batch = HudBatch::new([size.width, size.height]);
+                    let point = [
+                        touch.location.x as f32 / batch.scale,
+                        touch.location.y as f32 / batch.scale,
+                    ];
+                    if crate::game::voicechat::touch_hud(
+                        self,
+                        touch.id,
+                        point,
+                        touch.phase == TouchPhase::Started,
+                        matches!(touch.phase, TouchPhase::Ended | TouchPhase::Cancelled),
+                    ) {
+                        self.pad.touch.ignore(touch.id);
+                        return;
+                    }
                 }
                 if touch.phase == TouchPhase::Started {
                     let batch = HudBatch::new([size.width, size.height]);
@@ -16832,6 +16926,14 @@ impl Game<'_> {
             } else {
                 self.physical_buttons.remove(button);
             }
+        }
+        #[cfg(target_os = "android")]
+        if let WindowEvent::Occluded(backgrounded) = &event {
+            self.backgrounded = *backgrounded;
+            if *backgrounded && self.title.is_none() && self.screen == Screen::Playing {
+                self.screen = Screen::Paused;
+            }
+            self.sync_server_pause();
         }
         if let WindowEvent::Focused(false) = &event {
             #[cfg(target_os = "android")]
@@ -18121,9 +18223,8 @@ impl Game<'_> {
                         crate::performance::submit(sample, self.android_performance_context());
                     }
                     self.limit_frame();
-                    self.pause = self.pauses_game();
+                    self.sync_server_pause();
                     if let Some(server) = &self.integrated {
-                        server.set_paused(self.pause);
                         server.set_distances(
                             self.settings.render_distance,
                             self.settings.simulation_distance,
@@ -18262,6 +18363,13 @@ impl Game<'_> {
             }
             return;
         }
+        #[cfg(target_os = "android")]
+        if self.backgrounded || self.renderer.as_ref().is_some_and(|r| r.suspended) {
+            // Android can stop redraws before another frame publishes the pause.
+            self.sync_server_pause();
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
         if let Err(error) = self.resume_world_entry() {
             self.error = Some(error);
             self.exit_on_error(event_loop);
@@ -18368,6 +18476,10 @@ impl<'a> Game<'a> {
             &gui.atlas.translucent,
         );
         Ok(Game {
+            #[cfg(target_os = "android")]
+            backgrounded: false,
+            #[cfg(target_os = "android")]
+            surface_lost: false,
             world_biomes: None,
             res: res.clone(),
             rest_loader: None,
@@ -18464,15 +18576,6 @@ impl<'a> Game<'a> {
             pause: false,
             debug: false,
             screen: Screen::Playing,
-            voice: {
-                let mut v = horizon_client::voice::VoiceChatClient::new(
-                    &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-                );
-                if !settings.touch.svc_enabled {
-                    v.config.enabled = false;
-                }
-                v
-            },
             window: None,
             renderer: None,
             entity_vertices: Vec::new(),
@@ -20284,7 +20387,7 @@ fn leave_fullscreen_after(
     }
 }
 
-fn run_event_loop(mut game: Game<'_>) -> Result<()> {
+fn run_event_loop<'a>(mut game: Game<'a>, resources: &'a Arc<Resources>) -> Result<()> {
     if game.options.headless {
         // No display to open winit's loop on: the game's own loop.
         game.run_headless();
@@ -20293,7 +20396,7 @@ fn run_event_loop(mut game: Game<'_>) -> Result<()> {
         write_report(&game)?;
         return game.error.take().map_or(Ok(()), Err);
     }
-    let mut split = split::Split::new(game);
+    let mut split = split::Split::new(game, resources);
     let result = new_event_loop()?.run_app(&mut split);
     game = split.host;
     narrator::stop();
@@ -20327,6 +20430,11 @@ struct Loading {
     receiver: Receiver<LoaderMsg>,
     loaded: Option<std::result::Result<Loaded, String>>,
     renderer_job: Option<JoinHandle<std::result::Result<Renderer, String>>>,
+    /// GLES preparation exclusively owns the context; keep pumping native events without drawing.
+    renderer_job_gl: bool,
+    backgrounded: bool,
+    surface_lost: bool,
+    cancel_renderer: bool,
     prepared_renderer: Option<Renderer>,
     /// The loader's `Done` arrived: its channel closing afterwards is expected.
     delivered: bool,
@@ -20336,8 +20444,9 @@ struct Loading {
     error: Option<Box<dyn std::error::Error>>,
 }
 impl Loading {
-    /// Keep window/input/lifecycle events flowing while Vulkan creates the
-    /// full game's textures and pipelines. The worker never owns a surface.
+    /// Keep native events flowing while the GPU worker creates world resources.
+    /// GLES has exclusive context access; Vulkan can keep drawing the loading screen.
+    /// The worker never owns a window surface.
     fn prepare_renderer(&mut self) -> Result<()> {
         if self.menu.reload_packs {
             return Ok(());
@@ -20348,6 +20457,15 @@ impl Loading {
             }
             let job = self.renderer_job.take().unwrap();
             self.prepared_renderer = Some(job.join().map_err(|_| "renderer worker panicked")??);
+            if self.renderer_job_gl
+                && !self.surface_lost
+                && let Some(previous) = &mut self.renderer
+            {
+                // The old surface was released before the worker took the GL context.
+                // activate_replacement will attach the new renderer to the current window.
+                previous.suspended = false;
+            }
+            self.renderer_job_gl = false;
             return Ok(());
         }
         if !cfg!(target_os = "android") || !self.shown || self.prepared_renderer.is_some() {
@@ -20360,10 +20478,14 @@ impl Loading {
             return Ok(());
         };
         let options = self.options.as_ref().ok_or("loading already finished")?;
+        let gl = previous.info.backend == wgpu::Backend::Gl;
         if options.offscreen
-            || previous.info.backend != wgpu::Backend::Vulkan
-            || previous.matches_sprite_layout(loaded.pack.render.texture_layers)
+            || (!gl && previous.info.backend != wgpu::Backend::Vulkan)
+            || (!gl && previous.matches_sprite_layout(loaded.pack.render.texture_layers))
         {
+            return Ok(());
+        }
+        if gl && (!self.menu.needs_world_renderer() || !self.menu.entry_presented) {
             return Ok(());
         }
         let _ = previous.device.poll(wgpu::PollType::wait_indefinitely());
@@ -20378,6 +20500,13 @@ impl Loading {
         let glint_armor = gui.atlas.glint_armor.clone();
         let prepared = loaded.renderer_cpu.take();
         let api = rendering_api(&self.settings);
+        #[cfg(target_os = "android")]
+        if gl {
+            // No render, resize or surface operation may contend with a long driver compile.
+            // Keep the last presented loading frame while native events continue to be drained.
+            self.renderer.as_mut().unwrap().suspend_surface();
+        }
+        self.renderer_job_gl = gl;
         self.renderer_job = Some(
             std::thread::Builder::new()
                 .name("Renderer preparation".into())
@@ -20415,6 +20544,10 @@ impl Loading {
         Ok(())
     }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.surface_lost = false;
+        if self.renderer_job_gl && self.renderer_job.is_some() {
+            return;
+        }
         #[cfg(target_os = "android")]
         if let Some(renderer) = &mut self.renderer {
             if let Err(error) = renderer.recreate_surface() {
@@ -20513,6 +20646,20 @@ impl Loading {
         self.window = Some(window);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, mut event: WindowEvent) {
+        if let WindowEvent::Occluded(backgrounded) = &event {
+            self.backgrounded = *backgrounded;
+        }
+        if self.renderer_job_gl && self.renderer_job.is_some() {
+            if matches!(event, WindowEvent::CloseRequested)
+                || matches!(&event, WindowEvent::KeyboardInput { event, .. }
+                    if event.state == ElementState::Pressed
+                        && matches!(event.logical_key, winit::keyboard::Key::Named(
+                            winit::keyboard::NamedKey::Escape | winit::keyboard::NamedKey::BrowserBack)))
+            {
+                self.cancel_renderer = true;
+            }
+            return;
+        }
         if self.window.as_ref().is_none_or(|w| w.id() != id) {
             return;
         }
@@ -20562,6 +20709,12 @@ impl Loading {
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.renderer_job_gl && self.renderer_job.is_some() {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(50),
+            ));
+            return;
+        }
         #[cfg(target_os = "android")]
         if let (Some(w), Some(r)) = (&self.window, &mut self.renderer) {
             let _ = crate::display::apply(w, r);
@@ -20690,7 +20843,7 @@ impl Loading {
             );
         }
     }
-    fn finish(&mut self, loaded: Loaded) -> Result<Option<split::Split<'static>>> {
+    fn finish(&mut self, loaded: Loaded) -> Result<Option<session::Session>> {
         let handoff_at = Instant::now();
         let mut options = self.options.take().ok_or("loading already finished")?;
         options.resources = loaded.root.clone();
@@ -20775,43 +20928,44 @@ impl Loading {
             Audio::with_device(&options.resources, &self.settings.sound_device)
         };
         let pack_error = loaded.pack_error.or_else(|| self.pack_error.take());
-        // The game borrows its shared resources for the process's lifetime,
-        // like the single copy an integrated server would share.
-        let res: &'static Arc<Resources> = Box::leak(Box::new(loaded.resources));
+        // The session drops the games before releasing their borrowed resources.
         let game_at = Instant::now();
-        let Some(mut game) = start_game(
-            res,
-            loaded.pack,
-            gui,
-            options,
-            pack_error,
-            audio,
-            self.vanilla_root.clone(),
-            self.started,
-            loaded.rest_loader,
-            Some(self.settings.clone()),
-            loaded.game_cpu,
-        )?
-        else {
-            return Ok(None);
-        };
-        let game_ms = game_at.elapsed().as_millis();
-        game.window = Some(window);
-        game.renderer = Some(renderer);
-        game.world_renderer_ready = true;
-        game.fullscreen = self.fullscreen;
-        game.panorama_rotation = self.panorama_rotation;
-        self.menu.handoff(&mut game);
-        game.apply_settings();
-        let _ = horizon_client::spans::take();
-        game.previous = Instant::now();
-        log::info!(
-            "Horizon: startup handoff {} ms (renderer {} ms, start_game {} ms)",
-            handoff_at.elapsed().as_millis(),
-            renderer_ms,
-            game_ms
-        );
-        Ok(Some(split::Split::new(game)))
+        let session = session::Session::try_new(loaded.resources, |res| -> Result<_> {
+            let Some(mut game) = start_game(
+                res,
+                loaded.pack,
+                gui,
+                options,
+                pack_error,
+                audio,
+                self.vanilla_root.clone(),
+                self.started,
+                loaded.rest_loader,
+                Some(self.settings.clone()),
+                loaded.game_cpu,
+            )?
+            else {
+                return Ok(None);
+            };
+            let game_ms = game_at.elapsed().as_millis();
+            game.window = Some(window);
+            game.renderer = Some(renderer);
+            game.world_renderer_ready = true;
+            game.fullscreen = self.fullscreen;
+            game.panorama_rotation = self.panorama_rotation;
+            self.menu.handoff(&mut game);
+            game.apply_settings();
+            let _ = horizon_client::spans::take();
+            game.previous = Instant::now();
+            log::info!(
+                "Horizon: startup handoff {} ms (renderer {} ms, start_game {} ms)",
+                handoff_at.elapsed().as_millis(),
+                renderer_ms,
+                game_ms
+            );
+            Ok(Some(split::Split::new(game, res)))
+        })?;
+        Ok(session.has_game().then_some(session))
     }
 }
 
@@ -20819,15 +20973,18 @@ impl Loading {
 /// the game itself, on the same event loop and window.
 enum App {
     Loading(Box<Loading>),
-    Ready(Box<split::Split<'static>>),
+    Ready(Box<session::Session>),
 }
 impl ApplicationHandler for App {
     #[cfg(target_os = "android")]
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
         match self {
-            App::Ready(game) => game.suspended(event_loop),
+            App::Ready(game) => game.with_game(|game| game.suspended(event_loop)),
             App::Loading(loading) => {
-                if let Some(renderer) = &mut loading.renderer {
+                loading.surface_lost = true;
+                if !loading.renderer_job_gl
+                    && let Some(renderer) = &mut loading.renderer
+                {
                     renderer.suspend_surface();
                 }
             }
@@ -20836,18 +20993,18 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         match self {
             App::Loading(loading) => loading.resumed(event_loop),
-            App::Ready(game) => game.resumed(event_loop),
+            App::Ready(game) => game.with_game(|game| game.resumed(event_loop)),
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         match self {
             App::Loading(loading) => loading.window_event(event_loop, id, event),
-            App::Ready(game) => game.window_event(event_loop, id, event),
+            App::Ready(game) => game.with_game(|game| game.window_event(event_loop, id, event)),
         }
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
         match self {
-            App::Ready(game) => game.device_event(event_loop, id, event),
+            App::Ready(game) => game.with_game(|game| game.device_event(event_loop, id, event)),
             App::Loading(_loading) =>
             {
                 #[cfg(target_os = "android")]
@@ -20863,13 +21020,12 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         enum Step {
             Waiting,
-            Ready(Box<split::Split<'static>>),
+            Ready(Box<session::Session>),
             Done,
             Failed(Box<dyn std::error::Error>),
         }
         #[cfg(target_os = "android")]
-        if matches!(self, App::Loading(loading) if loading.renderer.as_ref().is_some_and(|r| r.suspended))
-        {
+        if matches!(self, App::Loading(loading) if loading.surface_lost || loading.backgrounded) {
             // A ready worker must not recreate a surface while Android owns
             // no native window. Its messages stay queued until resumed.
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -20877,7 +21033,7 @@ impl ApplicationHandler for App {
         }
         let step = match self {
             App::Ready(game) => {
-                game.about_to_wait(event_loop);
+                game.with_game(|game| game.about_to_wait(event_loop));
                 return;
             }
             App::Loading(loading) => {
@@ -20891,9 +21047,11 @@ impl ApplicationHandler for App {
                     crate::game::exit_app(event_loop);
                     return;
                 }
-                // GLES pipeline creation must stay on the event thread. Do not
-                // freeze an otherwise interactive title menu to build world-only
-                // pipelines. Start after a world/server request and its loading frame.
+                if loading.cancel_renderer && loading.renderer_job.is_none() {
+                    crate::game::exit_app(event_loop);
+                    return;
+                }
+                // Preserve the presented-frame boundary before preparing world-only GLES work.
                 let defer_gles_world = cfg!(target_os = "android")
                     && loading
                         .renderer
@@ -20932,20 +21090,22 @@ impl ApplicationHandler for App {
     }
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
         if let App::Ready(game) = self {
-            game.exiting(event_loop);
+            game.with_game(|game| game.exiting(event_loop));
         }
         #[cfg(target_os = "android")]
         {
-            let error = match self {
-                App::Ready(game) => game.host.error.as_ref(),
-                App::Loading(loading) => loading.error.as_ref(),
+            let report = |error: Option<&(dyn std::error::Error + 'static)>| {
+                if let Some(error) = error {
+                    log::error!("Horizon: {error}");
+                    let home = crate::backend::game_home();
+                    crate::diagnostics::record_error(&error.to_string());
+                    horizon_client::crash::report_error(&home, "client", error);
+                    let _ = std::fs::write(home.join("android-error.txt"), error.to_string());
+                }
             };
-            if let Some(error) = error {
-                log::error!("Horizon: {error}");
-                let home = crate::backend::game_home();
-                crate::diagnostics::record_error(&error.to_string());
-                horizon_client::crash::report_error(&home, "client", &**error);
-                let _ = std::fs::write(home.join("android-error.txt"), error.to_string());
+            match self {
+                App::Ready(game) => game.with_game(|game| report(game.host.error.as_deref())),
+                App::Loading(loading) => report(loading.error.as_deref()),
             }
         }
     }
@@ -20999,6 +21159,10 @@ fn loading_app(
         receiver,
         loaded: None,
         renderer_job: None,
+        renderer_job_gl: false,
+        backgrounded: false,
+        surface_lost: false,
+        cancel_renderer: false,
         prepared_renderer: None,
         delivered: false,
         handle: Some(loader),
@@ -21067,19 +21231,19 @@ fn run_loading(
     narrator::stop();
     match &mut app {
         // Ready: splitscreen around P1's game.
-        App::Ready(split) => leave_fullscreen_after(&result, &mut split.host.settings),
+        App::Ready(session) => {
+            session.with_game(|split| leave_fullscreen_after(&result, &mut split.host.settings))
+        }
         App::Loading(loading) => leave_fullscreen_after(&result, &mut loading.settings),
     }
     result?;
 
     horizon_client::discord_presence::stop();
     match app {
-        App::Ready(mut split) => {
+        App::Ready(mut session) => session.with_game(|split| -> Result<()> {
             write_report(&split.host)?;
-            if let Some(e) = split.host.error.take() {
-                return Err(e);
-            }
-        }
+            split.host.error.take().map_or(Ok(()), Err)
+        })?,
         App::Loading(loading) => {
             if let Some(e) = loading.error {
                 return Err(e);
@@ -21213,7 +21377,7 @@ pub fn run() -> Result<()> {
         None,
     )?;
     if let Some(game) = game {
-        run_event_loop(game)?;
+        run_event_loop(game, &resources)?;
     }
     Ok(())
 }

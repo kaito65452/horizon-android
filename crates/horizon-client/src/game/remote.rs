@@ -546,7 +546,7 @@ pub(super) struct Remote {
     /// `ClientSuggestionProvider.customCompletionSuggestions`: the extra chat
     /// completions this server sent (ClientboundCustomChatCompletionsPacket).
     custom_completions: std::collections::BTreeSet<String>,
-    players: HashMap<u128, String>,
+    pub(crate) players: HashMap<u128, String>,
     /// `ClientPacketListener.playerInfoMap` as player-list entries, and
     /// which of them are listed.
     pub(crate) tab_players: HashMap<u128, horizon_client::tab_list::TabPlayer>,
@@ -2909,7 +2909,7 @@ impl Game<'_> {
                 self.remote_native_net(&p.data);
             }
             C::CustomPayload(p) if p.channel.starts_with("voicechat:") => {
-                self.remote_voicechat_payload(&p.channel, &p.data);
+                super::voicechat::push_payload(p.channel.clone(), p.data.clone());
             }
             // PingDebugMonitor.onPongReceived.
             C::PongResponse(p) => {
@@ -2959,7 +2959,6 @@ impl Game<'_> {
                 }
                 self.send(S::ClientInformation(info));
                 self.remote_chat_login();
-                self.initiate_voice_handshake();
             }
             C::Respawn(p) => {
                 // A new player, without effects (the server sends them
@@ -5529,7 +5528,6 @@ impl Game<'_> {
         self.native_net.to_server = 0;
         self.native_tick();
         self.tick_chat_session();
-        self.tick_voice_chat();
         // Minecraft.tick sends this even when the player cannot tick yet,
         // including while waiting for chunks. Keep it outside early returns.
         if self.remote.as_ref().is_some_and(|r| r.joined) {
@@ -9242,168 +9240,6 @@ impl Game<'_> {
             "decode_errors": r.decode_errors,
             "chat": r.chat.iter().rev().take(10).rev().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
         }))
-    }
-
-    pub(super) fn remote_voicechat_payload(&mut self, channel: &str, data: &[u8]) {
-        match self.voice.handle_custom_payload(channel, data) {
-            Ok(Some((resp_channel, resp_data))) => {
-                self.send(S::CustomPayload(
-                    horizon_protocol::packets::configuration::CustomPayload {
-                        channel: resp_channel,
-                        data: resp_data,
-                    },
-                ));
-            }
-            Ok(None) => {}
-            Err(e) => {
-                log::warn!("SVC: Failed to handle voicechat payload on {channel}: {e}");
-            }
-        }
-    }
-
-    pub(super) fn initiate_voice_handshake(&mut self) {
-        if !self.voice.config.enabled {
-            return;
-        }
-        if let Some(r) = self.remote.as_ref() {
-            let addr = &r.session.address;
-            let host = addr.split(':').next().unwrap_or(addr);
-            self.voice.set_server_host(host);
-        }
-        let (ch, data) = self.voice.initiate_handshake();
-        self.send(S::CustomPayload(
-            horizon_protocol::packets::configuration::CustomPayload { channel: ch, data },
-        ));
-    }
-
-    pub(super) fn tick_voice_chat(&mut self) {
-        if !self.voice.config.enabled {
-            return;
-        }
-        if self.server_packs.is_busy() || self.pack_reload.is_some() {
-            self.voice.delay_handshake_timer();
-        }
-        if let Some((ch, data)) = self.voice.check_handshake_timeout() {
-            self.send(S::CustomPayload(
-                horizon_protocol::packets::configuration::CustomPayload { channel: ch, data },
-            ));
-        }
-        if let Some(r) = self.remote.as_ref() {
-            for (&u128_val, info) in r.tab_players.iter() {
-                self.voice
-                    .register_known_player(u128_val, info.name.clone());
-            }
-            for (&u128_val, name) in r.players.iter() {
-                self.voice.register_known_player(u128_val, name.clone());
-            }
-            for (&_eid, &u) in self.persist.uuids.iter() {
-                let u128_val = horizon_client::lan::playerdata::ints_uuid(u);
-                let player_name = r
-                    .tab_players
-                    .get(&u128_val)
-                    .map(|p| p.name.clone())
-                    .or_else(|| r.players.get(&u128_val).cloned())
-                    .unwrap_or_default();
-                self.voice.register_known_player(u128_val, player_name);
-            }
-        }
-        let listener_pos = self.view.eye;
-        let listener_yaw = self.yaw;
-        let uuids = &self.persist.uuids;
-        let remote_ref = self.remote.as_ref();
-        let gamertag_map: std::collections::HashMap<u128, String> = self
-            .voice
-            .player_states
-            .iter()
-            .map(|(&u, st)| (u, st.name.clone()))
-            .chain(self.voice.known_players.iter().cloned())
-            .collect();
-
-        self.voice
-            .tick_audio(listener_pos, listener_yaw, |sender_uuid| {
-                let r = remote_ref?;
-                let target_u = [
-                    (sender_uuid >> 96) as i32,
-                    (sender_uuid >> 64) as i32,
-                    (sender_uuid >> 32) as i32,
-                    sender_uuid as i32,
-                ];
-
-                // Stage 1: Match by exact UUID across all alive entities in r.entities, pick the closest
-                let mut best_pos: Option<([f64; 3], f64)> = None;
-                for (&eid, &u) in uuids.iter() {
-                    if u == target_u {
-                        if let Some(tracked) = r.entities.get(&(eid as i32)) {
-                            let mut p = tracked.position;
-                            p[1] += 1.62;
-                            let d2 = (p[0] - listener_pos[0]).powi(2)
-                                + (p[1] - listener_pos[1]).powi(2)
-                                + (p[2] - listener_pos[2]).powi(2);
-                            if best_pos.map_or(true, |(_, best_d2)| d2 < best_d2) {
-                                best_pos = Some((p, d2));
-                            }
-                        }
-                    }
-                }
-                if let Some((pos, _)) = best_pos {
-                    return Some(pos);
-                }
-
-                // Stage 2: Fallback for Offline-Mode / Proxy servers where sender_uuid differs from world entity UUID
-                if let Some(sender_name) = gamertag_map
-                    .get(&sender_uuid)
-                    .filter(|n| !n.is_empty() && !n.starts_with("Player "))
-                {
-                    let matched_u128 = r
-                        .tab_players
-                        .iter()
-                        .find_map(|(&u, tp)| {
-                            if tp.name.eq_ignore_ascii_case(sender_name) {
-                                Some(u)
-                            } else {
-                                None
-                            }
-                        })
-                        .or_else(|| {
-                            r.players.iter().find_map(|(&u, pname)| {
-                                if pname.eq_ignore_ascii_case(sender_name) {
-                                    Some(u)
-                                } else {
-                                    None
-                                }
-                            })
-                        });
-
-                    if let Some(world_uuid) = matched_u128 {
-                        let world_u = [
-                            (world_uuid >> 96) as i32,
-                            (world_uuid >> 64) as i32,
-                            (world_uuid >> 32) as i32,
-                            world_uuid as i32,
-                        ];
-                        let mut best_fallback: Option<([f64; 3], f64)> = None;
-                        for (&eid, &u) in uuids.iter() {
-                            if u == world_u {
-                                if let Some(tracked) = r.entities.get(&(eid as i32)) {
-                                    let mut p = tracked.position;
-                                    p[1] += 1.62;
-                                    let d2 = (p[0] - listener_pos[0]).powi(2)
-                                        + (p[1] - listener_pos[1]).powi(2)
-                                        + (p[2] - listener_pos[2]).powi(2);
-                                    if best_fallback.map_or(true, |(_, best_d2)| d2 < best_d2) {
-                                        best_fallback = Some((p, d2));
-                                    }
-                                }
-                            }
-                        }
-                        if let Some((pos, _)) = best_fallback {
-                            return Some(pos);
-                        }
-                    }
-                }
-
-                None
-            });
     }
 }
 

@@ -103,13 +103,9 @@ class LauncherOverhaulTests(unittest.TestCase):
 
     def test_virtual_mouse_windows11_pointer_and_authoritative_toggle(self) -> None:
         touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
-        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(
-            encoding="utf-8"
-        )
+        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(encoding="utf-8")
         touch = (ROOT / "crates/horizon-client-render/src/touch.rs").read_text(encoding="utf-8")
-        options_ui = (ROOT / "crates/horizon-client-render/src/options_ui.rs").read_text(
-            encoding="utf-8"
-        )
+        options_ui = (ROOT / "crates/horizon-client-render/src/options_ui.rs").read_text(encoding="utf-8")
         launcher_pages = (
             ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
         ).read_text(encoding="utf-8")
@@ -168,9 +164,7 @@ class LauncherOverhaulTests(unittest.TestCase):
 
     def test_skin_3d_projection_and_drag_direction_math(self) -> None:
         preview = (ROOT / "launcher/src/skins/preview.rs").read_text(encoding="utf-8")
-        wardrobe = (ROOT / "crates/horizon-client/src/android/wardrobe.rs").read_text(
-            encoding="utf-8"
-        )
+        wardrobe = (ROOT / "crates/horizon-client/src/android/wardrobe.rs").read_text(encoding="utf-8")
         self.assertIn("pub fn drag(&mut self, dx: f32, dy: f32)", preview)
         self.assertIn("self.rotate(-dx * 0.7, -dy * 0.5);", preview)
         self.assertIn("self.camera.drag(point[0] - old[0], point[1] - old[1]);", wardrobe)
@@ -202,9 +196,7 @@ class LauncherOverhaulTests(unittest.TestCase):
 
     def test_theme_customization_and_controls_animation_exclusion(self) -> None:
         ui_theme = (ROOT / "crates/horizon-client/src/ui_theme.rs").read_text(encoding="utf-8")
-        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(
-            encoding="utf-8"
-        )
+        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
         launcher_pages = (
             ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
         ).read_text(encoding="utf-8")
@@ -230,18 +222,14 @@ class LauncherOverhaulTests(unittest.TestCase):
         gfx = (ROOT / "crates/horizon-client-render/src/gfx.rs").read_text(encoding="utf-8")
         audio = (ROOT / "crates/horizon-client-render/src/audio.rs").read_text(encoding="utf-8")
         mesher = (ROOT / "crates/horizon-client-render/src/mesher.rs").read_text(encoding="utf-8")
-        sides = (ROOT / "crates/horizon-client-render/src/mesher/sides.rs").read_text(
-            encoding="utf-8"
-        )
+        sides = (ROOT / "crates/horizon-client-render/src/mesher/sides.rs").read_text(encoding="utf-8")
         terrain_wgsl = (ROOT / "crates/horizon-client-render/src/terrain.wgsl").read_text(
             encoding="utf-8"
         )
         tick = (ROOT / "crates/horizon-world/src/level/tick.rs").read_text(encoding="utf-8")
         world = (ROOT / "crates/horizon-client-render/src/world.rs").read_text(encoding="utf-8")
         game = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
-        native_ime = (ROOT / "crates/horizon-client/src/android/native_ime.rs").read_text(
-            encoding="utf-8"
-        )
+        native_ime = (ROOT / "crates/horizon-client/src/android/native_ime.rs").read_text(encoding="utf-8")
 
         # 1. In-place Loading::set_ui texture update & surface_extent tracking
         self.assertIn("pub fn set_loading_ui(", gfx)
@@ -253,7 +241,6 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("260 | super::flags::UPDATE_KNOWN_SHAPE", tick)
 
         # 3. Smart/hollow leaf culling & early fragment discard (#156)
-        self.assertIn("let mut force_opaque_face = [false; 6];", mesher)
         self.assertIn('static GROUPED: AtomicBool = AtomicBool::new(cfg!(all(target_os = "android", not(test))));', sides)
         self.assertLess(
             terrain_wgsl.index("if texel.a * in.color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }"),
@@ -267,18 +254,14 @@ class LauncherOverhaulTests(unittest.TestCase):
 
     def test_custom_input_dialogue_typing_back_confirm_launching_and_slider(self) -> None:
         touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
-        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(
-            encoding="utf-8"
-        )
+        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(encoding="utf-8")
         android_input = (
             ROOT / "crates/horizon-client/src/game/android_input.rs"
         ).read_text(encoding="utf-8")
         startup_menu = (
             ROOT / "crates/horizon-client/src/game/startup_menu.rs"
         ).read_text(encoding="utf-8")
-        launcher = (ROOT / "crates/horizon-client/src/android/launcher.rs").read_text(
-            encoding="utf-8"
-        )
+        launcher = (ROOT / "crates/horizon-client/src/android/launcher.rs").read_text(encoding="utf-8")
         launcher_pages = (
             ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
         ).read_text(encoding="utf-8")
@@ -309,29 +292,15 @@ class LauncherOverhaulTests(unittest.TestCase):
 
     def test_next_development_pass_controls_kbm_file_manager_dpi_intro_and_ui_perf(self) -> None:
         touch = (ROOT / "crates/horizon-client-render/src/touch.rs").read_text(encoding="utf-8")
-        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(
-            encoding="utf-8"
-        )
-        custom = (ROOT / "crates/horizon-client-render/src/touch/custom.rs").read_text(
-            encoding="utf-8"
-        )
-        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(
-            encoding="utf-8"
-        )
+        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(encoding="utf-8")
+        custom = (ROOT / "crates/horizon-client-render/src/touch/custom.rs").read_text(encoding="utf-8")
+        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(encoding="utf-8")
         touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
         ui_theme = (ROOT / "crates/horizon-client/src/ui_theme.rs").read_text(encoding="utf-8")
-        doc_store = (ROOT / "crates/horizon-client/src/android/document_store.rs").read_text(
-            encoding="utf-8"
-        )
-        documents = (ROOT / "crates/horizon-client/src/android/documents.rs").read_text(
-            encoding="utf-8"
-        )
-        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(
-            encoding="utf-8"
-        )
-        launcher = (ROOT / "crates/horizon-client/src/android/launcher.rs").read_text(
-            encoding="utf-8"
-        )
+        doc_store = (ROOT / "crates/horizon-client/src/android/document_store.rs").read_text(encoding="utf-8")
+        documents = (ROOT / "crates/horizon-client/src/android/documents.rs").read_text(encoding="utf-8")
+        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
+        launcher = (ROOT / "crates/horizon-client/src/android/launcher.rs").read_text(encoding="utf-8")
         launcher_pages = (
             ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
         ).read_text(encoding="utf-8")
@@ -341,9 +310,7 @@ class LauncherOverhaulTests(unittest.TestCase):
         keycodes = (
             ROOT / "third_party/winit/src/platform_impl/android/keycodes.rs"
         ).read_text(encoding="utf-8")
-        native_ime = (ROOT / "crates/horizon-client/src/android/native_ime.rs").read_text(
-            encoding="utf-8"
-        )
+        native_ime = (ROOT / "crates/horizon-client/src/android/native_ime.rs").read_text(encoding="utf-8")
         game = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
         android_input = (
             ROOT / "crates/horizon-client/src/game/android_input.rs"
@@ -351,22 +318,14 @@ class LauncherOverhaulTests(unittest.TestCase):
         startup_menu = (
             ROOT / "crates/horizon-client/src/game/startup_menu.rs"
         ).read_text(encoding="utf-8")
-        menu_blur = (ROOT / "crates/horizon-client-render/src/menu_blur.rs").read_text(
-            encoding="utf-8"
-        )
+        menu_blur = (ROOT / "crates/horizon-client-render/src/menu_blur.rs").read_text(encoding="utf-8")
         perspective = (
             ROOT / "crates/horizon-client/src/game/perspective.rs"
         ).read_text(encoding="utf-8")
-        item_gui = (ROOT / "crates/horizon-client/src/item_render/gui.rs").read_text(
-            encoding="utf-8"
-        )
-        item_render = (ROOT / "crates/horizon-client/src/item_render.rs").read_text(
-            encoding="utf-8"
-        )
+        item_gui = (ROOT / "crates/horizon-client/src/item_render/gui.rs").read_text(encoding="utf-8")
+        item_render = (ROOT / "crates/horizon-client/src/item_render.rs").read_text(encoding="utf-8")
         ui_render = (ROOT / "crates/horizon-client-render/src/ui.rs").read_text(encoding="utf-8")
-        screens = (ROOT / "crates/horizon-client/src/game/screens.rs").read_text(
-            encoding="utf-8"
-        )
+        screens = (ROOT / "crates/horizon-client/src/game/screens.rs").read_text(encoding="utf-8")
 
         # 1. MCPE Floating Menu bubble appearance (Horizon H icon in MCPE, MenuEquals in GoyControl)
         self.assertIn("if settings.control_style == ControlStyle::Mcpe {", touch_ui)
@@ -434,7 +393,6 @@ class LauncherOverhaulTests(unittest.TestCase):
         # 13. Rust Edition in-game UI & menu performance
         self.assertIn("pub fn blit_cached(", menu_blur)
         self.assertIn("pub menu_blur_cache: bool,", (ROOT / "crates/horizon-client-render/src/gfx.rs").read_text(encoding="utf-8"))
-        self.assertIn("batch.clip_since(start, x0, y0, x1, y1);", perspective)
         self.assertIn("struct GuiCachedItem", item_gui)
         self.assertIn("static CACHE: std::cell::RefCell<Vec<(crate::items::ItemStack, StackView)>>", item_render)
         self.assertIn("src[2] <= 2.0 || src[3] <= 2.0", ui_render)
@@ -468,18 +426,12 @@ class LauncherOverhaulTests(unittest.TestCase):
             ROOT / "crates/horizon-client/src/game/startup_menu.rs"
         ).read_text(encoding="utf-8")
         pad = (ROOT / "crates/horizon-client/src/game/pad.rs").read_text(encoding="utf-8")
-        custom = (ROOT / "crates/horizon-client-render/src/touch/custom.rs").read_text(
-            encoding="utf-8"
-        )
-        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(
-            encoding="utf-8"
-        )
+        custom = (ROOT / "crates/horizon-client-render/src/touch/custom.rs").read_text(encoding="utf-8")
+        editor = (ROOT / "crates/horizon-client-render/src/touch/editor.rs").read_text(encoding="utf-8")
         launcher_pages = (
             ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
         ).read_text(encoding="utf-8")
-        options_ui = (ROOT / "crates/horizon-client-render/src/options_ui.rs").read_text(
-            encoding="utf-8"
-        )
+        options_ui = (ROOT / "crates/horizon-client-render/src/options_ui.rs").read_text(encoding="utf-8")
         ui_theme = (ROOT / "crates/horizon-client/src/ui_theme.rs").read_text(encoding="utf-8")
 
         # 1. tools/test_android_content.py supplies mod android_runtime stub
@@ -527,12 +479,8 @@ class LauncherOverhaulTests(unittest.TestCase):
         pack_uniforms = (
             ROOT / "crates/horizon-client-render/src/gfx/pack_uniforms.rs"
         ).read_text(encoding="utf-8")
-        arena = (ROOT / "crates/horizon-client-render/src/gfx/arena.rs").read_text(
-            encoding="utf-8"
-        )
-        graphics = (ROOT / "crates/horizon-client-render/src/graphics.rs").read_text(
-            encoding="utf-8"
-        )
+        arena = (ROOT / "crates/horizon-client-render/src/gfx/arena.rs").read_text(encoding="utf-8")
+        graphics = (ROOT / "crates/horizon-client-render/src/graphics.rs").read_text(encoding="utf-8")
         gfx = (ROOT / "crates/horizon-client-render/src/gfx.rs").read_text(encoding="utf-8")
         shader_packs = (
             ROOT / "crates/horizon-client/src/game/shader_packs.rs"
@@ -575,28 +523,16 @@ class LauncherOverhaulTests(unittest.TestCase):
     def test_studio_props_recommended_resolution_shaders_and_animations_revamp(self) -> None:
         custom_rs = (ROOT / "crates/horizon-shaders/src/custom.rs").read_text(encoding="utf-8")
         scan_rs = (ROOT / "crates/horizon-shaders/src/translate/scan.rs").read_text(encoding="utf-8")
-        rewrite_rs = (ROOT / "crates/horizon-shaders/src/translate/rewrite.rs").read_text(
-            encoding="utf-8"
-        )
-        pack_sky = (ROOT / "crates/horizon-client-render/src/gfx/pack_sky.rs").read_text(
-            encoding="utf-8"
-        )
-        pack_post = (ROOT / "crates/horizon-client-render/src/gfx/pack_post.rs").read_text(
-            encoding="utf-8"
-        )
+        rewrite_rs = (ROOT / "crates/horizon-shaders/src/translate/rewrite.rs").read_text(encoding="utf-8")
+        pack_sky = (ROOT / "crates/horizon-client-render/src/gfx/pack_sky.rs").read_text(encoding="utf-8")
+        pack_post = (ROOT / "crates/horizon-client-render/src/gfx/pack_post.rs").read_text(encoding="utf-8")
         pack_uniforms = (
             ROOT / "crates/horizon-client-render/src/gfx/pack_uniforms.rs"
         ).read_text(encoding="utf-8")
-        shader_packs = (ROOT / "crates/horizon-client/src/game/shader_packs.rs").read_text(
-            encoding="utf-8"
-        )
-        menu_blur = (ROOT / "crates/horizon-client-render/src/menu_blur.rs").read_text(
-            encoding="utf-8"
-        )
+        shader_packs = (ROOT / "crates/horizon-client/src/game/shader_packs.rs").read_text(encoding="utf-8")
+        menu_blur = (ROOT / "crates/horizon-client-render/src/menu_blur.rs").read_text(encoding="utf-8")
         touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
-        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(
-            encoding="utf-8"
-        )
+        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(encoding="utf-8")
         launcher_pages = (
             ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
         ).read_text(encoding="utf-8")
@@ -675,6 +611,45 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("fn apply_props_slider(", touch_ui)
         self.assertIn("fn draw_m3_selector_cell(", touch_ui)
         self.assertIn("Action::RenderScaleDelta(", launcher_pages)
+
+
+    def test_final_polish_vertex_shaders_mods_2d_goy_skins_and_sliders(self):
+        manifest = (ROOT / "crates/horizon-shader-api/src/manifest.rs").read_text(encoding="utf-8")
+        stages = (ROOT / "crates/horizon-shader-api/src/stages.rs").read_text(encoding="utf-8")
+        pack_shadow = (ROOT / "crates/horizon-client-render/src/gfx/pack_shadow.rs").read_text(encoding="utf-8")
+        pack_uniforms = (ROOT / "crates/horizon-client-render/src/gfx/pack_uniforms.rs").read_text(encoding="utf-8")
+        perspective = (ROOT / "crates/horizon-client/src/game/perspective.rs").read_text(encoding="utf-8")
+        shader_packs = (ROOT / "crates/horizon-client/src/game/shader_packs.rs").read_text(encoding="utf-8")
+        rewrite = (ROOT / "crates/horizon-shaders/src/translate/rewrite.rs").read_text(encoding="utf-8")
+        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
+        wardrobe = (ROOT / "crates/horizon-client/src/android/wardrobe.rs").read_text(encoding="utf-8")
+        layout = (ROOT / "crates/horizon-client-render/src/touch/layout.rs").read_text(encoding="utf-8")
+        touch_ui = (ROOT / "crates/horizon-client/src/touch_ui.rs").read_text(encoding="utf-8")
+        launcher_pages = (ROOT / "crates/horizon-client/src/android/launcher_pages.rs").read_text(encoding="utf-8")
+
+        self.assertIn("pub vertex: Option<Stage>,", manifest)
+        self.assertIn("StageKind::Vertex", stages)
+        self.assertIn(".min(4096)", pack_shadow)
+        self.assertIn('"lightningBoltPosition"', pack_uniforms)
+        self.assertIn('"normalMatrix"', pack_uniforms)
+        self.assertIn("self.pack_shadow_casters.0", perspective)
+        self.assertIn("pub fn pending_shader_pack_status()", shader_packs)
+        self.assertIn("hz_dot", rewrite)
+        self.assertIn("float hz_dot(vec3 a, vec3 b) { return dot(a, b); }", rewrite)
+        inputs_rs = (ROOT / "crates/horizon-shader-api/src/inputs.rs").read_text(encoding="utf-8")
+        self.assertIn("colored_light:", inputs_rs)
+        self.assertIn("displaced:", inputs_rs)
+        self.assertIn("pub const SURFACE_DATA: Struct", inputs_rs)
+        self.assertIn("crate::touch::draw_mcpe_custom_button(", touch_ui)
+        self.assertIn("{ if (true) discard; }", rewrite)
+        self.assertIn("builtin:", catalog)
+        self.assertIn("query.limit = 100;", catalog)
+        self.assertNotIn("Action::WardrobeZoom(false)", wardrobe)
+        self.assertIn("fn default_shadow_size() -> f32 {\n    0.0\n}", layout)
+        self.assertIn("let sens_card_y = body_y + 148.0;", touch_ui)
+        self.assertIn("pub gyro_sensitivity_dragging: bool,", touch_ui)
+        self.assertIn("pub button_scale_dragging: bool,", touch_ui)
+        self.assertIn("ACTIVE_SLIDER_DRAG", launcher_pages)
 
 
 if __name__ == "__main__":

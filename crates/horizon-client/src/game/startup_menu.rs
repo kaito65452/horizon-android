@@ -1432,8 +1432,9 @@ impl Loading {
                 use winit::event::TouchPhase;
                 let size = self.menu_size();
                 self.menu.controls.viewport(size[0], size[1]);
+                let ended = t.phase == TouchPhase::Ended;
                 if t.phase == TouchPhase::Cancelled {
-                    self.menu.controls.cancel_editor();
+                    self.menu.controls.cancel_editor_gesture();
                 } else if let Some(gui) = self.gui.as_ref() {
                     let mut b = HudBatch::new(size);
                     horizon_client::touch_ui::touch_hud_editor(
@@ -1446,7 +1447,7 @@ impl Loading {
                             t.location.y as f32 / size[1].max(1) as f32,
                         ],
                         t.phase == TouchPhase::Started,
-                        t.phase == TouchPhase::Ended,
+                        ended,
                     );
                 }
                 if let Some(ed) = self.menu.controls.editor.as_mut()
@@ -1748,12 +1749,18 @@ impl Loading {
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
                     }
-                    InGameMenuAction::ToggleVibrate => {
-                        let next = !self.menu.controls.settings.vibrate;
-                        self.menu.controls.settings.vibrate = next;
+                    InGameMenuAction::ToggleVibrate | InGameMenuAction::ToggleUiVibrate => {
+                        let ui = matches!(hub_act, InGameMenuAction::ToggleUiVibrate);
+                        let value = if ui {
+                            &mut self.menu.controls.settings.ui_vibrate
+                        } else {
+                            &mut self.menu.controls.settings.vibrate
+                        };
+                        *value = !*value;
+                        let next = *value;
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
-                        if next {
+                        if next && ui {
                             crate::platform::vibrate(horizon_client::gamepad::Pulse {
                                 strong: 0.30,
                                 weak: 0.55,
@@ -1888,12 +1895,10 @@ impl Loading {
                         self.menu.controls.settings.svc_enabled = next;
                         let _ = self.menu.controls.settings.save();
                         self.settings.touch = self.menu.controls.settings.clone();
-                        let dir = std::env::current_dir()
-                            .unwrap_or_else(|_| std::path::PathBuf::from("."));
-                        let mut svc_cfg =
-                            horizon_client::voice::config::SvcProtocolConfig::load_from_dir(&dir);
-                        svc_cfg.enabled = next;
-                        let _ = svc_cfg.save_to_dir(&dir);
+                        horizon_client::android_runtime::set_experimental_svc(
+                            next,
+                            horizon_client::android_runtime::experimental_svc_rnnoise(),
+                        );
                     }
                     InGameMenuAction::SendCustomInput(token) => {
                         self.startup_dispatch_custom_token(event_loop, &token, true);
@@ -2503,21 +2508,22 @@ impl Loading {
                     self.menu.controls.settings.virtual_mouse_pointer_scale,
                 );
             }
-            if is_goy {
-                horizon_client::touch_ui::draw_goy_hud(
-                    &self.menu.controls,
-                    batch,
-                    &gui.atlas,
-                    hud_in_menu,
-                    self.menu.touch.virtual_mouse,
-                );
-            } else if !hud_in_menu
-                || self.menu.controls.settings.layouts[self.menu.controls.settings.mode.index()]
+            if !is_goy
+                && (!hud_in_menu
+                    || self.menu.controls.settings.layouts
+                        [self.menu.controls.settings.mode.index()]
                     .iter()
-                    .any(|p| p.visible_in_menu)
+                    .any(|p| p.visible_in_menu))
             {
                 self.menu.controls.draw(batch, &gui.atlas);
             }
+            horizon_client::touch_ui::draw_goy_hud(
+                &self.menu.controls,
+                batch,
+                &gui.atlas,
+                hud_in_menu,
+                self.menu.touch.virtual_mouse,
+            );
             self.menu.touch.draw(batch, &gui.atlas, true);
             self.menu
                 .touch
@@ -2640,6 +2646,10 @@ mod tests {
             receiver,
             loaded: None,
             renderer_job: None,
+            renderer_job_gl: false,
+            backgrounded: false,
+            surface_lost: false,
+            cancel_renderer: false,
             prepared_renderer: None,
             delivered: false,
             handle: None,
@@ -2651,27 +2661,30 @@ mod tests {
 
     #[test]
     fn renderer_preparation_does_not_wait_for_its_worker() {
-        let (_sender, receiver) = std::sync::mpsc::channel();
-        let (release, wait) = std::sync::mpsc::channel();
-        let mut loading = loading(receiver);
-        loading.renderer_job = Some(std::thread::spawn(move || {
-            wait.recv().unwrap();
-            Err("test renderer failure".into())
-        }));
-        loading.prepare_renderer().unwrap();
-        assert!(!loading.renderer_job.as_ref().unwrap().is_finished());
-        release.send(()).unwrap();
-        while !loading.renderer_job.as_ref().unwrap().is_finished() {
-            std::thread::yield_now();
+        for gl in [false, true] {
+            let (_sender, receiver) = std::sync::mpsc::channel();
+            let (release, wait) = std::sync::mpsc::channel();
+            let mut loading = loading(receiver);
+            loading.renderer_job_gl = gl;
+            loading.renderer_job = Some(std::thread::spawn(move || {
+                wait.recv().unwrap();
+                Err("test renderer failure".into())
+            }));
+            loading.prepare_renderer().unwrap();
+            assert!(!loading.renderer_job.as_ref().unwrap().is_finished());
+            release.send(()).unwrap();
+            while !loading.renderer_job.as_ref().unwrap().is_finished() {
+                std::thread::yield_now();
+            }
+            assert!(
+                loading
+                    .prepare_renderer()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("test renderer failure")
+            );
+            assert!(loading.renderer_job.is_none());
         }
-        assert!(
-            loading
-                .prepare_renderer()
-                .unwrap_err()
-                .to_string()
-                .contains("test renderer failure")
-        );
-        assert!(loading.renderer_job.is_none());
     }
 
     #[test]
