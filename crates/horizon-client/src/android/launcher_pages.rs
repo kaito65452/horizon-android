@@ -5282,29 +5282,32 @@ impl Launcher {
                         SettingControl::Toggle(c.device.gpu_profile, Action::GpuProfile),
                     ),
                     (
-                    (
-                        "Experimental Leaf Culling",
-                        "Simplifies dense foliage and changes its appearance; applies on next Play",
-                        SettingControl::Toggle(
-                            c.experimental_leaf_culling,
-                            Action::ToggleExperimentalLeaves,
+                        (
+                            "Experimental Leaf Culling",
+                            "Simplifies dense foliage and changes its appearance; applies on next Play",
+                            SettingControl::Toggle(
+                                c.experimental_leaf_culling,
+                                Action::ToggleExperimentalLeaves,
+                            ),
                         ),
-                    ),
-                    (
-                        "VOICE CHAT & ACOUSTIC CONDITIONING",
-                        "Built-in Simple Voice Chat 2.6.x (Complex Voice Chat v2.0.0) & RNNoise filter",
-                        SettingControl::SectionHeader(svc_badge, Icon::Flask),
-                    ),
-                    (
-                        "Built-in Simple Voice Chat (SVC)",
-                        "Enables proximity voice chat, groups, V-menu & UDP Opus audio on SVC servers",
-                        SettingControl::Toggle(c.svc_enabled, Action::ToggleExperimentalSvc),
-                    ),
-                    (
-                        "SVC RNNoise & Echo Suppression",
-                        "Post-AEC RNNoise neural denoiser, NLMS echo filter & smart speaker ducking",
-                        SettingControl::Toggle(c.svc_rnnoise, Action::ToggleExperimentalSvcRnnoise),
-                    ),
+                        (
+                            "VOICE CHAT & ACOUSTIC CONDITIONING",
+                            "Built-in Simple Voice Chat 2.6.x (Complex Voice Chat v2.0.0) & RNNoise filter",
+                            SettingControl::SectionHeader(svc_badge, Icon::Flask),
+                        ),
+                        (
+                            "Built-in Simple Voice Chat (SVC)",
+                            "Enables proximity voice chat, groups, V-menu & UDP Opus audio on SVC servers",
+                            SettingControl::Toggle(c.svc_enabled, Action::ToggleExperimentalSvc),
+                        ),
+                        (
+                            "SVC RNNoise & Echo Suppression",
+                            "Post-AEC RNNoise neural denoiser, NLMS echo filter & smart speaker ducking",
+                            SettingControl::Toggle(
+                                c.svc_rnnoise,
+                                Action::ToggleExperimentalSvcRnnoise,
+                            ),
+                        ),
                     ),
                 ];
 
