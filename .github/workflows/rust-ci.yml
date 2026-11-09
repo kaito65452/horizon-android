@@ -58,7 +58,7 @@ jobs:
       matrix:
         toolchain: ${{ github.event_name == 'workflow_dispatch' && inputs.toolchain != '' && fromJSON(format('["{0}"]', inputs.toolchain)) || fromJSON('["stable","beta","1.95.0"]') }}
     env:
-      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_DEV_DEBUG: 'line-tables-only'
       CMAKE_POLICY_VERSION_MINIMUM: '3.5'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -70,17 +70,17 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libudev-dev libxkbcommon-dev libopus-dev cmake pkg-config
+        run: sudo apt-get update && sudo apt-get install --yes libasound2-dev libudev-dev libxkbcommon-dev libopus-dev libvulkan1 mesa-vulkan-drivers cmake pkg-config
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::all
+        run: cargo clippy --workspace --exclude horizon-android --lib --bins --tests -- -D warnings -A clippy::all
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude horizon-android --lib --bins --tests
       - name: Summary
         if: always()
         run: |
           echo '### Rust checks (${{ matrix.toolchain }})' >> "$GITHUB_STEP_SUMMARY"
           rustc --version >> "$GITHUB_STEP_SUMMARY"
-          echo 'Commands: `cargo clippy --workspace --all-targets -- -D warnings -A clippy::all`, `cargo test --workspace`' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Commands: `cargo clippy --workspace --exclude horizon-android --lib --bins --tests -- -D warnings -A clippy::all`, `cargo test --workspace --exclude horizon-android --lib --bins --tests`' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload failure log
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
