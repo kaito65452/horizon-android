@@ -2758,7 +2758,7 @@ impl TouchUi {
             ui.text(Face::SemiBold, 11.0, cx + 14.0, ry + 6.0, text_c, title);
             ui.text(Face::Regular, 9.2, cx + 14.0, ry + 24.0, muted_c, sub);
             if let Some(state) = on {
-                ui.m3_switch(cx + cw - 62.0, ry + 9.0, state);
+                ui.switch(cx + cw - 62.0, ry + 9.0, state);
             } else if let Some(badge) = right_badge {
                 let bw = 64.0;
                 let bx = cx + cw - bw - 10.0;
@@ -5261,7 +5261,7 @@ pub fn draw_hud_editor(
                             st_border
                         },
                     );
-                    ui.m3_checkbox(
+                    ui.checkbox(
                         wx + 18.0,
                         y6 + 8.0,
                         18.0,
@@ -5294,7 +5294,7 @@ pub fn draw_hud_editor(
                             st_border
                         },
                     );
-                    ui.m3_checkbox(
+                    ui.checkbox(
                         vm_x + 6.0,
                         y6 + 8.0,
                         18.0,
@@ -5941,7 +5941,7 @@ pub fn draw_hud_editor(
                             st_border
                         },
                     );
-                    ui.m3_checkbox(
+                    ui.checkbox(
                         wx + 18.0,
                         vy + 5.0,
                         18.0,
@@ -5974,7 +5974,7 @@ pub fn draw_hud_editor(
                             st_border
                         },
                     );
-                    ui.m3_checkbox(
+                    ui.checkbox(
                         vm_x + 6.0,
                         vy + 5.0,
                         18.0,
