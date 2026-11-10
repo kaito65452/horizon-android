@@ -955,7 +955,7 @@ pub fn aux_mouse_phase(pressed: bool, owned: bool, touched: bool) -> Option<Touc
 
 const COLOR_SWATCHES: [(u32, &str); 8] = [
     (0xFF1E1B2E, "Obsidian"),
-    (0xFF9A7BFF, "Violet"),
+    (0xFFA78BFA, "Violet"),
     (0xFFD0BCFF, "Lavender"),
     (0xFF38BDF8, "Cyan"),
     (0xFF34D399, "Emerald"),

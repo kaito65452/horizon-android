@@ -188,7 +188,7 @@ impl Default for JoystickStyle {
     fn default() -> Self {
         Self {
             stick_stroke: 2.0,
-            stick_stroke_color: 0xFF9A7BFF,
+            stick_stroke_color: 0xFF38BDF8,
             stick_color: 0xFFD8CEFF,
             stick_opacity: 0.90,
             stick_size: 0.42,

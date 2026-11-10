@@ -11,70 +11,168 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
+const WALLPAPER_CYAN: &[u8] = include_bytes!("wallpapers/cyan.png");
+const WALLPAPER_EMERALD: &[u8] = include_bytes!("wallpapers/emerald.png");
+const WALLPAPER_CRIMSON: &[u8] = include_bytes!("wallpapers/crimson.png");
+const WALLPAPER_VIOLET: &[u8] = include_bytes!("wallpapers/violet.png");
+const WALLPAPER_AMBER: &[u8] = include_bytes!("wallpapers/amber.png");
+const WALLPAPER_WINTER: &[u8] = include_bytes!("wallpapers/winter.png");
+
 thread_local! {
     static ACTIVE_SLIDER_DRAG: std::cell::Cell<Option<(Action, f32, f32)>> = const { std::cell::Cell::new(None) };
     static SLIDER_TRACK_TARGETS: std::cell::RefCell<Vec<([f32; 4], Action, f32, f32)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static WALLPAPER_CACHE: std::cell::RefCell<Option<(&'static str, u32, u32, Vec<u8>)>> = const { std::cell::RefCell::new(None) };
+}
+
+fn is_december() -> bool {
+    let now = std::time::SystemTime::now();
+    let Ok(dur) = now.duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    let secs = dur.as_secs();
+    let days = (secs / 86400) as i64;
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u32;
+    let yoe = (doe - doe / 1024 + doe / 1461 - doe / 142401) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    m == 12
+}
+
+fn decode_png_rgba(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let width = info.width;
+    let height = info.height;
+    buf.truncate(info.buffer_size());
+
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => {
+            let mut out = Vec::with_capacity((width * height * 4) as usize);
+            for chunk in buf.chunks_exact(3) {
+                out.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 255]);
+            }
+            out
+        }
+        png::ColorType::Grayscale => {
+            let mut out = Vec::with_capacity((width * height * 4) as usize);
+            for &g in &buf {
+                out.extend_from_slice(&[g, g, g, 255]);
+            }
+            out
+        }
+        png::ColorType::GrayscaleAlpha => {
+            let mut out = Vec::with_capacity((width * height * 4) as usize);
+            for chunk in buf.chunks_exact(2) {
+                out.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
+            }
+            out
+        }
+        _ => return None,
+    };
+    Some((width, height, rgba))
+}
+
+fn get_theme_wallpaper_bytes(
+    palette: horizon_theme::blaze::AccentPalette,
+) -> (&'static str, &'static [u8]) {
+    if is_december() {
+        return ("blaze_wallpaper_winter", WALLPAPER_WINTER);
+    }
+    match palette {
+        horizon_theme::blaze::AccentPalette::Cyan => ("blaze_wallpaper_cyan", WALLPAPER_CYAN),
+        horizon_theme::blaze::AccentPalette::Emerald => {
+            ("blaze_wallpaper_emerald", WALLPAPER_EMERALD)
+        }
+        horizon_theme::blaze::AccentPalette::Crimson => {
+            ("blaze_wallpaper_crimson", WALLPAPER_CRIMSON)
+        }
+        horizon_theme::blaze::AccentPalette::Violet => ("blaze_wallpaper_violet", WALLPAPER_VIOLET),
+        horizon_theme::blaze::AccentPalette::Amber => ("blaze_wallpaper_amber", WALLPAPER_AMBER),
+    }
+}
+
+fn load_active_wallpaper(
+    palette: horizon_theme::blaze::AccentPalette,
+) -> Option<(&'static str, u32, u32, Vec<u8>)> {
+    let (key, bytes) = get_theme_wallpaper_bytes(palette);
+    WALLPAPER_CACHE.with(|cache| {
+        let mut borrow = cache.borrow_mut();
+        if let Some((cached_key, w, h, rgba)) = borrow.as_ref() {
+            if *cached_key == key {
+                return Some((*cached_key, *w, *h, rgba.clone()));
+            }
+        }
+        let (w, h, rgba) = decode_png_rgba(bytes)?;
+        *borrow = Some((key, w, h, rgba.clone()));
+        Some((key, w, h, rgba))
+    })
 }
 
 /// Centralized dynamic theme accessors backed by `horizon_client::ui_theme::active_theme()`.
 #[inline]
-fn my3_bg() -> u32 {
+fn blaze_bg() -> u32 {
     horizon_client::ui_theme::active_theme().bg_solid
 }
 #[inline]
-fn my3_surface() -> u32 {
+fn blaze_surface() -> u32 {
     horizon_client::ui_theme::active_theme().surface
 }
 #[inline]
-fn my3_card_bg() -> u32 {
+fn blaze_card_bg() -> u32 {
     horizon_client::ui_theme::active_theme().surface_dim
 }
 #[inline]
-fn my3_card_border() -> u32 {
+fn blaze_card_border() -> u32 {
     horizon_client::ui_theme::active_theme().border
 }
 #[inline]
-fn my3_surface_high() -> u32 {
+fn blaze_surface_high() -> u32 {
     horizon_client::ui_theme::active_theme().surface_bright
 }
 #[inline]
-fn my3_border() -> u32 {
+fn blaze_border() -> u32 {
     horizon_client::ui_theme::active_theme().border
 }
 #[inline]
-fn my3_nav_active() -> u32 {
+fn blaze_nav_active() -> u32 {
     horizon_client::ui_theme::active_theme().surface_selected
 }
 #[inline]
-fn my3_accent() -> u32 {
+fn blaze_accent() -> u32 {
     horizon_client::ui_theme::active_theme().accent
 }
 #[inline]
-fn my3_accent_soft() -> u32 {
+fn blaze_accent_soft() -> u32 {
     horizon_client::ui_theme::active_theme().accent_soft
 }
 #[inline]
-fn my3_on_accent() -> u32 {
+fn blaze_on_accent() -> u32 {
     horizon_client::ui_theme::active_theme().on_accent
 }
 #[inline]
-fn my3_track() -> u32 {
+fn blaze_track() -> u32 {
     horizon_client::ui_theme::active_theme().surface_dim
 }
 #[inline]
-fn my3_pause_bg() -> u32 {
+fn blaze_pause_bg() -> u32 {
     horizon_client::ui_theme::active_theme().surface_bright
 }
 #[inline]
-fn my3_cancel_bg() -> u32 {
+fn blaze_cancel_bg() -> u32 {
     color::with_alpha(horizon_client::ui_theme::active_theme().danger, 0.28)
 }
 #[inline]
-fn my3_text() -> u32 {
+fn blaze_text() -> u32 {
     horizon_client::ui_theme::active_theme().text_primary
 }
 #[inline]
-fn my3_muted() -> u32 {
+fn blaze_muted() -> u32 {
     horizon_client::ui_theme::active_theme().text_muted
 }
 
@@ -457,15 +555,27 @@ pub(super) fn button(
         h,
         radius,
         if accent {
-            my3_accent()
+            blaze_accent()
         } else {
-            my3_surface_high()
+            blaze_surface_high()
         },
     );
     if !accent {
-        ui.border(x, y, w, h, radius, my3_border());
+        ui.border(x, y, w, h, radius, blaze_border());
     }
-    let padding = (w * 0.10).clamp(8.0, 14.0);
+    let (clean_label, is_dropdown) = if let Some(s) = label.strip_suffix(" v") {
+        (s, true)
+    } else if let Some(s) = label.strip_suffix(" \u{25be}") {
+        (s, true)
+    } else {
+        (label, false)
+    };
+
+    let padding = if is_dropdown {
+        10.0
+    } else {
+        (w * 0.10).clamp(8.0, 14.0)
+    };
     let font = if w < 90.0 {
         13.0
     } else if h <= 36.0 {
@@ -473,23 +583,42 @@ pub(super) fn button(
     } else {
         15.0
     };
-    let fitted = ui.fit_text(Face::Medium, font, label, (w - 2.0 * padding).max(16.0));
+    let avail_w = if is_dropdown {
+        (w - 2.0 * padding - 16.0).max(12.0)
+    } else {
+        (w - 2.0 * padding).max(16.0)
+    };
+    let fitted = ui.fit_text(Face::Medium, font, clean_label, avail_w);
     let text_w = ui.measure(Face::Medium, font, &fitted);
-    let left_align = matches!(action, Action::Field(_)) || label.ends_with(" v");
+    let left_align = matches!(action, Action::Field(_)) || is_dropdown;
     let tx = if left_align {
         x + padding
     } else {
         x + ((w - text_w) * 0.5).max(padding)
     };
     let ty = y + ((h - font * 1.45) * 0.5).max(2.0);
-    ui.text(
-        Face::Medium,
-        font,
-        tx,
-        ty,
-        if accent { my3_on_accent() } else { my3_text() },
-        &fitted,
-    );
+    let text_col = if accent {
+        blaze_on_accent()
+    } else {
+        blaze_text()
+    };
+    ui.text(Face::Medium, font, tx, ty, text_col, &fitted);
+    if is_dropdown {
+        let icon_sz = 12.0;
+        let icon_x = x + w - padding - icon_sz;
+        let icon_y = y + (h - icon_sz) * 0.5;
+        ui.icon(
+            Icon::ChevronDown,
+            icon_x,
+            icon_y,
+            icon_sz,
+            if accent {
+                blaze_on_accent()
+            } else {
+                blaze_muted()
+            },
+        );
+    }
     if let Some(c) = ui.clip_rect(rect) {
         targets.push((c, action));
     }
@@ -508,7 +637,7 @@ fn toggle(
         13.5,
         x,
         y + (h - 20.0) * 0.5,
-        if on { my3_accent() } else { my3_muted() },
+        if on { blaze_accent() } else { blaze_muted() },
         if on { "Enabled" } else { "Off" },
     );
     let track_x = x + w - 52.0;
@@ -519,7 +648,7 @@ fn toggle(
         50.0,
         26.0,
         13.0,
-        if on { my3_accent() } else { my3_track() },
+        if on { blaze_accent() } else { blaze_track() },
     );
     ui.rounded(
         track_x + if on { 26.0 } else { 4.0 },
@@ -527,7 +656,7 @@ fn toggle(
         20.0,
         20.0,
         10.0,
-        if on { my3_on_accent() } else { my3_muted() },
+        if on { blaze_on_accent() } else { blaze_muted() },
     );
     if let Some(c) = ui.clip_rect([x, y, w, h]) {
         targets.push((c, action));
@@ -535,7 +664,7 @@ fn toggle(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_setting_card(
+fn draw_blaze_setting_card(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
     list_targets: &mut Vec<([f32; 4], Action)>,
@@ -548,10 +677,10 @@ fn draw_setting_card(
     right_control: SettingControl<'_>,
 ) {
     if let SettingControl::SectionHeader(badge, icon) = right_control {
-        ui.rounded(x, y + 6.0, w, h - 10.0, 16.0, my3_surface());
-        ui.border(x, y + 6.0, w, h - 10.0, 16.0, my3_border());
-        ui.rounded(x + 12.0, y + 13.0, 34.0, 34.0, 11.0, my3_accent_soft());
-        ui.icon(icon, x + 20.0, y + 21.0, 18.0, my3_accent());
+        ui.rounded(x, y + 6.0, w, h - 10.0, 16.0, blaze_surface());
+        ui.border(x, y + 6.0, w, h - 10.0, 16.0, blaze_border());
+        ui.rounded(x + 12.0, y + 13.0, 34.0, 34.0, 11.0, blaze_accent_soft());
+        ui.icon(icon, x + 20.0, y + 21.0, 18.0, blaze_accent());
         let text_max = (w - 170.0).max(90.0);
         let fitted_title = ui.fit_text(Face::SemiBold, 13.5, title, text_max);
         ui.text(
@@ -559,7 +688,7 @@ fn draw_setting_card(
             13.5,
             x + 56.0,
             y + 12.0,
-            my3_accent(),
+            blaze_accent(),
             &fitted_title,
         );
         let fitted_sub = ui.fit_text(Face::Regular, 11.5, subtitle, text_max);
@@ -568,19 +697,19 @@ fn draw_setting_card(
             11.5,
             x + 56.0,
             y + 31.0,
-            my3_muted(),
+            blaze_muted(),
             &fitted_sub,
         );
         let chip_w = (ui.measure(Face::SemiBold, 10.5, badge) + 22.0).clamp(64.0, 124.0);
         let chip_x = x + w - chip_w - 14.0;
         let chip_y = y + (h - 24.0) * 0.5 + 1.0;
-        ui.rounded(chip_x, chip_y, chip_w, 24.0, 12.0, my3_accent_soft());
-        ui.border(chip_x, chip_y, chip_w, 24.0, 12.0, my3_accent());
+        ui.rounded(chip_x, chip_y, chip_w, 24.0, 12.0, blaze_accent_soft());
+        ui.border(chip_x, chip_y, chip_w, 24.0, 12.0, blaze_accent());
         ui.centered_fit(
             Face::SemiBold,
             10.0,
             [chip_x + 4.0, chip_y, chip_w - 8.0, 24.0],
-            my3_accent(),
+            blaze_accent(),
             badge,
         );
         return;
@@ -595,14 +724,14 @@ fn draw_setting_card(
     let theme = horizon_client::ui_theme::active_theme();
     let card_fill = color::with_alpha(
         if is_active_card {
-            my3_surface_high()
+            blaze_surface_high()
         } else {
-            my3_card_bg()
+            blaze_card_bg()
         },
         theme.glass_opacity,
     );
     ui.rounded(x, y, w, h, 18.0, card_fill);
-    ui.border(x, y, w, h, 18.0, my3_card_border());
+    ui.border(x, y, w, h, 18.0, blaze_card_border());
     if is_active_card {
         ui.rounded(
             x + 4.0,
@@ -610,7 +739,7 @@ fn draw_setting_card(
             3.5,
             (h - 24.0).max(12.0),
             1.8,
-            my3_accent(),
+            blaze_accent(),
         );
     }
 
@@ -621,7 +750,7 @@ fn draw_setting_card(
         15.0,
         x + 16.0,
         y + 10.0,
-        my3_text(),
+        blaze_text(),
         &fitted_title,
     );
     let fitted_sub = ui.fit_text(Face::Regular, 12.5, subtitle, text_max);
@@ -630,7 +759,7 @@ fn draw_setting_card(
         12.5,
         x + 16.0,
         y + 32.0,
-        my3_muted(),
+        blaze_muted(),
         &fitted_sub,
     );
 
@@ -684,9 +813,16 @@ fn draw_setting_card(
                 val_w,
                 36.0,
                 12.0,
-                my3_surface(),
+                blaze_surface(),
             );
-            ui.border(val_x, y + (h - 36.0) * 0.5, val_w, 36.0, 12.0, my3_border());
+            ui.border(
+                val_x,
+                y + (h - 36.0) * 0.5,
+                val_w,
+                36.0,
+                12.0,
+                blaze_border(),
+            );
             let fitted_v = ui.fit_text(Face::SemiBold, 13.5, value_label, val_w - 10.0);
             let tw = ui.measure(Face::SemiBold, 13.5, &fitted_v);
             ui.text(
@@ -694,7 +830,7 @@ fn draw_setting_card(
                 13.5,
                 val_x + (val_w - tw) * 0.5,
                 y + (h - 20.0) * 0.5,
-                my3_accent(),
+                blaze_accent(),
                 &fitted_v,
             );
             list_targets.push((minus_rect, minus_action));
@@ -715,8 +851,8 @@ fn draw_setting_card(
             let minus_rect = [track_x - 34.0 - 6.0, y + (h - 34.0) * 0.5, 34.0, 34.0];
 
             let pill_y = y + (h - 36.0) * 0.5;
-            ui.rounded(track_x, pill_y, track_w, 36.0, 12.0, my3_surface());
-            ui.border(track_x, pill_y, track_w, 36.0, 12.0, my3_border());
+            ui.rounded(track_x, pill_y, track_w, 36.0, 12.0, blaze_surface());
+            ui.border(track_x, pill_y, track_w, 36.0, 12.0, blaze_border());
 
             // M3 Expressive Value Label + Linear Track Bar with Active Thumb
             let fitted_v = ui.fit_text(Face::SemiBold, 12.0, value_label, track_w - 12.0);
@@ -726,7 +862,7 @@ fn draw_setting_card(
                 12.0,
                 track_x + (track_w - tw) * 0.5,
                 pill_y + 4.0,
-                my3_accent(),
+                blaze_accent(),
                 &fitted_v,
             );
 
@@ -734,11 +870,11 @@ fn draw_setting_card(
             let bar_w = (track_w - 20.0).max(24.0);
             let bar_y = pill_y + 24.0;
             let t = fraction.clamp(0.0, 1.0);
-            ui.rounded(bar_x, bar_y, bar_w, 6.0, 3.0, my3_surface_high());
+            ui.rounded(bar_x, bar_y, bar_w, 6.0, 3.0, blaze_surface_high());
             let fill_w = (bar_w * t).max(6.0);
-            ui.rounded(bar_x, bar_y, fill_w, 6.0, 3.0, my3_accent());
+            ui.rounded(bar_x, bar_y, fill_w, 6.0, 3.0, blaze_accent());
             let thumb_x = (bar_x + bar_w * t - 2.0).clamp(bar_x, bar_x + bar_w - 4.0);
-            ui.rounded(thumb_x, bar_y - 2.0, 4.0, 10.0, 2.0, my3_text());
+            ui.rounded(thumb_x, bar_y - 2.0, 4.0, 10.0, 2.0, blaze_text());
 
             let left_half = [track_x, pill_y, track_w * 0.5, 36.0];
             let right_half = [track_x + track_w * 0.5, pill_y, track_w * 0.5, 36.0];
@@ -809,13 +945,13 @@ fn icon_action_button(
         x + (w - icon_size) * 0.5,
         y + (h - icon_size) * 0.5,
         icon_size,
-        my3_text(),
+        blaze_text(),
     );
     targets.push((rect, action));
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_my3_progress_view(
+fn draw_blaze_progress_view(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
     content_x: f32,
@@ -842,7 +978,7 @@ fn draw_my3_progress_view(
         23.0,
         content_x,
         center_y - 68.0,
-        my3_text(),
+        blaze_text(),
         &title_fitted,
     );
 
@@ -859,14 +995,14 @@ fn draw_my3_progress_view(
         badge_w,
         22.0,
         11.0,
-        my3_accent_soft(),
+        blaze_accent_soft(),
     );
     ui.text(
         Face::SemiBold,
         12.0,
         content_x + 9.0,
         center_y - 31.0,
-        my3_accent(),
+        blaze_accent(),
         &step_badge,
     );
 
@@ -879,7 +1015,7 @@ fn draw_my3_progress_view(
         13.5,
         left_x,
         center_y - 32.0,
-        my3_muted(),
+        blaze_muted(),
         &left_fitted,
     );
     ui.text(
@@ -887,18 +1023,18 @@ fn draw_my3_progress_view(
         13.5,
         content_x + content_w - right_w,
         center_y - 32.0,
-        my3_text(),
+        blaze_text(),
         subtitle_right,
     );
 
-    // Thick Material You 3 rounded progress bar (#9A7BFF on #2B2937) with animated shimmer.
+    // Segmented Blaze rounded progress bar with animated shimmer.
     let bar_y = center_y + 2.0;
     let bar_h = 12.0;
-    ui.rounded(content_x, bar_y, content_w, bar_h, 6.0, my3_track());
+    ui.rounded(content_x, bar_y, content_w, bar_h, 6.0, blaze_track());
     let clamped = fraction.clamp(0.0, 1.0);
     if clamped > 0.0 {
         let fill_w = (content_w * clamped).max(bar_h).min(content_w);
-        ui.rounded(content_x, bar_y, fill_w, bar_h, 6.0, my3_accent());
+        ui.rounded(content_x, bar_y, fill_w, bar_h, 6.0, blaze_accent());
         if !paused && fill_w > 36.0 {
             let sw = (fill_w * 0.25).clamp(24.0, 72.0);
             let sx = content_x + (fill_w - sw) * shimmer_phase.clamp(0.0, 1.0);
@@ -928,7 +1064,7 @@ fn draw_my3_progress_view(
         13.0,
         content_x,
         bar_y + 20.0,
-        my3_muted(),
+        blaze_muted(),
         &stage_fitted,
     );
     ui.text(
@@ -936,7 +1072,7 @@ fn draw_my3_progress_view(
         13.0,
         content_x + content_w - metrics_w,
         bar_y + 20.0,
-        my3_accent(),
+        blaze_accent(),
         &metrics_line,
     );
 
@@ -951,16 +1087,16 @@ fn draw_my3_progress_view(
             let done = idx < step_index;
             let active = idx == step_index;
             let bg = if active {
-                my3_accent_soft()
+                blaze_accent_soft()
             } else if done {
-                my3_surface_high()
+                blaze_surface_high()
             } else {
-                my3_surface()
+                blaze_surface()
             };
             let border_col = if active || done {
-                my3_accent()
+                blaze_accent()
             } else {
-                my3_border()
+                blaze_border()
             };
             ui.rounded(px, step_y, pill_w, 26.0, 8.0, bg);
             ui.border(px, step_y, pill_w, 26.0, 8.0, border_col);
@@ -974,9 +1110,9 @@ fn draw_my3_progress_view(
                 px + (pill_w - tw) * 0.5,
                 step_y + 5.0,
                 if active || done {
-                    my3_text()
+                    blaze_text()
                 } else {
-                    my3_muted()
+                    blaze_muted()
                 },
                 &fitted,
             );
@@ -991,7 +1127,7 @@ fn draw_my3_progress_view(
         ui,
         targets,
         [pause_x, btn_y, 46.0, 46.0],
-        my3_pause_bg(),
+        blaze_pause_bg(),
         if paused { Icon::Play } else { Icon::Pause },
         pause_action,
     );
@@ -999,7 +1135,7 @@ fn draw_my3_progress_view(
         ui,
         targets,
         [cancel_x, btn_y, 46.0, 46.0],
-        my3_cancel_bg(),
+        blaze_cancel_bg(),
         Icon::Close,
         cancel_action,
     );
@@ -1140,7 +1276,7 @@ impl Launcher {
             15.0,
             brand_x + 36.0,
             brand_y + 4.0,
-            my3_text(),
+            blaze_text(),
             "Blaze Launcher",
         );
         ui.text(
@@ -1148,7 +1284,7 @@ impl Launcher {
             10.0,
             brand_x + 36.0,
             brand_y + 22.0,
-            my3_muted(),
+            blaze_muted(),
             "26.3 • Rust Engine",
         );
 
@@ -1165,11 +1301,18 @@ impl Launcher {
         let pill_h = 36.0;
 
         // Account Avatar Pill
-        ui.rounded(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, my3_surface());
-        ui.border(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, my3_border());
+        ui.rounded(
+            pill_x,
+            pill_y,
+            pill_w,
+            pill_h,
+            pill_h * 0.5,
+            blaze_surface(),
+        );
+        ui.border(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, blaze_border());
         ui.avatar_head_2d(pill_x + 5.0, pill_y + 4.0, 28.0, &account_name);
         if self.login.signed_in {
-            ui.rounded(pill_x + 25.0, pill_y + 24.0, 9.0, 9.0, 4.5, my3_bg());
+            ui.rounded(pill_x + 25.0, pill_y + 24.0, 9.0, 9.0, 4.5, blaze_bg());
             ui.rounded(
                 pill_x + 26.0,
                 pill_y + 25.0,
@@ -1185,7 +1328,7 @@ impl Launcher {
             13.0,
             pill_x + 36.0,
             pill_y + 8.0,
-            my3_text(),
+            blaze_text(),
             &fitted_acct,
         );
         ui.icon(
@@ -1193,24 +1336,14 @@ impl Launcher {
             pill_x + pill_w - 20.0,
             pill_y + 12.0,
             12.0,
-            my3_muted(),
+            blaze_muted(),
         );
         self.targets
             .push(([pill_x, pill_y, pill_w, pill_h], Action::Account));
 
-        // GitHub Button
-        let git_w = 34.0;
-        let git_x = pill_x - 8.0 - git_w;
-        let git_y = pill_y;
-        ui.rounded(git_x, git_y, git_w, pill_h, pill_h * 0.5, my3_surface());
-        ui.border(git_x, git_y, git_w, pill_h, pill_h * 0.5, my3_border());
-        ui.icon(Icon::Share, git_x + 9.0, git_y + 10.0, 16.0, my3_muted());
-        self.targets
-            .push(([git_x, git_y, git_w, pill_h], Action::Repository));
-
         // Touch Control Editor Button
         let eq_btn_w = 34.0;
-        let eq_btn_x = git_x - 8.0 - eq_btn_w;
+        let eq_btn_x = pill_x - 8.0 - eq_btn_w;
         let eq_btn_y = pill_y;
         ui.rounded(
             eq_btn_x,
@@ -1218,7 +1351,7 @@ impl Launcher {
             eq_btn_w,
             pill_h,
             pill_h * 0.5,
-            my3_surface(),
+            blaze_surface(),
         );
         ui.border(
             eq_btn_x,
@@ -1226,14 +1359,14 @@ impl Launcher {
             eq_btn_w,
             pill_h,
             pill_h * 0.5,
-            my3_border(),
+            blaze_border(),
         );
         ui.icon(
             Icon::MenuEquals,
             eq_btn_x + 8.0,
             eq_btn_y + 9.0,
             18.0,
-            my3_accent(),
+            blaze_accent(),
         );
         self.targets.push((
             [eq_btn_x, eq_btn_y, eq_btn_w, pill_h],
@@ -1241,18 +1374,33 @@ impl Launcher {
         ));
 
         // Profile Selector Pill
-        let prof_label = format!("Profile {} v", self.catalog.config.profile + 1);
-        let prof_w = (ui.measure(Face::Medium, 12.0, &prof_label) + 20.0).clamp(84.0, 108.0);
+        let prof_label = format!("Profile {}", self.catalog.config.profile + 1);
+        let prof_w = (ui.measure(Face::Medium, 12.0, &prof_label) + 32.0).clamp(84.0, 110.0);
         let prof_x = eq_btn_x - 8.0 - prof_w;
         let prof_y = pill_y;
-        ui.rounded(prof_x, prof_y, prof_w, pill_h, pill_h * 0.5, my3_surface());
-        ui.border(prof_x, prof_y, prof_w, pill_h, pill_h * 0.5, my3_border());
-        ui.centered_fit(
+        ui.rounded(
+            prof_x,
+            prof_y,
+            prof_w,
+            pill_h,
+            pill_h * 0.5,
+            blaze_surface(),
+        );
+        ui.border(prof_x, prof_y, prof_w, pill_h, pill_h * 0.5, blaze_border());
+        ui.text(
             Face::Medium,
             12.0,
-            [prof_x, prof_y, prof_w, pill_h],
-            my3_text(),
+            prof_x + 12.0,
+            prof_y + 9.0,
+            blaze_text(),
             &prof_label,
+        );
+        ui.icon(
+            Icon::ChevronDown,
+            prof_x + prof_w - 18.0,
+            prof_y + 12.0,
+            12.0,
+            blaze_muted(),
         );
         self.targets
             .push(([prof_x, prof_y, prof_w, pill_h], Action::Profile));
@@ -1266,8 +1414,15 @@ impl Launcher {
         let deck_y = top_margin + (top_h - 36.0) * 0.5;
         let deck_h = 36.0;
 
-        ui.rounded(deck_x, deck_y, deck_w, deck_h, deck_h * 0.5, my3_surface());
-        ui.border(deck_x, deck_y, deck_w, deck_h, deck_h * 0.5, my3_border());
+        ui.rounded(
+            deck_x,
+            deck_y,
+            deck_w,
+            deck_h,
+            deck_h * 0.5,
+            blaze_surface(),
+        );
+        ui.border(deck_x, deck_y, deck_w, deck_h, deck_h * 0.5, blaze_border());
 
         let tabs: [(Page, &'static str, Icon); 5] = [
             (Page::Play, "Home", Icon::Play),
@@ -1320,7 +1475,7 @@ impl Launcher {
             tab_w,
             deck_h - 6.0,
             (deck_h - 6.0) * 0.5,
-            my3_nav_active(),
+            blaze_nav_active(),
         );
 
         for (i, (page_target, name, icon)) in tabs.into_iter().enumerate() {
@@ -1328,7 +1483,11 @@ impl Launcher {
             let ty = deck_y + 3.0;
             let th = deck_h - 6.0;
             let selected = i == selected_tab_idx;
-            let fg = if selected { my3_text() } else { my3_muted() };
+            let fg = if selected {
+                blaze_text()
+            } else {
+                blaze_muted()
+            };
 
             if tab_w >= 62.0 {
                 ui.icon(icon, tx + 8.0, ty + (th - 14.0) * 0.5, 14.0, fg);
@@ -1395,7 +1554,7 @@ impl Launcher {
             } else {
                 3
             };
-            draw_my3_progress_view(
+            draw_blaze_progress_view(
                 &mut ui,
                 &mut self.targets,
                 content_x,
@@ -1459,7 +1618,7 @@ impl Launcher {
                     InstallStage::Download => "Downloading Java Edition 26.3 client.jar",
                     other => other.label(),
                 };
-                draw_my3_progress_view(
+                draw_blaze_progress_view(
                     &mut ui,
                     &mut self.targets,
                     content_x,
@@ -1500,79 +1659,30 @@ impl Launcher {
 
                 // ========================================================
                 // ROW 1 — Hero Banner (6/12 height)
-                // Minecraft.net Underwater Axolotl & Coral Scene
+                // Official Drop Wallpaper (Dynamic per Accent Palette or Winter Easter Egg)
                 // ========================================================
-                // 1. Deep Ocean Base Gradient
+                let palette = self.catalog.config.accent_palette;
+                if let Some((key, img_w, img_h, rgba)) = load_active_wallpaper(palette) {
+                    ui.wallpaper(
+                        key, img_w, img_h, &rgba, row1.x, row1.y, row1.w, row1.h, 16.0,
+                    );
+                } else {
+                    ui.rounded(row1.x, row1.y, row1.w, row1.h, 16.0, blaze_card_bg());
+                }
+
+                // Vignette Gradient Overlay at bottom for readable text & controls
                 ui.fill_gradient(
                     row1.x,
-                    row1.y,
+                    row1.y + row1.h * 0.35,
                     row1.w,
-                    row1.h,
-                    horizon_client::ui_theme::GradientDirection::DiagonalDown,
-                    color::hex(0x06192D, 255),
-                    color::hex(0x0E6F73, 255),
-                    Some((0.48, color::hex(0x0D4466, 255))),
-                    24,
-                );
-
-                // 2. Underwater Sunbeams radiating from top
-                ui.fill(row1.x + row1.w * 0.22, row1.y, (row1.w * 0.12).max(40.0), row1.h, color::hex(0x7DD3FC, 22));
-                ui.fill(row1.x + row1.w * 0.44, row1.y, (row1.w * 0.16).max(50.0), row1.h, color::hex(0x7DD3FC, 18));
-                ui.fill(row1.x + row1.w * 0.70, row1.y, (row1.w * 0.14).max(45.0), row1.h, color::hex(0x7DD3FC, 20));
-
-                // 3. Left Ocean Ruins Silhouette with glowing lantern windows
-                let ruin_w = (row1.w * 0.18).clamp(80.0, 160.0);
-                let ruin_x = row1.x + 24.0;
-                let ruin_y = row1.y + row1.h * 0.38;
-                ui.rounded(ruin_x, ruin_y, ruin_w, row1.h * 0.62, 4.0, color::hex(0x041524, 210));
-                ui.rounded(ruin_x + ruin_w * 0.18, ruin_y - 20.0, ruin_w * 0.64, 24.0, 4.0, color::hex(0x041524, 210));
-                ui.rounded(ruin_x + ruin_w * 0.22, ruin_y + 24.0, 14.0, 14.0, 2.0, color::hex(0x7DD3FC, 220));
-                ui.rounded(ruin_x + ruin_w * 0.62, ruin_y + 24.0, 14.0, 14.0, 2.0, color::hex(0x7DD3FC, 220));
-
-                // 4. Pink Minecraft Axolotl (swimming left-center)
-                let axo_x = row1.x + (row1.w * 0.34).clamp(180.0, 360.0);
-                let axo_y = row1.y + (row1.h * 0.26).clamp(24.0, 90.0);
-                ui.rounded(axo_x, axo_y, 52.0, 30.0, 6.0, color::hex(0xF9A8D4, 255));
-                ui.rounded(axo_x + 8.0, axo_y + 9.0, 6.0, 6.0, 1.0, color::hex(0x9D174D, 255));
-                ui.rounded(axo_x + 36.0, axo_y + 9.0, 6.0, 6.0, 1.0, color::hex(0x9D174D, 255));
-                ui.rounded(axo_x - 8.0, axo_y + 3.0, 10.0, 6.0, 2.0, color::hex(0xEC4899, 255));
-                ui.rounded(axo_x - 10.0, axo_y + 12.0, 12.0, 6.0, 2.0, color::hex(0xEC4899, 255));
-                ui.rounded(axo_x - 8.0, axo_y + 21.0, 10.0, 6.0, 2.0, color::hex(0xEC4899, 255));
-                ui.rounded(axo_x + 50.0, axo_y + 3.0, 10.0, 6.0, 2.0, color::hex(0xEC4899, 255));
-                ui.rounded(axo_x + 50.0, axo_y + 12.0, 12.0, 6.0, 2.0, color::hex(0xEC4899, 255));
-                ui.rounded(axo_x + 50.0, axo_y + 21.0, 10.0, 6.0, 2.0, color::hex(0xEC4899, 255));
-
-                // 5. Diving Character Center with Trident
-                let chr_x = row1.x + (row1.w * 0.50).clamp(260.0, 560.0);
-                let chr_y = row1.y + (row1.h * 0.18).clamp(18.0, 70.0);
-                ui.rounded(chr_x + 14.0, chr_y, 30.0, 30.0, 4.0, color::hex(0xD97706, 255));
-                ui.rounded(chr_x + 14.0, chr_y, 30.0, 10.0, 2.0, color::hex(0x451A03, 255));
-                ui.rounded(chr_x + 18.0, chr_y + 14.0, 7.0, 5.0, 1.0, color::hex(0x0284C7, 255));
-                ui.rounded(chr_x + 31.0, chr_y + 14.0, 7.0, 5.0, 1.0, color::hex(0x0284C7, 255));
-                ui.rounded(chr_x + 16.0, chr_y + 30.0, 26.0, 36.0, 4.0, color::hex(0x0EA5E9, 255));
-                ui.rounded(chr_x - 2.0, chr_y + 6.0, 4.0, 68.0, 2.0, color::hex(0x5EEAD4, 255));
-                ui.rounded(chr_x - 10.0, chr_y + 4.0, 20.0, 4.0, 1.0, color::hex(0x99F6E4, 255));
-
-                // 6. Right Coral Reefs
-                let coral_x = row1.x + row1.w - 140.0;
-                ui.rounded(coral_x, row1.y + row1.h * 0.50, 22.0, row1.h * 0.50, 4.0, color::hex(0xF43F5E, 210));
-                ui.rounded(coral_x + 28.0, row1.y + row1.h * 0.38, 24.0, row1.h * 0.62, 4.0, color::hex(0xEC4899, 210));
-                ui.rounded(coral_x + 58.0, row1.y + row1.h * 0.44, 28.0, row1.h * 0.56, 4.0, color::hex(0xA855F7, 210));
-                ui.rounded(coral_x + 92.0, row1.y + row1.h * 0.58, 20.0, row1.h * 0.42, 4.0, color::hex(0x10B981, 210));
-
-                // 7. Vignette Gradient Overlay
-                ui.fill_gradient(
-                    row1.x,
-                    row1.y + row1.h * 0.42,
-                    row1.w,
-                    row1.h * 0.58,
+                    row1.h * 0.65,
                     horizon_client::ui_theme::GradientDirection::Vertical,
-                    color::hex(0x070A10, 0),
-                    color::hex(0x070A10, 220),
-                    None,
-                    12,
+                    color::hex(0x05070B, 0),
+                    color::hex(0x05070B, 230),
+                    Some((0.5, color::hex(0x05070B, 140))),
+                    16,
                 );
-                ui.border(row1.x, row1.y, row1.w, row1.h, 20.0, my3_border());
+                ui.border(row1.x, row1.y, row1.w, row1.h, 16.0, blaze_border());
 
                 // Top-right Engine Badge
                 let engine_badge = format!(
@@ -1583,13 +1693,13 @@ impl Launcher {
                     (ui.measure(Face::Medium, 11.0, &engine_badge) + 24.0).min(row1.w * 0.45);
                 let badge_x = row1.x + row1.w - badge_w - 14.0;
                 let badge_y = row1.y + 12.0;
-                ui.rounded(badge_x, badge_y, badge_w, 26.0, 13.0, my3_surface_high());
-                ui.border(badge_x, badge_y, badge_w, 26.0, 13.0, my3_border());
+                ui.rounded(badge_x, badge_y, badge_w, 26.0, 13.0, blaze_surface_high());
+                ui.border(badge_x, badge_y, badge_w, 26.0, 13.0, blaze_border());
                 ui.centered_fit(
                     Face::Medium,
                     11.0,
                     [badge_x, badge_y, badge_w, 26.0],
-                    my3_accent(),
+                    blaze_accent(),
                     &engine_badge,
                 );
                 self.targets.push((
@@ -1600,19 +1710,30 @@ impl Launcher {
                 // Bottom-left Display Title & Tagline
                 let title_x = row1.x + 18.0;
                 let title_y = row1.y + row1.h - 48.0;
-                ui.text(Face::SemiBold, 22.0, title_x, title_y, my3_text(), "MINECRAFT");
+                ui.text(
+                    Face::SemiBold,
+                    22.0,
+                    title_x,
+                    title_y,
+                    blaze_text(),
+                    "MINECRAFT",
+                );
                 ui.text(
                     Face::Medium,
                     10.0,
                     title_x,
                     title_y + 24.0,
-                    my3_muted(),
-                    "PLAY WITHOUT LIMITS • YOUR JAVA WORLDS ON ANDROID",
+                    blaze_muted(),
+                    if is_december() {
+                        "WINTER CELEBRATION • PLAY WITHOUT LIMITS"
+                    } else {
+                        "PLAY WITHOUT LIMITS • YOUR JAVA WORLDS ON ANDROID"
+                    },
                 );
 
                 // Bottom-right Capability Pills ("FAST", "STABLE", "CUSTOMIZABLE")
                 let cap_pills = [
-                    ("FAST", my3_accent()),
+                    ("FAST", blaze_accent()),
                     ("STABLE", color::hex(0x34D399, 255)),
                     ("CUSTOMIZABLE", color::hex(0xA78BFA, 255)),
                 ];
@@ -1622,8 +1743,8 @@ impl Launcher {
                 for (cap_label, cap_col) in cap_pills.into_iter().rev() {
                     let pw = ui.measure(Face::Medium, 10.0, cap_label) + 16.0;
                     let px = pill_right - pw;
-                    ui.rounded(px, cap_y, pw, cap_h, 11.0, my3_surface_high());
-                    ui.border(px, cap_y, pw, cap_h, 11.0, my3_border());
+                    ui.rounded(px, cap_y, pw, cap_h, 11.0, blaze_surface_high());
+                    ui.border(px, cap_y, pw, cap_h, 11.0, blaze_border());
                     ui.centered_fit(
                         Face::Medium,
                         10.0,
@@ -1641,8 +1762,22 @@ impl Launcher {
                 let [prof_col, edit_col, play_col] = row2.split_cols([5.0, 2.0, 5.0], gap);
 
                 // Left: Selected Profile Card
-                ui.rounded(prof_col.x, prof_col.y, prof_col.w, prof_col.h, 16.0, my3_surface());
-                ui.border(prof_col.x, prof_col.y, prof_col.w, prof_col.h, 16.0, my3_border());
+                ui.rounded(
+                    prof_col.x,
+                    prof_col.y,
+                    prof_col.w,
+                    prof_col.h,
+                    16.0,
+                    blaze_surface(),
+                );
+                ui.border(
+                    prof_col.x,
+                    prof_col.y,
+                    prof_col.w,
+                    prof_col.h,
+                    16.0,
+                    blaze_border(),
+                );
                 let icon_size = (prof_col.h - 16.0).clamp(24.0, 32.0);
                 ui.rounded(
                     prof_col.x + 8.0,
@@ -1650,30 +1785,30 @@ impl Launcher {
                     icon_size,
                     icon_size,
                     8.0,
-                    my3_surface_high(),
+                    blaze_surface_high(),
                 );
                 ui.icon(
                     Icon::Gamepad,
                     prof_col.x + 8.0 + (icon_size - 16.0) * 0.5,
                     prof_col.y + (prof_col.h - 16.0) * 0.5,
                     16.0,
-                    my3_accent(),
+                    blaze_accent(),
                 );
                 ui.text(
                     Face::Medium,
                     9.0,
                     prof_col.x + icon_size + 14.0,
                     prof_col.y + 8.0,
-                    my3_muted(),
+                    blaze_muted(),
                     "SELECTED PROFILE",
                 );
-                let prof_name = format!("Profile {} v", self.catalog.config.profile + 1);
+                let prof_name = format!("Profile {}", self.catalog.config.profile + 1);
                 ui.text(
                     Face::SemiBold,
                     13.5,
                     prof_col.x + icon_size + 14.0,
                     prof_col.y + 22.0,
-                    my3_text(),
+                    blaze_text(),
                     &prof_name,
                 );
                 ui.icon(
@@ -1681,30 +1816,45 @@ impl Launcher {
                     prof_col.x + prof_col.w - 18.0,
                     prof_col.y + (prof_col.h - 12.0) * 0.5,
                     12.0,
-                    my3_muted(),
+                    blaze_muted(),
                 );
                 self.targets.push((prof_col.to_array(), Action::Profile));
 
                 // Center: EDIT Button
-                ui.rounded(edit_col.x, edit_col.y, edit_col.w, edit_col.h, 16.0, my3_surface());
-                ui.border(edit_col.x, edit_col.y, edit_col.w, edit_col.h, 16.0, my3_border());
+                ui.rounded(
+                    edit_col.x,
+                    edit_col.y,
+                    edit_col.w,
+                    edit_col.h,
+                    16.0,
+                    blaze_surface(),
+                );
+                ui.border(
+                    edit_col.x,
+                    edit_col.y,
+                    edit_col.w,
+                    edit_col.h,
+                    16.0,
+                    blaze_border(),
+                );
                 let edit_icon_x = edit_col.x + (edit_col.w - 56.0) * 0.5;
                 ui.icon(
                     Icon::Pencil,
                     edit_icon_x,
                     edit_col.y + (edit_col.h - 14.0) * 0.5,
                     14.0,
-                    my3_accent(),
+                    blaze_accent(),
                 );
                 ui.text(
                     Face::SemiBold,
                     13.0,
                     edit_icon_x + 18.0,
                     edit_col.y + (edit_col.h - 16.0) * 0.5,
-                    my3_text(),
+                    blaze_text(),
                     "EDIT",
                 );
-                self.targets.push((edit_col.to_array(), Action::Page(Page::Skins)));
+                self.targets
+                    .push((edit_col.to_array(), Action::Page(Page::Skins)));
 
                 // Right: 3-Element Prominent PLAY Button (Matching Reference)
                 let is_launching = self.launching || self.session_worker.is_some();
@@ -1716,7 +1866,7 @@ impl Launcher {
                         play_col.w,
                         play_col.h,
                         radius,
-                        my3_accent_soft(),
+                        blaze_accent_soft(),
                     );
                     ui.stroke_rounded(
                         play_col.x,
@@ -1725,15 +1875,15 @@ impl Launcher {
                         play_col.h,
                         radius,
                         1.6,
-                        my3_accent(),
+                        blaze_accent(),
                     );
                     let bar_w = (play_col.w - 28.0).max(40.0);
                     let bar_x = play_col.x + 14.0;
                     let bar_y = play_col.y + play_col.h - 10.0;
-                    ui.rounded(bar_x, bar_y, bar_w, 4.0, 2.0, my3_track());
+                    ui.rounded(bar_x, bar_y, bar_w, 4.0, 2.0, blaze_track());
                     let sw = (bar_w * 0.36).clamp(24.0, bar_w);
                     let sx = bar_x + (bar_w - sw) * self.anim.shimmer_phase.clamp(0.0, 1.0);
-                    ui.rounded(sx, bar_y, sw, 4.0, 2.0, my3_accent());
+                    ui.rounded(sx, bar_y, sw, 4.0, 2.0, blaze_accent());
                     ui.centered_fit(
                         Face::SemiBold,
                         15.0,
@@ -1743,12 +1893,19 @@ impl Launcher {
                             play_col.w - 24.0,
                             play_col.h - 16.0,
                         ],
-                        my3_text(),
+                        blaze_text(),
                         "Launching...",
                     );
                 } else {
                     let radius = 16.0;
-                    ui.rounded(play_col.x, play_col.y, play_col.w, play_col.h, radius, my3_accent());
+                    ui.rounded(
+                        play_col.x,
+                        play_col.y,
+                        play_col.w,
+                        play_col.h,
+                        radius,
+                        blaze_accent(),
+                    );
                     let btn_icon_sz = (play_col.h - 16.0).clamp(26.0, 32.0);
                     // Element 1: Left rounded icon box with Play icon
                     ui.rounded(
@@ -1764,7 +1921,7 @@ impl Launcher {
                         play_col.x + 10.0 + (btn_icon_sz - 16.0) * 0.5 + 1.0,
                         play_col.y + (play_col.h - 16.0) * 0.5,
                         16.0,
-                        my3_on_accent(),
+                        blaze_on_accent(),
                     );
                     // Element 2: Center Title & Subtitle
                     let play_title = if installed {
@@ -1777,15 +1934,25 @@ impl Launcher {
                     ui.centered_fit(
                         Face::SemiBold,
                         15.0,
-                        [play_col.x + btn_icon_sz + 16.0, play_col.y + 6.0, play_col.w - btn_icon_sz * 2.0 - 32.0, 18.0],
-                        my3_on_accent(),
+                        [
+                            play_col.x + btn_icon_sz + 16.0,
+                            play_col.y + 6.0,
+                            play_col.w - btn_icon_sz * 2.0 - 32.0,
+                            18.0,
+                        ],
+                        blaze_on_accent(),
                         play_title,
                     );
                     ui.centered_fit(
                         Face::Medium,
                         10.0,
-                        [play_col.x + btn_icon_sz + 16.0, play_col.y + 24.0, play_col.w - btn_icon_sz * 2.0 - 32.0, 14.0],
-                        color::with_alpha(my3_on_accent(), 0.88),
+                        [
+                            play_col.x + btn_icon_sz + 16.0,
+                            play_col.y + 24.0,
+                            play_col.w - btn_icon_sz * 2.0 - 32.0,
+                            14.0,
+                        ],
+                        color::with_alpha(blaze_on_accent(), 0.88),
                         "26.3 • Blaze Engine",
                     );
                     // Element 3: Right ChevronDown disc
@@ -1803,7 +1970,7 @@ impl Launcher {
                         play_col.x + play_col.w - disc_sz - 10.0 + (disc_sz - 14.0) * 0.5,
                         play_col.y + (play_col.h - 14.0) * 0.5,
                         14.0,
-                        my3_on_accent(),
+                        blaze_on_accent(),
                     );
                     self.targets.push((play_col.to_array(), Action::Play));
                 }
@@ -1815,8 +1982,22 @@ impl Launcher {
                 let [browse_card, manager_card] = row3.split_cols([6.0, 6.0], gap);
 
                 // Bottom Left: BROWSE RESOURCES Card
-                ui.rounded(browse_card.x, browse_card.y, browse_card.w, browse_card.h, 16.0, my3_surface());
-                ui.border(browse_card.x, browse_card.y, browse_card.w, browse_card.h, 16.0, my3_border());
+                ui.rounded(
+                    browse_card.x,
+                    browse_card.y,
+                    browse_card.w,
+                    browse_card.h,
+                    16.0,
+                    blaze_surface(),
+                );
+                ui.border(
+                    browse_card.x,
+                    browse_card.y,
+                    browse_card.w,
+                    browse_card.h,
+                    16.0,
+                    blaze_border(),
+                );
                 let c_icon_sz = (browse_card.h - 16.0).clamp(28.0, 36.0);
                 ui.rounded(
                     browse_card.x + 12.0,
@@ -1824,21 +2005,21 @@ impl Launcher {
                     c_icon_sz,
                     c_icon_sz,
                     10.0,
-                    my3_surface_high(),
+                    blaze_surface_high(),
                 );
                 ui.icon(
                     Icon::Mods,
                     browse_card.x + 12.0 + (c_icon_sz - 18.0) * 0.5,
                     browse_card.y + (browse_card.h - 18.0) * 0.5,
                     18.0,
-                    my3_accent(),
+                    blaze_accent(),
                 );
                 ui.text(
                     Face::SemiBold,
                     13.5,
                     browse_card.x + c_icon_sz + 20.0,
                     browse_card.y + 10.0,
-                    my3_text(),
+                    blaze_text(),
                     "BROWSE RESOURCES",
                 );
                 ui.text(
@@ -1846,7 +2027,7 @@ impl Launcher {
                     10.5,
                     browse_card.x + c_icon_sz + 20.0,
                     browse_card.y + 26.0,
-                    my3_muted(),
+                    blaze_muted(),
                     "Mods • Resource Packs • Shaders",
                 );
                 ui.icon(
@@ -1854,20 +2035,35 @@ impl Launcher {
                     browse_card.x + browse_card.w - 22.0,
                     browse_card.y + (browse_card.h - 14.0) * 0.5,
                     14.0,
-                    my3_muted(),
+                    blaze_muted(),
                 );
-                self.targets.push((browse_card.to_array(), Action::Page(Page::Mods)));
+                self.targets
+                    .push((browse_card.to_array(), Action::Page(Page::Mods)));
 
                 // Bottom Right: MANAGER Card
-                ui.rounded(manager_card.x, manager_card.y, manager_card.w, manager_card.h, 16.0, my3_surface());
-                ui.border(manager_card.x, manager_card.y, manager_card.w, manager_card.h, 16.0, my3_border());
+                ui.rounded(
+                    manager_card.x,
+                    manager_card.y,
+                    manager_card.w,
+                    manager_card.h,
+                    16.0,
+                    blaze_surface(),
+                );
+                ui.border(
+                    manager_card.x,
+                    manager_card.y,
+                    manager_card.w,
+                    manager_card.h,
+                    16.0,
+                    blaze_border(),
+                );
                 ui.rounded(
                     manager_card.x + 12.0,
                     manager_card.y + (manager_card.h - c_icon_sz) * 0.5,
                     c_icon_sz,
                     c_icon_sz,
                     10.0,
-                    my3_surface_high(),
+                    blaze_surface_high(),
                 );
                 ui.icon(
                     Icon::Folder,
@@ -1881,7 +2077,7 @@ impl Launcher {
                     13.5,
                     manager_card.x + c_icon_sz + 20.0,
                     manager_card.y + 10.0,
-                    my3_text(),
+                    blaze_text(),
                     "MANAGER",
                 );
                 ui.text(
@@ -1889,7 +2085,7 @@ impl Launcher {
                     10.5,
                     manager_card.x + c_icon_sz + 20.0,
                     manager_card.y + 26.0,
-                    my3_muted(),
+                    blaze_muted(),
                     "Manage Installed Mods, Packs, Worlds & SAF Export",
                 );
                 ui.icon(
@@ -1897,9 +2093,10 @@ impl Launcher {
                     manager_card.x + manager_card.w - 22.0,
                     manager_card.y + (manager_card.h - 14.0) * 0.5,
                     14.0,
-                    my3_muted(),
+                    blaze_muted(),
                 );
-                self.targets.push((manager_card.to_array(), Action::Page(Page::Installed)));
+                self.targets
+                    .push((manager_card.to_array(), Action::Page(Page::Installed)));
             }
         } else if page == Page::Skins {
             self.wardrobe.draw(
@@ -2030,7 +2227,7 @@ impl Launcher {
                     12.5,
                     content_x + 246.0,
                     sub_y + 5.0,
-                    my3_muted(),
+                    blaze_muted(),
                     &fitted_status,
                 );
             }
@@ -2095,8 +2292,8 @@ impl Launcher {
                 if y + 64.0 < top || y > bottom {
                     continue;
                 }
-                ui.rounded(content_x, y, content_w, 64.0, 14.0, my3_card_bg());
-                ui.border(content_x, y, content_w, 64.0, 14.0, my3_card_border());
+                ui.rounded(content_x, y, content_w, 64.0, 14.0, blaze_card_bg());
+                ui.border(content_x, y, content_w, 64.0, 14.0, blaze_card_border());
 
                 // Project icon: fetched Modrinth PFP if available, else MY3 vector icon badge.
                 let drawn_icon = if let Some((iw, ih, rgba)) = self.catalog.icons.get(*id) {
@@ -2111,14 +2308,14 @@ impl Launcher {
                         44.0,
                         44.0,
                         12.0,
-                        my3_accent_soft(),
+                        blaze_accent_soft(),
                     );
                     ui.icon(
                         fallback_icon,
                         content_x + 21.0,
                         y + 21.0,
                         22.0,
-                        my3_accent(),
+                        blaze_accent(),
                     );
                 }
 
@@ -2136,7 +2333,7 @@ impl Launcher {
                     15.0,
                     content_x + 64.0,
                     y + 8.0,
-                    my3_text(),
+                    blaze_text(),
                     &fitted_title,
                 );
                 ui.text(
@@ -2144,7 +2341,7 @@ impl Launcher {
                     12.5,
                     content_x + 64.0,
                     y + 28.0,
-                    my3_muted(),
+                    blaze_muted(),
                     &summary,
                 );
                 ui.text(
@@ -2152,7 +2349,7 @@ impl Launcher {
                     11.0,
                     content_x + 64.0,
                     y + 45.0,
-                    my3_accent(),
+                    blaze_accent(),
                     "Horizon Built-in • Tap for versions, Modrinth info & screenshots",
                 );
                 if let Some(c) = ui.clip_rect(card_rect) {
@@ -2180,8 +2377,8 @@ impl Launcher {
                 if y + 64.0 < top || y > bottom {
                     continue;
                 }
-                ui.rounded(content_x, y, content_w, 64.0, 14.0, my3_card_bg());
-                ui.border(content_x, y, content_w, 64.0, 14.0, my3_card_border());
+                ui.rounded(content_x, y, content_w, 64.0, 14.0, blaze_card_bg());
+                ui.border(content_x, y, content_w, 64.0, 14.0, blaze_card_border());
 
                 // Project icon: fetched RGBA icon if ready, else MY3 vector icon badge.
                 let drawn_icon = if let Some((iw, ih, rgba)) = self.catalog.icons.get(&p.id) {
@@ -2205,14 +2402,14 @@ impl Launcher {
                         44.0,
                         44.0,
                         12.0,
-                        my3_accent_soft(),
+                        blaze_accent_soft(),
                     );
                     ui.icon(
                         fallback_icon,
                         content_x + 21.0,
                         y + 21.0,
                         22.0,
-                        my3_accent(),
+                        blaze_accent(),
                     );
                 }
 
@@ -2232,7 +2429,7 @@ impl Launcher {
                     15.0,
                     content_x + 64.0,
                     y + 8.0,
-                    my3_text(),
+                    blaze_text(),
                     &title,
                 );
                 ui.text(
@@ -2240,7 +2437,7 @@ impl Launcher {
                     12.5,
                     content_x + 64.0,
                     y + 28.0,
-                    my3_muted(),
+                    blaze_muted(),
                     &summary,
                 );
                 let meta_tag = if p.downloads > 0 {
@@ -2261,7 +2458,7 @@ impl Launcher {
                     11.0,
                     content_x + 64.0,
                     y + 45.0,
-                    my3_accent(),
+                    blaze_accent(),
                     &fitted_meta,
                 );
                 if let Some(c) = ui.clip_rect(card_rect) {
@@ -2275,21 +2472,21 @@ impl Launcher {
                         btn_rect[2],
                         btn_rect[3],
                         19.0,
-                        my3_surface_high(),
+                        blaze_surface_high(),
                     );
                     ui.icon(
                         Icon::Check,
                         btn_rect[0] + 10.0,
                         btn_rect[1] + 11.0,
                         15.0,
-                        my3_accent(),
+                        blaze_accent(),
                     );
                     ui.text(
                         Face::Medium,
                         13.0,
                         btn_rect[0] + 28.0,
                         btn_rect[1] + 9.0,
-                        my3_text(),
+                        blaze_text(),
                         &state,
                     );
                     if let Some(c) = ui.clip_rect(btn_rect) {
@@ -2346,12 +2543,13 @@ impl Launcher {
                     12.5,
                     content_x,
                     h - 32.0,
-                    my3_muted(),
+                    blaze_muted(),
                     &fitted,
                 );
             }
-            if page == Page::Settings
-                && self.catalog.settings_category == SettingsCategory::Overview
+            if (page == Page::Settings
+                && self.catalog.settings_category == SettingsCategory::Overview)
+                || page == Page::Installed
             {
                 button(
                     &mut ui,
@@ -2364,7 +2562,7 @@ impl Launcher {
             }
         }
 
-        // Material You 3 Project Detail Modal (Versions, Modrinth Description, Gallery Screenshots)
+        // Blaze Project Detail Modal (Versions, Modrinth Description, Gallery Screenshots)
         if self.catalog.project_modal.is_some() {
             self.draw_project_modal(&mut ui, w, h);
         }
@@ -2397,8 +2595,8 @@ impl Launcher {
             let height = bottom - top;
             let thumb = (height * height / (height + maximum)).max(20.0).min(height);
             let y = top + (height - thumb) * (scroll / maximum).clamp(0.0, 1.0);
-            ui.rounded(w - 10.0, top, 4.0, height, 2.0, my3_border());
-            ui.rounded(w - 10.0, y, 4.0, thumb, 2.0, my3_muted());
+            ui.rounded(w - 10.0, top, 4.0, height, 2.0, blaze_border());
+            ui.rounded(w - 10.0, y, 4.0, thumb, 2.0, blaze_muted());
         }
         if self.catalog.fm_modal.is_some() {
             self.draw_fm_modal(&mut ui, w, h, ime_top_dp);
@@ -2423,14 +2621,14 @@ impl Launcher {
             let width = (w - 32.0).min(360.0) * scale_in;
             let x = (w - width) * 0.5;
             let y = (h - 160.0) * 0.5 + (1.0 - modal_t) * 8.0;
-            ui.rounded(x, y, width, 160.0, 20.0, my3_surface());
-            ui.border(x, y, width, 160.0, 20.0, my3_border());
+            ui.rounded(x, y, width, 160.0, 20.0, blaze_surface());
+            ui.border(x, y, width, 160.0, 20.0, blaze_border());
             ui.text(
                 Face::SemiBold,
                 20.0,
                 x + 22.0,
                 y + 24.0,
-                my3_text(),
+                blaze_text(),
                 "Exit Horizon Android?",
             );
             let bw = (width - 52.0) * 0.5;
@@ -2457,7 +2655,7 @@ impl Launcher {
         if let Some(index) = self.focus
             && let Some(([x, y, w, h], _)) = self.targets.get(index)
         {
-            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 12.0, my3_accent());
+            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 12.0, blaze_accent());
             self.cursor = (
                 f64::from((x + w / 2.0) * ui.density),
                 f64::from((y + h / 2.0) * ui.density),
@@ -2535,7 +2733,7 @@ impl Launcher {
         Ok(())
     }
 
-    /// Material Design 3 Library & Content Manager with two top sub-views:
+    /// Blaze Library & Content Manager with two top sub-views:
     /// View 1: `InstalledSubTab::Library` (Search, Category Filter Pills, Sort, Rich M3 Cards)
     /// View 2: `InstalledSubTab::FileManager` (Real filesystem manager with Back/Forward history,
     /// Breadcrumbs, Multi-select, Copy/Cut/Paste, Import, Export, Rename, New Folder, Delete, Details)
@@ -2557,7 +2755,7 @@ impl Launcher {
             19.0,
             content_x,
             header_y + 2.0,
-            my3_text(),
+            blaze_text(),
             if self.catalog.installed_sub_tab == InstalledSubTab::Library {
                 "Content Library"
             } else {
@@ -2689,29 +2887,29 @@ impl Launcher {
             if filtered.is_empty() {
                 self.list_view = None;
                 let card_h = (bottom - top - 8.0).clamp(110.0, 176.0);
-                ui.rounded(content_x, top, content_w, card_h, 18.0, my3_surface());
-                ui.border(content_x, top, content_w, card_h, 18.0, my3_border());
+                ui.rounded(content_x, top, content_w, card_h, 18.0, blaze_surface());
+                ui.border(content_x, top, content_w, card_h, 18.0, blaze_border());
                 ui.rounded(
                     content_x + 20.0,
                     top + 18.0,
                     42.0,
                     42.0,
                     12.0,
-                    my3_accent_soft(),
+                    blaze_accent_soft(),
                 );
                 ui.icon(
                     Icon::Installed,
                     content_x + 30.0,
                     top + 28.0,
                     22.0,
-                    my3_accent(),
+                    blaze_accent(),
                 );
                 ui.text(
                     Face::SemiBold,
                     16.0,
                     content_x + 74.0,
                     top + 18.0,
-                    my3_text(),
+                    blaze_text(),
                     if self.catalog.local.is_empty() {
                         "No local add-ons installed yet"
                     } else {
@@ -2723,7 +2921,7 @@ impl Launcher {
                     top + 42.0,
                     (content_w - 92.0).max(80.0),
                     "Import .hmod/.jar mods, .zip resource packs, or shader packs — or browse files in File Manager.",
-                    my3_muted(),
+                    blaze_muted(),
                 );
                 let cta_y = top + card_h - 46.0;
                 let cta_w = ((content_w - 56.0) / 3.0).clamp(88.0, 168.0);
@@ -2782,7 +2980,7 @@ impl Launcher {
                 if y + card_h < top || y > bottom {
                     continue;
                 }
-                ui.rounded(content_x, y, content_w, card_h, 14.0, my3_card_bg());
+                ui.rounded(content_x, y, content_w, card_h, 14.0, blaze_card_bg());
                 ui.border(
                     content_x,
                     y,
@@ -2790,9 +2988,9 @@ impl Launcher {
                     card_h,
                     14.0,
                     if item.enabled {
-                        my3_accent()
+                        blaze_accent()
                     } else {
-                        my3_card_border()
+                        blaze_card_border()
                     },
                 );
 
@@ -2809,9 +3007,9 @@ impl Launcher {
                     44.0,
                     12.0,
                     if item.enabled {
-                        my3_accent_soft()
+                        blaze_accent_soft()
                     } else {
-                        my3_surface_high()
+                        blaze_surface_high()
                     },
                 );
                 ui.icon(
@@ -2820,9 +3018,9 @@ impl Launcher {
                     y + 15.0,
                     20.0,
                     if item.enabled {
-                        my3_accent()
+                        blaze_accent()
                     } else {
-                        my3_muted()
+                        blaze_muted()
                     },
                 );
                 ui.centered_fit(
@@ -2830,9 +3028,9 @@ impl Launcher {
                     8.0,
                     [content_x + 11.0, y + 36.0, 42.0, 14.0],
                     if item.enabled {
-                        my3_accent()
+                        blaze_accent()
                     } else {
-                        my3_muted()
+                        blaze_muted()
                     },
                     item.badge,
                 );
@@ -2848,7 +3046,7 @@ impl Launcher {
                     14.5,
                     text_x,
                     y + 9.0,
-                    my3_text(),
+                    blaze_text(),
                     &fitted_title,
                 );
                 let badge_x = text_x + title_w + 8.0;
@@ -2859,9 +3057,9 @@ impl Launcher {
                     18.0,
                     9.0,
                     if item.enabled {
-                        my3_accent_soft()
+                        blaze_accent_soft()
                     } else {
-                        my3_surface_high()
+                        blaze_surface_high()
                     },
                 );
                 ui.centered_fit(
@@ -2869,9 +3067,9 @@ impl Launcher {
                     8.5,
                     [badge_x, y + 11.0, status_w, 18.0],
                     if item.enabled {
-                        my3_accent()
+                        blaze_accent()
                     } else {
-                        my3_muted()
+                        blaze_muted()
                     },
                     status_str,
                 );
@@ -2882,7 +3080,7 @@ impl Launcher {
                     text_x,
                     y + 34.0,
                     (content_w - 270.0).max(70.0),
-                    my3_muted(),
+                    blaze_muted(),
                     &item.subtitle,
                 );
 
@@ -2972,8 +3170,8 @@ impl Launcher {
         // Clickable Breadcrumb Bar between Up button and Right CTAs
         let bc_x = content_x + 110.0;
         let bc_w = (content_x + content_w - right_cta_w - 8.0 - bc_x).max(60.0);
-        ui.rounded(bc_x, nav_y, bc_w, 30.0, 10.0, my3_surface());
-        ui.border(bc_x, nav_y, bc_w, 30.0, 10.0, my3_border());
+        ui.rounded(bc_x, nav_y, bc_w, 30.0, 10.0, blaze_surface());
+        ui.border(bc_x, nav_y, bc_w, 30.0, 10.0, blaze_border());
         let mut cur_bx = bc_x + 6.0;
         let root_lbl = format!("P{}", self.catalog.config.profile + 1);
         let root_bw = (ui.measure(Face::SemiBold, 11.5, &root_lbl) + 12.0).min(bc_w - 10.0);
@@ -2985,12 +3183,12 @@ impl Launcher {
             root_br[3],
             6.0,
             if self.catalog.fm_current_dir.is_empty() {
-                my3_accent_soft()
+                blaze_accent_soft()
             } else {
-                my3_surface_high()
+                blaze_surface_high()
             },
         );
-        ui.centered_fit(Face::SemiBold, 11.0, root_br, my3_accent(), &root_lbl);
+        ui.centered_fit(Face::SemiBold, 11.0, root_br, blaze_accent(), &root_lbl);
         self.targets.push((root_br, Action::FmBreadcrumb(0)));
         cur_bx += root_bw + 4.0;
 
@@ -3005,7 +3203,7 @@ impl Launcher {
                 if cur_bx + 28.0 > bc_x + bc_w {
                     break;
                 }
-                ui.text(Face::Regular, 11.0, cur_bx, nav_y + 7.0, my3_muted(), "/");
+                ui.text(Face::Regular, 11.0, cur_bx, nav_y + 7.0, blaze_muted(), "/");
                 cur_bx += 8.0;
                 let avail = (bc_x + bc_w - 6.0 - cur_bx).max(24.0);
                 let fit_seg = ui.fit_text(Face::Medium, 11.0, seg, (avail - 10.0).max(16.0));
@@ -3019,16 +3217,16 @@ impl Launcher {
                     seg_r[3],
                     6.0,
                     if is_last {
-                        my3_accent_soft()
+                        blaze_accent_soft()
                     } else {
-                        my3_surface_high()
+                        blaze_surface_high()
                     },
                 );
                 ui.centered_fit(
                     Face::Medium,
                     11.0,
                     seg_r,
-                    if is_last { my3_text() } else { my3_muted() },
+                    if is_last { blaze_text() } else { blaze_muted() },
                     &fit_seg,
                 );
                 self.targets.push((seg_r, Action::FmBreadcrumb(idx + 1)));
@@ -3102,21 +3300,21 @@ impl Launcher {
         if self.catalog.fm_entries.is_empty() {
             self.list_view = None;
             let empty_h = (bottom - top - 8.0).clamp(96.0, 152.0);
-            ui.rounded(content_x, top, content_w, empty_h, 16.0, my3_surface());
-            ui.border(content_x, top, content_w, empty_h, 16.0, my3_border());
+            ui.rounded(content_x, top, content_w, empty_h, 16.0, blaze_surface());
+            ui.border(content_x, top, content_w, empty_h, 16.0, blaze_border());
             ui.icon(
                 Icon::Folder,
                 content_x + 20.0,
                 top + 20.0,
                 24.0,
-                my3_accent(),
+                blaze_accent(),
             );
             ui.text(
                 Face::SemiBold,
                 15.0,
                 content_x + 54.0,
                 top + 18.0,
-                my3_text(),
+                blaze_text(),
                 "This folder is empty",
             );
             ui.hint_line(
@@ -3124,7 +3322,7 @@ impl Launcher {
                 top + 40.0,
                 (content_w - 72.0).max(80.0),
                 "Use Import to copy files from Android storage, + Folder to create a directory, or Paste from clipboard.",
-                my3_muted(),
+                blaze_muted(),
             );
             return;
         }
@@ -3177,9 +3375,9 @@ impl Launcher {
                 card_h,
                 12.0,
                 if selected {
-                    my3_nav_active()
+                    blaze_nav_active()
                 } else {
-                    my3_card_bg()
+                    blaze_card_bg()
                 },
             );
             ui.border(
@@ -3189,9 +3387,9 @@ impl Launcher {
                 card_h,
                 12.0,
                 if selected {
-                    my3_accent()
+                    blaze_accent()
                 } else {
-                    my3_card_border()
+                    blaze_card_border()
                 },
             );
 
@@ -3218,9 +3416,9 @@ impl Launcher {
                 32.0,
                 9.0,
                 if entry.is_dir {
-                    my3_accent_soft()
+                    blaze_accent_soft()
                 } else {
-                    my3_surface_high()
+                    blaze_surface_high()
                 },
             );
             ui.icon(
@@ -3229,9 +3427,9 @@ impl Launcher {
                 y + 15.0,
                 16.0,
                 if entry.is_dir {
-                    my3_accent()
+                    blaze_accent()
                 } else {
-                    my3_text()
+                    blaze_text()
                 },
             );
 
@@ -3243,7 +3441,7 @@ impl Launcher {
                 tx,
                 y + 5.0,
                 max_tw,
-                my3_text(),
+                blaze_text(),
                 &entry.name,
             );
             let meta_line = if entry.is_dir {
@@ -3262,7 +3460,7 @@ impl Launcher {
                 tx,
                 y + 24.0,
                 max_tw,
-                my3_muted(),
+                blaze_muted(),
                 &meta_line,
             );
             if let Some(c) = ui.clip_rect(open_r) {
@@ -3326,9 +3524,9 @@ impl Launcher {
                 let mh = 190.0;
                 let mx = (w - mw) * 0.5;
                 let my = (h - mh) * 0.5;
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
-                ui.icon(Icon::Trash, mx + 20.0, my + 20.0, 22.0, my3_accent());
+                ui.rounded(mx, my, mw, mh, 20.0, blaze_surface());
+                ui.border(mx, my, mw, mh, 20.0, blaze_border());
+                ui.icon(Icon::Trash, mx + 20.0, my + 20.0, 22.0, blaze_accent());
                 let title = if paths.len() == 1 {
                     "Delete selected item?".to_owned()
                 } else {
@@ -3339,7 +3537,7 @@ impl Launcher {
                     18.0,
                     mx + 50.0,
                     my + 18.0,
-                    my3_text(),
+                    blaze_text(),
                     &title,
                 );
                 let preview_names = paths.iter().take(3).cloned().collect::<Vec<_>>().join(", ");
@@ -3349,7 +3547,7 @@ impl Launcher {
                     mx + 20.0,
                     my + 54.0,
                     mw - 40.0,
-                    my3_accent(),
+                    blaze_accent(),
                     &preview_names,
                 );
                 ui.hint_line(
@@ -3357,7 +3555,7 @@ impl Launcher {
                     my + 80.0,
                     mw - 40.0,
                     "This permanently deletes the selected file(s) from this profile and cannot be undone.",
-                    my3_muted(),
+                    blaze_muted(),
                 );
                 let bw = (mw - 52.0) * 0.5;
                 button(
@@ -3385,14 +3583,14 @@ impl Launcher {
                 if let Some(ime_y) = ime_top_dp {
                     my = my.min((ime_y - mh - 8.0).max(6.0));
                 }
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 20.0, blaze_surface());
+                ui.border(mx, my, mw, mh, 20.0, blaze_border());
                 ui.text(
                     Face::SemiBold,
                     18.0,
                     mx + 20.0,
                     my + 16.0,
-                    my3_text(),
+                    blaze_text(),
                     "Rename File or Folder",
                 );
                 ui.hint_line(
@@ -3400,7 +3598,7 @@ impl Launcher {
                     my + 42.0,
                     mw - 40.0,
                     &format!("Target: /{target_rel} (Slashes and '..' are rejected)"),
-                    my3_muted(),
+                    blaze_muted(),
                 );
                 let field_r = ui.text_field(
                     mx + 20.0,
@@ -3439,14 +3637,14 @@ impl Launcher {
                 if let Some(ime_y) = ime_top_dp {
                     my = my.min((ime_y - mh - 8.0).max(6.0));
                 }
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 20.0, blaze_surface());
+                ui.border(mx, my, mw, mh, 20.0, blaze_border());
                 ui.text(
                     Face::SemiBold,
                     18.0,
                     mx + 20.0,
                     my + 16.0,
-                    my3_text(),
+                    blaze_text(),
                     "Create New Folder",
                 );
                 let loc = if self.catalog.fm_current_dir.is_empty() {
@@ -3459,7 +3657,7 @@ impl Launcher {
                     my + 42.0,
                     mw - 40.0,
                     &format!("Location: {loc}"),
-                    my3_muted(),
+                    blaze_muted(),
                 );
                 let field_r = ui.text_field(
                     mx + 20.0,
@@ -3495,15 +3693,15 @@ impl Launcher {
                 let mh = (h - 32.0).min(340.0);
                 let mx = (w - mw) * 0.5;
                 let my = (h - mh) * 0.5;
-                ui.rounded(mx, my, mw, mh, 20.0, my3_surface());
-                ui.border(mx, my, mw, mh, 20.0, my3_border());
+                ui.rounded(mx, my, mw, mh, 20.0, blaze_surface());
+                ui.border(mx, my, mw, mh, 20.0, blaze_border());
                 ui.text_clipped(
                     Face::SemiBold,
                     17.5,
                     mx + 20.0,
                     my + 14.0,
                     mw - 80.0,
-                    my3_text(),
+                    blaze_text(),
                     &details.name,
                 );
                 let close_r = [mx + mw - 50.0, my + 12.0, 34.0, 34.0];
@@ -3511,7 +3709,7 @@ impl Launcher {
                     ui,
                     &mut self.targets,
                     close_r,
-                    my3_surface_high(),
+                    blaze_surface_high(),
                     Icon::Close,
                     Action::FmCloseModal,
                 );
@@ -3524,20 +3722,41 @@ impl Launcher {
                     details.size_bytes,
                     details.modified_label
                 );
-                ui.hint_line(mx + 20.0, my + 40.0, mw - 40.0, &meta_summary, my3_accent());
-                ui.rounded(mx + 18.0, my + 62.0, mw - 36.0, 1.0, 0.0, my3_border());
+                ui.hint_line(
+                    mx + 20.0,
+                    my + 40.0,
+                    mw - 40.0,
+                    &meta_summary,
+                    blaze_accent(),
+                );
+                ui.rounded(mx + 18.0, my + 62.0, mw - 36.0, 1.0, 0.0, blaze_border());
 
                 let box_y = my + 70.0;
                 let box_h = (mh - 126.0).max(60.0);
-                ui.rounded(mx + 18.0, box_y, mw - 36.0, box_h, 12.0, my3_card_bg());
-                ui.border(mx + 18.0, box_y, mw - 36.0, box_h, 12.0, my3_card_border());
+                ui.rounded(mx + 18.0, box_y, mw - 36.0, box_h, 12.0, blaze_card_bg());
+                ui.border(
+                    mx + 18.0,
+                    box_y,
+                    mw - 36.0,
+                    box_h,
+                    12.0,
+                    blaze_card_border(),
+                );
                 ui.set_clip(Some([mx + 22.0, box_y + 4.0, mw - 44.0, box_h - 8.0]));
                 for (i, line) in details.preview_lines.iter().enumerate() {
                     let ly = box_y + 8.0 + i as f32 * 16.0;
                     if ly + 14.0 > box_y + box_h {
                         break;
                     }
-                    ui.text_clipped(Face::Mono, 10.5, mx + 26.0, ly, mw - 52.0, my3_text(), line);
+                    ui.text_clipped(
+                        Face::Mono,
+                        10.5,
+                        mx + 26.0,
+                        ly,
+                        mw - 52.0,
+                        blaze_text(),
+                        line,
+                    );
                 }
                 ui.set_clip(None);
 
@@ -3595,7 +3814,7 @@ impl Launcher {
         }
     }
 
-    /// Material You 3 Project Detail Dialog showing Modrinth PFP, Description,
+    /// Blaze Project Detail Dialog showing Modrinth PFP, Description,
     /// Gallery Screenshots, and selectable Versions to Download.
     fn draw_project_modal(&mut self, ui: &mut Ui, w: f32, h: f32) {
         // The install label asks the catalog about the project the modal is showing, so work it out
@@ -3644,8 +3863,8 @@ impl Launcher {
         let mx = (w - mw) * 0.5;
         let my = (h - mh) * 0.5;
 
-        ui.rounded(mx, my, mw, mh, 22.0, my3_surface());
-        ui.border(mx, my, mw, mh, 22.0, my3_border());
+        ui.rounded(mx, my, mw, mh, 22.0, blaze_surface());
+        ui.border(mx, my, mw, mh, 22.0, blaze_border());
 
         // Modal Top Header (PFP + Title + Author/Downloads + Close Button)
         let icon_drawn = if let Some((iw, ih, rgba)) = self.catalog.icons.get(&modal.project.id) {
@@ -3663,13 +3882,13 @@ impl Launcher {
             false
         };
         if !icon_drawn {
-            ui.rounded(mx + 18.0, my + 16.0, 50.0, 50.0, 14.0, my3_accent_soft());
+            ui.rounded(mx + 18.0, my + 16.0, 50.0, 50.0, 14.0, blaze_accent_soft());
             ui.icon(
                 page_icon(self.catalog.page),
                 mx + 31.0,
                 my + 29.0,
                 24.0,
-                my3_accent(),
+                blaze_accent(),
             );
         }
 
@@ -3678,7 +3897,7 @@ impl Launcher {
             ui,
             &mut self.targets,
             close_rect,
-            my3_surface_high(),
+            blaze_surface_high(),
             Icon::Close,
             Action::CloseProjectModal,
         );
@@ -3690,7 +3909,7 @@ impl Launcher {
             18.5,
             mx + 78.0,
             my + 16.0,
-            my3_text(),
+            blaze_text(),
             &fitted_title,
         );
 
@@ -3711,12 +3930,12 @@ impl Launcher {
             12.5,
             mx + 78.0,
             my + 41.0,
-            my3_muted(),
+            blaze_muted(),
             &fitted_meta,
         );
 
         // Divider under modal header
-        ui.rounded(mx + 16.0, my + 74.0, mw - 32.0, 1.0, 0.0, my3_border());
+        ui.rounded(mx + 16.0, my + 74.0, mw - 32.0, 1.0, 0.0, blaze_border());
 
         // Scrollable Body Area (Description + Gallery Screenshots + Versions List)
         let body_top = my + 82.0;
@@ -3753,14 +3972,14 @@ impl Launcher {
                 14.0,
                 inner_x,
                 cy,
-                my3_accent(),
+                blaze_accent(),
                 "About Project",
             );
         }
         cy += 22.0;
         for line in &desc_lines {
             if cy + 18.0 >= body_top && cy <= body_bottom {
-                ui.text(Face::Regular, 13.0, inner_x, cy, my3_text(), line);
+                ui.text(Face::Regular, 13.0, inner_x, cy, blaze_text(), line);
             }
             cy += 18.5;
         }
@@ -3774,7 +3993,7 @@ impl Launcher {
                     14.0,
                     inner_x,
                     cy,
-                    my3_accent(),
+                    blaze_accent(),
                     "Screenshots",
                 );
             }
@@ -3786,8 +4005,8 @@ impl Launcher {
             if cy + card_h >= body_top && cy <= body_bottom {
                 for (idx, (caption, sw, sh, rgba)) in modal.screenshots.iter().take(3).enumerate() {
                     let sx = inner_x + idx as f32 * (card_w + gap);
-                    ui.rounded(sx, cy, card_w, card_h, 12.0, my3_card_bg());
-                    ui.border(sx, cy, card_w, card_h, 12.0, my3_card_border());
+                    ui.rounded(sx, cy, card_w, card_h, 12.0, blaze_card_bg());
+                    ui.border(sx, cy, card_w, card_h, 12.0, blaze_card_border());
                     let key = format!("shot:{}:{idx}", modal.project.id);
                     let _ = ui.image(
                         &key,
@@ -3805,7 +4024,7 @@ impl Launcher {
                         11.0,
                         sx + 6.0,
                         cy + card_h - 17.0,
-                        my3_muted(),
+                        blaze_muted(),
                         &cap_fit,
                     );
                 }
@@ -3820,7 +4039,7 @@ impl Launcher {
                 14.0,
                 inner_x,
                 cy,
-                my3_accent(),
+                blaze_accent(),
                 "Available Versions",
             );
         }
@@ -3838,9 +4057,9 @@ impl Launcher {
                     34.0,
                     10.0,
                     if selected {
-                        my3_accent_soft()
+                        blaze_accent_soft()
                     } else {
-                        my3_card_bg()
+                        blaze_card_bg()
                     },
                 );
                 ui.border(
@@ -3850,9 +4069,9 @@ impl Launcher {
                     34.0,
                     10.0,
                     if selected {
-                        my3_accent()
+                        blaze_accent()
                     } else {
-                        my3_card_border()
+                        blaze_card_border()
                     },
                 );
                 let ver_title = format!(
@@ -3872,7 +4091,11 @@ impl Launcher {
                     13.0,
                     inner_x + 12.0,
                     cy + 7.0,
-                    if selected { my3_text() } else { my3_muted() },
+                    if selected {
+                        blaze_text()
+                    } else {
+                        blaze_muted()
+                    },
                     &fitted_v,
                 );
                 if let Some(c) = ui.clip_rect(row_rect) {
@@ -3884,7 +4107,14 @@ impl Launcher {
 
         ui.set_clip(None);
         // Modal Bottom Action Bar
-        ui.rounded(mx + 16.0, my + mh - 56.0, mw - 32.0, 1.0, 0.0, my3_border());
+        ui.rounded(
+            mx + 16.0,
+            my + mh - 56.0,
+            mw - 32.0,
+            1.0,
+            0.0,
+            blaze_border(),
+        );
 
         button(
             ui,
@@ -3932,18 +4162,18 @@ impl Launcher {
             22.0,
             horizon_client::hud::rgba(0, 0, 0, 175),
         );
-        ui.rounded(mx, my, mw, mh, 22.0, my3_surface());
-        ui.border(mx, my, mw, mh, 22.0, my3_accent());
+        ui.rounded(mx, my, mw, mh, 22.0, blaze_surface());
+        ui.border(mx, my, mw, mh, 22.0, blaze_accent());
 
         // Header icon & title
-        ui.rounded(mx + 18.0, my + 14.0, 36.0, 36.0, 11.0, my3_accent_soft());
-        ui.icon(Icon::Terminal, mx + 27.0, my + 23.0, 18.0, my3_accent());
+        ui.rounded(mx + 18.0, my + 14.0, 36.0, 36.0, 11.0, blaze_accent_soft());
+        ui.icon(Icon::Terminal, mx + 27.0, my + 23.0, 18.0, blaze_accent());
         ui.text(
             Face::SemiBold,
             17.0,
             mx + 64.0,
             my + 13.0,
-            my3_text(),
+            blaze_text(),
             "Diagnostics & Runtime Health Summary",
         );
         ui.text(
@@ -3951,11 +4181,11 @@ impl Launcher {
             11.5,
             mx + 64.0,
             my + 33.0,
-            my3_muted(),
+            blaze_muted(),
             "Live renderer pipeline, profile state, error log & telemetry status",
         );
 
-        ui.rounded(mx + 16.0, my + 58.0, mw - 32.0, 1.0, 0.0, my3_border());
+        ui.rounded(mx + 16.0, my + 58.0, mw - 32.0, 1.0, 0.0, blaze_border());
 
         // 2x2 Metric Grid Cards
         let c = &self.catalog.config;
@@ -4021,14 +4251,14 @@ impl Launcher {
         .enumerate()
         {
             let _ = r_idx;
-            ui.rounded(x_off, y_pos, half_w, 46.0, 12.0, my3_card_bg());
-            ui.border(x_off, y_pos, half_w, 46.0, 12.0, my3_card_border());
+            ui.rounded(x_off, y_pos, half_w, 46.0, 12.0, blaze_card_bg());
+            ui.border(x_off, y_pos, half_w, 46.0, 12.0, blaze_card_border());
             ui.text(
                 Face::SemiBold,
                 9.5,
                 x_off + 10.0,
                 y_pos + 6.0,
-                my3_accent(),
+                blaze_accent(),
                 title,
             );
             let fit_v = ui.fit_text(Face::Medium, 11.2, val, half_w - 20.0);
@@ -4037,7 +4267,7 @@ impl Launcher {
                 11.2,
                 x_off + 10.0,
                 y_pos + 23.0,
-                my3_text(),
+                blaze_text(),
                 &fit_v,
             );
         }
@@ -4045,8 +4275,8 @@ impl Launcher {
         // Summary & Error Log Box
         let log_y = card2_y + 54.0;
         let log_h = (mh - (log_y - my) - 60.0).max(52.0);
-        ui.rounded(gx, log_y, gw, log_h, 12.0, my3_card_bg());
-        ui.border(gx, log_y, gw, log_h, 12.0, my3_card_border());
+        ui.rounded(gx, log_y, gw, log_h, 12.0, blaze_card_bg());
+        ui.border(gx, log_y, gw, log_h, 12.0, blaze_card_border());
 
         let summary_str = crate::diagnostics::summary(&self.home);
         let err_str = std::fs::read_to_string(self.home.join("android-error.txt"))
@@ -4061,7 +4291,7 @@ impl Launcher {
             10.0,
             gx + 12.0,
             log_y + 6.0,
-            my3_accent(),
+            blaze_accent(),
             "DIAGNOSTICS SUMMARY & LAST HANDLED ERROR",
         );
         let fit_sum = ui.fit_text(Face::Regular, 11.0, &summary_str, gw - 24.0);
@@ -4070,7 +4300,7 @@ impl Launcher {
             11.0,
             gx + 12.0,
             log_y + 22.0,
-            my3_text(),
+            blaze_text(),
             &fit_sum,
         );
         let fit_err = ui.fit_text(
@@ -4084,7 +4314,7 @@ impl Launcher {
             10.2,
             gx + 12.0,
             log_y + 39.0,
-            my3_muted(),
+            blaze_muted(),
             &fit_err,
         );
 
@@ -4148,18 +4378,18 @@ impl Launcher {
         let panel_w = (content_w - rail_w - 12.0).max(180.0);
 
         let theme = horizon_client::ui_theme::active_theme();
-        let glass_card = color::with_alpha(my3_card_bg(), theme.glass_opacity);
+        let glass_card = color::with_alpha(blaze_card_bg(), theme.glass_opacity);
 
         // 1. Left Category Rail (4 cols / ~28% width)
         ui.rounded(content_x, top_y, rail_w, panel_h, 16.0, glass_card);
-        ui.border(content_x, top_y, rail_w, panel_h, 16.0, my3_card_border());
+        ui.border(content_x, top_y, rail_w, panel_h, 16.0, blaze_card_border());
 
         ui.text(
             Face::SemiBold,
             11.0,
             content_x + 16.0,
             top_y + 16.0,
-            my3_accent(),
+            blaze_accent(),
             "SETTINGS",
         );
 
@@ -4203,22 +4433,22 @@ impl Launcher {
             self.targets.push((r, Action::SettingsCat(c_enum)));
 
             if is_selected {
-                ui.rounded(r[0], r[1], r[2], r[3], 10.0, my3_nav_active());
-                ui.border(r[0], r[1], r[2], r[3], 10.0, my3_accent());
+                ui.rounded(r[0], r[1], r[2], r[3], 10.0, blaze_nav_active());
+                ui.border(r[0], r[1], r[2], r[3], 10.0, blaze_accent());
                 ui.rounded(
                     r[0] + 3.0,
                     r[1] + 6.0,
                     3.0,
                     item_h - 12.0,
                     1.5,
-                    my3_accent(),
+                    blaze_accent(),
                 );
             }
 
             let icon_c = if is_selected {
-                my3_accent()
+                blaze_accent()
             } else {
-                my3_muted()
+                blaze_muted()
             };
             ui.icon(
                 icon,
@@ -4228,7 +4458,11 @@ impl Launcher {
                 icon_c,
             );
 
-            let text_c = if is_selected { my3_text() } else { my3_muted() };
+            let text_c = if is_selected {
+                blaze_text()
+            } else {
+                blaze_muted()
+            };
             let fit_lbl = ui.fit_text(
                 if is_selected {
                     Face::SemiBold
@@ -4255,7 +4489,7 @@ impl Launcher {
 
         // 2. Right Content Panel (8 cols / ~72% width)
         ui.rounded(panel_x, top_y, panel_w, panel_h, 16.0, glass_card);
-        ui.border(panel_x, top_y, panel_w, panel_h, 16.0, my3_card_border());
+        ui.border(panel_x, top_y, panel_w, panel_h, 16.0, blaze_card_border());
 
         // Top bar with Search and Action Buttons
         let bar_y = top_y + 10.0;
@@ -4270,7 +4504,7 @@ impl Launcher {
             search_r[2],
             search_r[3],
             8.0,
-            my3_card_bg(),
+            blaze_card_bg(),
         );
         ui.border(
             search_r[0],
@@ -4279,9 +4513,9 @@ impl Launcher {
             search_r[3],
             8.0,
             if is_search_active {
-                my3_accent()
+                blaze_accent()
             } else {
-                my3_border()
+                blaze_border()
             },
         );
         self.targets
@@ -4292,7 +4526,7 @@ impl Launcher {
             search_r[0] + 8.0,
             search_r[1] + 8.0,
             16.0,
-            my3_muted(),
+            blaze_muted(),
         );
 
         let query_text = if self.catalog.settings_query.is_empty() {
@@ -4301,9 +4535,9 @@ impl Launcher {
             &self.catalog.settings_query
         };
         let query_color = if self.catalog.settings_query.is_empty() {
-            my3_muted()
+            blaze_muted()
         } else {
-            my3_text()
+            blaze_text()
         };
         let fit_q = ui.fit_text(Face::Regular, 12.0, query_text, (search_w - 56.0).max(30.0));
         ui.text(
@@ -4322,7 +4556,7 @@ impl Launcher {
                 clear_r[0] + 2.0,
                 clear_r[1] + 2.0,
                 16.0,
-                my3_muted(),
+                blaze_muted(),
             );
             self.targets.push((clear_r, Action::ClearSettingsSearch));
         }
@@ -4506,7 +4740,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -4564,7 +4798,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -4642,7 +4876,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -4826,7 +5060,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -4883,7 +5117,7 @@ impl Launcher {
                 let rows: [(&str, &str, SettingControl<'_>); 12] = [
                     (
                         "APPEARANCE, DPI SCALING & MOTION",
-                        "Material 3 Expressive theme studio, adaptive phone DPI scaling & animation toggles",
+                        "Blaze design theme studio, adaptive phone DPI scaling & animation toggles",
                         SettingControl::SectionHeader(c.theme.preset.label(), Icon::Settings),
                     ),
                     (
@@ -4967,7 +5201,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -5181,7 +5415,7 @@ impl Launcher {
                     12.5,
                     content_x,
                     cy,
-                    my3_accent(),
+                    blaze_accent(),
                     "PRESET THEMES",
                 );
                 cy += 22.0;
@@ -5207,9 +5441,9 @@ impl Launcher {
                             p_h,
                             12.0,
                             if active {
-                                my3_nav_active()
+                                blaze_nav_active()
                             } else {
-                                my3_card_bg()
+                                blaze_card_bg()
                             },
                         );
                         ui.stroke_rounded(
@@ -5220,9 +5454,9 @@ impl Launcher {
                             12.0,
                             if active { 1.8 } else { 1.0 },
                             if active {
-                                my3_accent()
+                                blaze_accent()
                             } else {
-                                my3_card_border()
+                                blaze_card_border()
                             },
                         );
                         let (p_bg, _, p_acc, _, _, _, _) = preset.palette_rgb();
@@ -5250,7 +5484,7 @@ impl Launcher {
                             11.8,
                             rx + 36.0,
                             ry + 8.0,
-                            my3_text(),
+                            blaze_text(),
                             &fit_lbl,
                         );
                         let fit_sub =
@@ -5260,7 +5494,7 @@ impl Launcher {
                             9.5,
                             rx + 10.0,
                             ry + 31.0,
-                            my3_muted(),
+                            blaze_muted(),
                             &fit_sub,
                         );
                         if let Some(c) = ui.clip_rect(r) {
@@ -5276,13 +5510,13 @@ impl Launcher {
                     12.5,
                     content_x,
                     cy,
-                    my3_accent(),
+                    blaze_accent(),
                     "CUSTOM ACCENT COLOR",
                 );
                 cy += 22.0;
                 if cy + 52.0 >= list_top && cy <= list_bottom {
-                    ui.rounded(content_x, cy, content_w, 50.0, 12.0, my3_card_bg());
-                    ui.border(content_x, cy, content_w, 50.0, 12.0, my3_card_border());
+                    ui.rounded(content_x, cy, content_w, 50.0, 12.0, blaze_card_bg());
+                    ui.border(content_x, cy, content_w, 50.0, 12.0, blaze_card_border());
                     let sw_size = 30.0;
                     let sw_gap = 8.0;
                     for (i, (rgb, hex_str, _name)) in THEME_ACCENT_SWATCHES.into_iter().enumerate()
@@ -5302,7 +5536,7 @@ impl Launcher {
                                 sr[3] + 4.0,
                                 17.0,
                                 2.0,
-                                my3_text(),
+                                blaze_text(),
                             );
                         }
                         if let Some(c) = ui.clip_rect(sr) {
@@ -5317,7 +5551,7 @@ impl Launcher {
                         40.0,
                         "ACCENT HEX",
                         &theme_cfg.custom_accent_hex,
-                        "#9A7BFF",
+                        "#38BDF8",
                         self.catalog.editing == Some("theme_accent"),
                     );
                     if let Some(c) = ui.clip_rect(hex_btn_r) {
@@ -5334,13 +5568,13 @@ impl Launcher {
                     12.5,
                     content_x,
                     cy,
-                    my3_accent(),
+                    blaze_accent(),
                     "CUSTOM SOLID BACKGROUND & SURFACE COLORS",
                 );
                 cy += 22.0;
                 if cy + 52.0 >= list_top && cy <= list_bottom {
-                    ui.rounded(content_x, cy, content_w, 50.0, 12.0, my3_card_bg());
-                    ui.border(content_x, cy, content_w, 50.0, 12.0, my3_card_border());
+                    ui.rounded(content_x, cy, content_w, 50.0, 12.0, blaze_card_bg());
+                    ui.border(content_x, cy, content_w, 50.0, 12.0, blaze_card_border());
                     let bg_swatches = if resolved.is_light {
                         THEME_BG_SWATCHES_LIGHT
                     } else {
@@ -5363,7 +5597,11 @@ impl Launcher {
                             sr[3],
                             15.0,
                             if is_sel { 2.0 } else { 1.0 },
-                            if is_sel { my3_accent() } else { my3_border() },
+                            if is_sel {
+                                blaze_accent()
+                            } else {
+                                blaze_border()
+                            },
                         );
                         if let Some(c) = ui.clip_rect(sr) {
                             self.targets.push((c, Action::SelectBgSwatch(rgb)));
@@ -5377,7 +5615,7 @@ impl Launcher {
                         40.0,
                         "BG HEX",
                         &theme_cfg.custom_bg_hex,
-                        "#13111C",
+                        "#05070B",
                         self.catalog.editing == Some("theme_bg"),
                     );
                     if let Some(c) = ui.clip_rect(bg_hex_r) {
@@ -5393,7 +5631,7 @@ impl Launcher {
                         40.0,
                         "CARD HEX",
                         &theme_cfg.custom_surface_hex,
-                        "#1D192B",
+                        "#0E131C",
                         self.catalog.editing == Some("theme_surface"),
                     );
                     if let Some(c) = ui.clip_rect(surf_hex_r) {
@@ -5410,7 +5648,7 @@ impl Launcher {
                     12.5,
                     content_x,
                     cy,
-                    my3_accent(),
+                    blaze_accent(),
                     "CUSTOM GRADIENT DIRECTION & COLOR STOPS",
                 );
                 cy += 22.0;
@@ -5433,8 +5671,8 @@ impl Launcher {
                 cy += 44.0;
 
                 if cy + 54.0 >= list_top && cy <= list_bottom {
-                    ui.rounded(content_x, cy, content_w, 50.0, 12.0, my3_card_bg());
-                    ui.border(content_x, cy, content_w, 50.0, 12.0, my3_card_border());
+                    ui.rounded(content_x, cy, content_w, 50.0, 12.0, blaze_card_bg());
+                    ui.border(content_x, cy, content_w, 50.0, 12.0, blaze_card_border());
                     let stop_w = ((content_w - 36.0) / 3.0).max(80.0);
                     for (i, (lbl, hex_val, field_name)) in [
                         (
@@ -5467,7 +5705,7 @@ impl Launcher {
                             40.0,
                             lbl,
                             hex_val,
-                            "#1A1333",
+                            "#05070B",
                             self.catalog.editing == Some(field_name),
                         );
                         if let Some(c) = ui.clip_rect(r) {
@@ -5845,9 +6083,9 @@ impl Launcher {
                             66.0,
                             18.0,
                             if selected {
-                                my3_surface()
+                                blaze_surface()
                             } else {
-                                my3_card_bg()
+                                blaze_card_bg()
                             },
                         );
                         ui.border(
@@ -5857,13 +6095,13 @@ impl Launcher {
                             66.0,
                             18.0,
                             if selected {
-                                my3_accent()
+                                blaze_accent()
                             } else {
-                                my3_card_border()
+                                blaze_card_border()
                             },
                         );
                         if selected {
-                            ui.rounded(rx + 4.0, picker_y + 12.0, 4.0, 42.0, 2.0, my3_accent());
+                            ui.rounded(rx + 4.0, picker_y + 12.0, 4.0, 42.0, 2.0, blaze_accent());
                         }
                         let rad_x = rx + 16.0;
                         let rad_y = picker_y + 23.0;
@@ -5874,10 +6112,14 @@ impl Launcher {
                             20.0,
                             10.0,
                             1.8,
-                            if selected { my3_accent() } else { my3_muted() },
+                            if selected {
+                                blaze_accent()
+                            } else {
+                                blaze_muted()
+                            },
                         );
                         if selected {
-                            ui.rounded(rad_x + 5.0, rad_y + 5.0, 10.0, 10.0, 5.0, my3_accent());
+                            ui.rounded(rad_x + 5.0, rad_y + 5.0, 10.0, 10.0, 5.0, blaze_accent());
                         }
                         let chip_w = 78.0;
                         let chip_x = rx + half_w - chip_w - 10.0;
@@ -5888,16 +6130,20 @@ impl Launcher {
                             20.0,
                             10.0,
                             if selected {
-                                my3_accent_soft()
+                                blaze_accent_soft()
                             } else {
-                                my3_surface_high()
+                                blaze_surface_high()
                             },
                         );
                         ui.centered_fit(
                             Face::SemiBold,
                             8.5,
                             [chip_x + 4.0, picker_y + 10.0, chip_w - 8.0, 20.0],
-                            if selected { my3_accent() } else { my3_muted() },
+                            if selected {
+                                blaze_accent()
+                            } else {
+                                blaze_muted()
+                            },
                             if selected { "ACTIVE" } else { badge },
                         );
                         let text_x = rx + 44.0;
@@ -5908,7 +6154,7 @@ impl Launcher {
                             14.5,
                             text_x,
                             picker_y + 11.0,
-                            my3_text(),
+                            blaze_text(),
                             &fitted,
                         );
                         let sub_max_w = (half_w - 54.0).max(60.0);
@@ -5918,7 +6164,7 @@ impl Launcher {
                             11.5,
                             text_x,
                             picker_y + 36.0,
-                            my3_muted(),
+                            blaze_muted(),
                             &fitted_sub,
                         );
                     }
@@ -5929,7 +6175,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -6055,7 +6301,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -6133,7 +6379,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -6202,7 +6448,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,
@@ -6266,7 +6512,7 @@ impl Launcher {
                     if y + card_h < list_top || y > list_bottom {
                         continue;
                     }
-                    draw_setting_card(
+                    draw_blaze_setting_card(
                         ui,
                         &mut self.targets,
                         &mut self.list_targets,

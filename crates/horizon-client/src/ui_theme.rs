@@ -157,7 +157,13 @@ impl LayoutRect {
     }
 
     /// Subdivide rectangle as a responsive grid column: `col_start` [0..total_cols-1], `col_span` [1..total_cols], with `gap`.
-    pub fn col_cell(self, col_start: usize, col_span: usize, total_cols: usize, gap: f32) -> LayoutRect {
+    pub fn col_cell(
+        self,
+        col_start: usize,
+        col_span: usize,
+        total_cols: usize,
+        gap: f32,
+    ) -> LayoutRect {
         let total_cols = total_cols.max(1);
         let total_gaps = gap * ((total_cols - 1) as f32);
         let col_unit = (self.w - total_gaps).max(0.0) / (total_cols as f32);
@@ -860,6 +866,56 @@ impl Cache {
         self.images.insert(key.to_owned(), rect);
         Some(rect)
     }
+    fn wallpaper(
+        &mut self,
+        atlas: &HudAtlas,
+        key: &str,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+        radius: f32,
+    ) -> Option<Rect> {
+        if let Some(&rect) = self.images.get(key) {
+            return Some(rect);
+        }
+        if w == 0 || h == 0 || rgba.len() != (w * h * 4) as usize {
+            return None;
+        }
+        let mut masked = rgba.to_vec();
+        let r = radius.clamp(0.0, (w.min(h) as f32) * 0.5);
+        if r > 0.5 {
+            let (wf, hf) = (w as f32, h as f32);
+            for y in 0..h {
+                for x in 0..w {
+                    let px = x as f32 + 0.5;
+                    let py = y as f32 + 0.5;
+                    let dx = if px < r {
+                        r - px
+                    } else if px > wf - r {
+                        px - (wf - r)
+                    } else {
+                        0.0
+                    };
+                    let dy = if py < r {
+                        r - py
+                    } else if py > hf - r {
+                        py - (hf - r)
+                    } else {
+                        0.0
+                    };
+                    if dx > 0.0 && dy > 0.0 {
+                        let d = (dx * dx + dy * dy).sqrt();
+                        let cov = (r + 0.5 - d).clamp(0.0, 1.0);
+                        let idx = ((y * w + x) * 4 + 3) as usize;
+                        masked[idx] = (masked[idx] as f32 * cov).round() as u8;
+                    }
+                }
+            }
+        }
+        let rect = self.upload_rgba(atlas, w, h, masked)?;
+        self.images.insert(key.to_owned(), rect);
+        Some(rect)
+    }
 }
 
 /// One frame of design-system drawing, in dp: the
@@ -1327,6 +1383,34 @@ impl<'a> Ui<'a> {
     ) -> bool {
         let atlas = self.atlas;
         let Some(rect) = with_cache(atlas, |c| c.image(atlas, key, w, h, rgba)) else {
+            return false;
+        };
+        let (x0, y0, x1, y1) = (
+            self.px_x(x),
+            self.px_y(y),
+            self.px_x(x + dw),
+            self.px_y(y + dh),
+        );
+        self.emit_clipped_uv(x0, y0, x1, y1, rect.u0, rect.v0, rect.u1, rect.v1, u32::MAX);
+        true
+    }
+
+    /// Draw a cached RGBA wallpaper/hero background (`w x h`) into `(x, y, dw, dh)` dp with rounded corners `radius`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn wallpaper(
+        &mut self,
+        key: &str,
+        w: u32,
+        h: u32,
+        rgba: &[u8],
+        x: f32,
+        y: f32,
+        dw: f32,
+        dh: f32,
+        radius: f32,
+    ) -> bool {
+        let atlas = self.atlas;
+        let Some(rect) = with_cache(atlas, |c| c.wallpaper(atlas, key, w, h, rgba, radius)) else {
             return false;
         };
         let (x0, y0, x1, y1) = (
@@ -2322,50 +2406,42 @@ fn wrapping_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec
 #[serde(rename_all = "kebab-case")]
 pub enum ThemePreset {
     #[default]
-    ObsidianViolet,
-    CyberCyan,
-    EmeraldForest,
-    CrimsonEmber,
-    SolarGold,
-    SakuraRose,
-    DaylightFrost,
+    Cyan,
+    Emerald,
+    Crimson,
+    Violet,
+    Amber,
     Custom,
 }
 
 impl ThemePreset {
-    pub const ALL: [Self; 8] = [
-        Self::ObsidianViolet,
-        Self::CyberCyan,
-        Self::EmeraldForest,
-        Self::CrimsonEmber,
-        Self::SolarGold,
-        Self::SakuraRose,
-        Self::DaylightFrost,
+    pub const ALL: [Self; 6] = [
+        Self::Cyan,
+        Self::Emerald,
+        Self::Crimson,
+        Self::Violet,
+        Self::Amber,
         Self::Custom,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::ObsidianViolet => "Obsidian Violet",
-            Self::CyberCyan => "Cyber Cyan",
-            Self::EmeraldForest => "Emerald Forest",
-            Self::CrimsonEmber => "Crimson Ember",
-            Self::SolarGold => "Solar Gold",
-            Self::SakuraRose => "Sakura Rose",
-            Self::DaylightFrost => "Daylight Frost",
+            Self::Cyan => "Cyan",
+            Self::Emerald => "Emerald",
+            Self::Crimson => "Crimson",
+            Self::Violet => "Violet",
+            Self::Amber => "Amber",
             Self::Custom => "Custom Theme",
         }
     }
 
     pub fn subtitle(self) -> &'static str {
         match self {
-            Self::ObsidianViolet => "Signature Horizon dark violet",
-            Self::CyberCyan => "Deep slate with electric cyan",
-            Self::EmeraldForest => "Woodland moss with emerald mint",
-            Self::CrimsonEmber => "Obsidian ruby with warm coral",
-            Self::SolarGold => "Dark bronze with radiant amber",
-            Self::SakuraRose => "Twilight plum with blossom pink",
-            Self::DaylightFrost => "High-contrast Material 3 light",
+            Self::Cyan => "Electric sky & ocean cyan (Default)",
+            Self::Emerald => "Vibrant mint & woodland emerald",
+            Self::Crimson => "Radiant rose & crimson flame",
+            Self::Violet => "Luminous lavender & royal violet",
+            Self::Amber => "Warm honey & sunlit amber",
             Self::Custom => "Personalized colors & gradients",
         }
     }
@@ -2373,26 +2449,20 @@ impl ThemePreset {
     /// Returns `(bg_rgb, surface_rgb, accent_rgb, grad_start_rgb, grad_mid_rgb, grad_end_rgb, is_light)`
     pub fn palette_rgb(self) -> (u32, u32, u32, u32, u32, u32, bool) {
         match self {
-            Self::ObsidianViolet | Self::Custom => (
-                0x13111C, 0x1D192B, 0x9A7BFF, 0x161129, 0x1E1638, 0x0E0C16, false,
+            Self::Cyan | Self::Custom => (
+                0x05070B, 0x0E131C, 0x38BDF8, 0x05070B, 0x0E131C, 0x0284C7, false,
             ),
-            Self::CyberCyan => (
-                0x0C131F, 0x152033, 0x38BDF8, 0x0D1B2E, 0x102942, 0x09101B, false,
+            Self::Emerald => (
+                0x05070B, 0x0E131C, 0x34D399, 0x05070B, 0x0E131C, 0x059669, false,
             ),
-            Self::EmeraldForest => (
-                0x0D1714, 0x152620, 0x34D399, 0x0F231C, 0x163329, 0x0A120F, false,
+            Self::Crimson => (
+                0x05070B, 0x0E131C, 0xFB7185, 0x05070B, 0x0E131C, 0xE11D48, false,
             ),
-            Self::CrimsonEmber => (
-                0x191013, 0x26181D, 0xF87171, 0x261219, 0x361922, 0x120B0E, false,
+            Self::Violet => (
+                0x05070B, 0x0E131C, 0xA78BFA, 0x05070B, 0x0E131C, 0x7C3AED, false,
             ),
-            Self::SolarGold => (
-                0x18140D, 0x251F15, 0xFBBF24, 0x241C0F, 0x332714, 0x120F0A, false,
-            ),
-            Self::SakuraRose => (
-                0x18111A, 0x261A29, 0xF472B6, 0x251429, 0x341C3A, 0x110C13, false,
-            ),
-            Self::DaylightFrost => (
-                0xF3F1FA, 0xFFFFFF, 0x6750A4, 0xEDE8FA, 0xF5F2FC, 0xE4DDF8, true,
+            Self::Amber => (
+                0x05070B, 0x0E131C, 0xFBBF24, 0x05070B, 0x0E131C, 0xD97706, false,
             ),
         }
     }
@@ -2470,24 +2540,19 @@ impl GradientDirection {
 }
 
 /// Curated palette swatches for quick one-tap selection in Launcher Settings -> Theme.
-pub const THEME_ACCENT_SWATCHES: [(u32, &str, &str); 8] = [
-    (0x9A7BFF, "#9A7BFF", "Violet"),
+pub const THEME_ACCENT_SWATCHES: [(u32, &str, &str); 5] = [
     (0x38BDF8, "#38BDF8", "Cyan"),
     (0x34D399, "#34D399", "Emerald"),
-    (0xF87171, "#F87171", "Crimson"),
+    (0xFB7185, "#FB7185", "Crimson"),
+    (0xA78BFA, "#A78BFA", "Violet"),
     (0xFBBF24, "#FBBF24", "Amber"),
-    (0xF472B6, "#F472B6", "Sakura"),
-    (0x60A5FA, "#60A5FA", "Cobalt"),
-    (0xA78BFA, "#A78BFA", "Iris"),
 ];
 
-pub const THEME_BG_SWATCHES_DARK: [(u32, &str, &str); 6] = [
-    (0x13111C, "#13111C", "Obsidian"),
-    (0x0C131F, "#0C131F", "Abyss Blue"),
-    (0x0D1714, "#0D1714", "Deep Pine"),
-    (0x191013, "#191013", "Dark Ruby"),
-    (0x141418, "#141418", "Carbon"),
-    (0x0A0A0E, "#0A0A0E", "OLED Pitch"),
+pub const THEME_BG_SWATCHES_DARK: [(u32, &str, &str); 4] = [
+    (0x05070B, "#05070B", "Blaze Dark"),
+    (0x0E131C, "#0E131C", "Slate Surface"),
+    (0x070A10, "#070A10", "Deep Navy"),
+    (0x000000, "#000000", "OLED Black"),
 ];
 
 pub const THEME_BG_SWATCHES_LIGHT: [(u32, &str, &str); 6] = [
@@ -2500,7 +2565,7 @@ pub const THEME_BG_SWATCHES_LIGHT: [(u32, &str, &str); 6] = [
 ];
 
 fn default_glass_opacity() -> f32 {
-    0.85
+    0.72
 }
 fn default_glass_blur() -> f32 {
     16.0
@@ -2539,19 +2604,19 @@ pub struct LauncherThemeConfig {
 impl Default for LauncherThemeConfig {
     fn default() -> Self {
         Self {
-            preset: ThemePreset::ObsidianViolet,
+            preset: ThemePreset::Cyan,
             appearance: ThemeAppearance::Dark,
             background_mode: BackgroundMode::Solid,
-            custom_bg_hex: "#13111C".into(),
-            custom_surface_hex: "#1D192B".into(),
-            custom_accent_hex: "#9A7BFF".into(),
+            custom_bg_hex: "#05070B".into(),
+            custom_surface_hex: "#0E131C".into(),
+            custom_accent_hex: "#38BDF8".into(),
             gradient_direction: GradientDirection::DiagonalDown,
-            gradient_start_hex: "#1A1333".into(),
-            gradient_mid_hex: "#131A2E".into(),
-            gradient_end_hex: "#0D0B14".into(),
+            gradient_start_hex: "#05070B".into(),
+            gradient_mid_hex: "#0E131C".into(),
+            gradient_end_hex: "#0284C7".into(),
             gradient_mid_pos: 0.50,
             use_three_stops: true,
-            glass_opacity: 0.85,
+            glass_opacity: 0.72,
             glass_blur: 16.0,
             bg_style: "mc".into(),
             custom_bg_uri: None,
@@ -2678,9 +2743,9 @@ impl LauncherThemeConfig {
         }
         self.gradient_mid_pos = self.gradient_mid_pos.clamp(0.15, 0.85);
         if !self.glass_opacity.is_finite() {
-            self.glass_opacity = 0.85;
+            self.glass_opacity = 0.72;
         }
-        self.glass_opacity = self.glass_opacity.clamp(0.40, 0.98);
+        self.glass_opacity = self.glass_opacity.clamp(0.30, 0.95);
         if !self.glass_blur.is_finite() {
             self.glass_blur = 16.0;
         }
@@ -2690,22 +2755,22 @@ impl LauncherThemeConfig {
             self.bg_style = "mc".into();
         }
         if parse_hex_color(&self.custom_bg_hex).is_none() {
-            self.custom_bg_hex = "#13111C".into();
+            self.custom_bg_hex = "#05070B".into();
         }
         if parse_hex_color(&self.custom_surface_hex).is_none() {
-            self.custom_surface_hex = "#1D192B".into();
+            self.custom_surface_hex = "#0E131C".into();
         }
         if parse_hex_color(&self.custom_accent_hex).is_none() {
-            self.custom_accent_hex = "#9A7BFF".into();
+            self.custom_accent_hex = "#38BDF8".into();
         }
         if parse_hex_color(&self.gradient_start_hex).is_none() {
-            self.gradient_start_hex = "#1A1333".into();
+            self.gradient_start_hex = "#05070B".into();
         }
         if parse_hex_color(&self.gradient_mid_hex).is_none() {
-            self.gradient_mid_hex = "#131A2E".into();
+            self.gradient_mid_hex = "#0E131C".into();
         }
         if parse_hex_color(&self.gradient_end_hex).is_none() {
-            self.gradient_end_hex = "#0D0B14".into();
+            self.gradient_end_hex = "#0284C7".into();
         }
     }
 
@@ -2748,7 +2813,7 @@ impl LauncherThemeConfig {
         if is_light && rgb_luminance(bg_rgb) < 0.45 {
             bg_rgb = blend_rgb(0xF3F1FA, def_acc, 0.06);
         } else if !is_light && rgb_luminance(bg_rgb) > 0.65 {
-            bg_rgb = 0x13111C;
+            bg_rgb = 0x05070B;
         }
 
         let mut accent_rgb = parse_hex_color(&self.custom_accent_hex).unwrap_or(def_acc);
@@ -2821,22 +2886,22 @@ impl LauncherThemeConfig {
             blend_rgb(surf_rgb, accent_rgb, 0.24)
         };
         let border_rgb = if is_light {
-            blend_rgb(bg_rgb, 0x1D192B, 0.16)
+            blend_rgb(bg_rgb, 0x0E131C, 0.16)
         } else {
             blend_rgb(surf_rgb, 0xFFFFFF, 0.11)
         };
         let border_strong_rgb = if is_light {
-            blend_rgb(bg_rgb, 0x1D192B, 0.34)
+            blend_rgb(bg_rgb, 0x0E131C, 0.34)
         } else {
             blend_rgb(surf_rgb, 0xFFFFFF, 0.28)
         };
         let on_accent_rgb = if rgb_luminance(accent_rgb) > 0.48 {
-            0x140E26
+            0x020617
         } else {
             0xFFFFFF
         };
-        let text_primary_rgb = if is_light { 0x1A1626 } else { 0xF5F2FC };
-        let text_muted_rgb = if is_light { 0x5E5675 } else { 0xA39BBF };
+        let text_primary_rgb = if is_light { 0x020617 } else { 0xF1F5F9 };
+        let text_muted_rgb = if is_light { 0x64748B } else { 0x94A3B8 };
 
         // Solid fallback even if gradient mode is active
         let solid_fallback_rgb = if self.background_mode == BackgroundMode::Gradient {
@@ -2858,7 +2923,7 @@ impl LauncherThemeConfig {
             gradient_direction: self.gradient_direction,
             use_three_stops: self.use_three_stops,
             gradient_mid_pos: self.gradient_mid_pos.clamp(0.15, 0.85),
-            glass_opacity: self.glass_opacity.clamp(0.40, 0.98),
+            glass_opacity: self.glass_opacity.clamp(0.30, 0.95),
             glass_blur: self.glass_blur.clamp(0.0, 32.0),
             bg_style_id,
             palette_id: self.palette_idx.min(4),
@@ -3098,8 +3163,8 @@ mod tests {
 
     #[test]
     fn theme_config_parses_hex_safely_and_resolves_presets_and_gradients() {
-        assert_eq!(parse_hex_color("#9A7BFF"), Some(0x9A7BFF));
-        assert_eq!(parse_hex_color("38bdf8"), Some(0x38BDF8));
+        assert_eq!(parse_hex_color("#38BDF8"), Some(0x38BDF8));
+        assert_eq!(parse_hex_color("34d399"), Some(0x34D399));
         assert_eq!(parse_hex_color("#F0A"), Some(0xFF00AA));
         assert_eq!(parse_hex_color("not-a-color"), None);
 
@@ -3107,13 +3172,13 @@ mod tests {
         cfg.custom_bg_hex = "invalid".into();
         cfg.gradient_mid_pos = 99.0;
         cfg.sanitize();
-        assert_eq!(cfg.custom_bg_hex, "#13111C");
+        assert_eq!(cfg.custom_bg_hex, "#05070B");
         assert_eq!(cfg.gradient_mid_pos, 0.85);
 
-        cfg.apply_preset(ThemePreset::DaylightFrost);
-        let light = cfg.resolve();
-        assert!(light.is_light);
-        assert_ne!(light.bg_solid, light.text_primary);
+        cfg.apply_preset(ThemePreset::Cyan);
+        let theme = cfg.resolve();
+        assert!(!theme.is_light);
+        assert_ne!(theme.bg_solid, theme.text_primary);
 
         cfg.background_mode = BackgroundMode::Gradient;
         cfg.gradient_direction = GradientDirection::DiagonalDown;
