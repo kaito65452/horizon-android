@@ -3862,7 +3862,7 @@ impl Launcher {
         let search_w = (panel_w - 240.0).clamp(100.0, 220.0);
         let search_r = [panel_x + 12.0, bar_y, search_w, bar_h];
         let is_search_active = self.catalog.editing == Some("settings_search");
-        ui.rounded(search_r[0], search_r[1], search_r[2], search_r[3], 8.0, my3_field_bg());
+        ui.rounded(search_r[0], search_r[1], search_r[2], search_r[3], 8.0, my3_card_bg());
         ui.border(
             search_r[0], search_r[1], search_r[2], search_r[3], 8.0,
             if is_search_active { my3_accent() } else { my3_border() },
@@ -4063,12 +4063,12 @@ impl Launcher {
                     (
                         "Starling Voice Chat (SVC)",
                         "Run proximity voice chat engine service in background during gameplay",
-                        SettingControl::Toggle(c.svc_enabled, Action::VoicechatToggle),
+                        SettingControl::Toggle(c.svc_enabled, Action::ToggleExperimentalSvc),
                     ),
                     (
                         "SVC RNNoise input filter",
                         "AI neural noise suppression on microphone input to eliminate background noise",
-                        SettingControl::Toggle(c.svc_rnnoise, Action::VoicechatRnnoiseToggle),
+                        SettingControl::Toggle(c.svc_rnnoise, Action::ToggleExperimentalSvcRnnoise),
                     ),
                 ];
 
@@ -5695,7 +5695,7 @@ impl Launcher {
                         if self.catalog.editing == Some("server") {
                             SettingControl::TextField {
                                 label: "SERVER IP",
-                                value: &self.catalog.server_text,
+                                value: &c.server,
                                 hint: "mc.example.com",
                                 active: true,
                                 action: Action::Field("server"),
