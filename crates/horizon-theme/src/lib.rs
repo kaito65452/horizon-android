@@ -12,8 +12,8 @@ use std::time::Duration;
 
 pub const FONT: &str = "Geist";
 pub const MONO: &str = "Geist Mono";
-pub mod night;
 pub mod blaze;
+pub mod night;
 
 /// The launcher's and the website's display face (headings, navigation, buttons, badges only):
 /// Pixelify Sans, bundled under the SIL Open Font License (`fonts/OFL-PixelifySans.txt`).

@@ -1802,7 +1802,9 @@ impl<'a> Ui<'a> {
                 let t = (std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis())
-                    .unwrap_or(0) % 100_000) as f32 * 0.002;
+                    .unwrap_or(0)
+                    % 100_000) as f32
+                    * 0.002;
                 let grid_cols = 16;
                 let box_size = 22.0;
                 for i in 0..grid_cols {
