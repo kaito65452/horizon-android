@@ -196,7 +196,7 @@ pub enum Face {
     Mono,
 }
 
-/// Vector icons used by the Material You 3 Android launcher navigation rail,
+/// Vector icons used by the Blaze Android launcher navigation,
 /// top bar, and progress controls.
 static ANDROID_DPI_BITS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static UI_SCALE_PERCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
@@ -1329,35 +1329,29 @@ impl<'a> Ui<'a> {
         self.border(x, y, size, size, radius, theme.border_strong);
     }
 
-    /// Draw an authentic Material You 3 Switch (`52x28dp` pill track with sliding thumb and checkmark).
-    pub fn m3_switch(&mut self, x: f32, y: f32, on: bool) {
+    /// Compact `42x22dp` pill switch: accent track when on, glass track with a hairline when off.
+    pub fn switch(&mut self, x: f32, y: f32, on: bool) {
         let theme = active_theme();
-        let track_w = 52.0;
-        let track_h = 28.0;
+        let (tw, th) = (42.0, 22.0);
+        let ink = if theme.is_light { 0x0F172A } else { 0xFFFFFF };
         if on {
-            self.rounded(x, y, track_w, track_h, 14.0, theme.accent);
-            let thumb_d = 22.0;
-            let tx = x + track_w - thumb_d - 3.0;
-            let ty = y + (track_h - thumb_d) * 0.5;
-            self.rounded(tx, ty, thumb_d, thumb_d, 11.0, theme.on_accent);
-            self.icon(Icon::Check, tx + 4.0, ty + 4.0, 14.0, theme.accent);
+            self.rounded(x, y, tw, th, th * 0.5, theme.accent);
+            self.rounded(x + tw - 18.0, y + 3.0, 16.0, 16.0, 8.0, theme.on_accent);
         } else {
-            self.rounded(x, y, track_w, track_h, 14.0, theme.surface_dim);
-            self.stroke_rounded(x, y, track_w, track_h, 14.0, 1.6, theme.border_strong);
-            let thumb_d = 16.0;
-            let tx = x + 6.0;
-            let ty = y + (track_h - thumb_d) * 0.5;
-            self.rounded(tx, ty, thumb_d, thumb_d, 8.0, theme.text_muted);
+            self.rounded(x, y, tw, th, th * 0.5, color::hex(ink, 28));
+            self.border(x, y, tw, th, th * 0.5, color::hex(ink, 46));
+            self.rounded(x + 3.0, y + 3.0, 16.0, 16.0, 8.0, theme.text_muted);
         }
     }
 
-    /// Draw an authentic Material You 3 Checkbox with label (`[✓] Label`) and return total width.
-    pub fn m3_checkbox(&mut self, x: f32, y: f32, size: f32, checked: bool, label: &str) -> f32 {
+    /// Checkbox with optional label (`[x] Label`); returns the total width drawn.
+    pub fn checkbox(&mut self, x: f32, y: f32, size: f32, checked: bool, label: &str) -> f32 {
         let theme = active_theme();
-        let r = (size * 0.28).clamp(4.0, 7.0);
+        let ink = if theme.is_light { 0x0F172A } else { 0xFFFFFF };
+        let r = (size * 0.25).clamp(3.0, 6.0);
         if checked {
             self.rounded(x, y, size, size, r, theme.accent);
-            let icon_s = (size - 4.0).max(10.0);
+            let icon_s = (size - 6.0).max(10.0);
             self.icon(
                 Icon::Check,
                 x + (size - icon_s) * 0.5,
@@ -1366,26 +1360,25 @@ impl<'a> Ui<'a> {
                 theme.on_accent,
             );
         } else {
-            self.rounded(x, y, size, size, r, theme.surface_dim);
-            self.stroke_rounded(x, y, size, size, r, 1.6, theme.border_strong);
+            self.rounded(x, y, size, size, r, color::hex(ink, 20));
+            self.border(x, y, size, size, r, color::hex(ink, 56));
         }
-        if !label.is_empty() {
-            let tw = self.text(
-                Face::Medium,
-                12.5,
-                x + size + 8.0,
-                y + (size - 18.0) * 0.5,
-                if checked {
-                    theme.text_primary
-                } else {
-                    theme.text_muted
-                },
-                label,
-            );
-            size + 8.0 + tw
-        } else {
-            size
+        if label.is_empty() {
+            return size;
         }
+        let tw = self.text(
+            Face::Medium,
+            12.0,
+            x + size + 8.0,
+            y + (size - 17.0) * 0.5,
+            if checked {
+                theme.text_primary
+            } else {
+                theme.text_muted
+            },
+            label,
+        );
+        size + 8.0 + tw
     }
 
     /// Draw a cached RGBA project icon (`w x h`) into `(x, y, dw, dh)` dp.
@@ -1499,7 +1492,7 @@ impl<'a> Ui<'a> {
         self.text_clipped(Face::Regular, size, x, y, w, color, &single_line);
     }
 
-    /// Material 3 filled/outlined text field: supports compact single-line mode (`label.is_empty()` or `h < 40.0`)
+    /// Glass text field (`white/5` fill, 1px hairline, accent ring when active): supports compact single-line mode (`label.is_empty()` or `h < 40.0`)
     /// and top-labeled mode (`!label.is_empty() && h >= 40.0`), single-line elided hints, and automatic
     /// tail-scrolling when `active` so newly typed characters and the blinking caret stay visible.
     #[allow(clippy::too_many_arguments)]
@@ -1516,28 +1509,21 @@ impl<'a> Ui<'a> {
     ) -> [f32; 4] {
         let theme = active_theme();
         let accent = theme.accent;
-        let radius = (h * 0.24).clamp(8.0, 14.0);
+        let radius = (h * 0.28).clamp(8.0, 12.0);
+        let ink = if theme.is_light { 0x0F172A } else { 0xFFFFFF };
         self.rounded(
             x,
             y,
             w,
             h,
             radius,
-            if active {
-                theme.surface_bright
-            } else {
-                theme.surface_dim
-            },
+            color::hex(ink, if active { 20 } else { 13 }),
         );
-        self.stroke_rounded(
-            x,
-            y,
-            w,
-            h,
-            radius,
-            if active { 1.6 } else { 1.0 },
-            if active { accent } else { theme.border },
-        );
+        if active {
+            self.stroke_rounded(x, y, w, h, radius, 1.4, accent);
+        } else {
+            self.border(x, y, w, h, radius, color::hex(ink, 26));
+        }
         let pad = (w * 0.035).clamp(10.0, 14.0);
         let compact = label.is_empty() || h < 40.0;
         let size = if compact {
@@ -2995,7 +2981,7 @@ pub fn set_active_theme(theme: ResolvedTheme) {
     }
 }
 
-/// Performant, hardware-conscious motion utilities following Material 3 Expressive
+/// Performant, hardware-conscious motion utilities tuned for the Blaze launcher
 /// and Disney choreography principles. Automatically respects low-power / reduced-motion modes.
 pub mod motion {
     use std::{
@@ -3032,7 +3018,7 @@ pub mod motion {
         DISABLE_GAME_ANIMATIONS.load(Ordering::Relaxed)
     }
 
-    /// Standard Material 3 decelerate cubic-bezier approximation (`1 - (1 - t)^3`).
+    /// Decelerate cubic-bezier approximation (`1 - (1 - t)^3`).
     pub fn ease_out_cubic(t: f32) -> f32 {
         let x = t.clamp(0.0, 1.0);
         1.0 - (1.0 - x).powi(3)
@@ -3044,7 +3030,7 @@ pub mod motion {
         1.0 - (1.0 - x).powi(5)
     }
 
-    /// Critically damped Material 3 spatial spring response (smooth settle, zero distracting bounce).
+    /// Critically damped spring response (smooth settle, zero distracting bounce).
     pub fn spring_spatial(t: f32) -> f32 {
         let x = t.clamp(0.0, 1.0);
         if x >= 1.0 {
