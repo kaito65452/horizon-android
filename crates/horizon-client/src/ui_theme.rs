@@ -1774,25 +1774,69 @@ impl<'a> Ui<'a> {
         }
     }
 
-    /// Paints the active theme background (solid or multi-stop gradient) over `[x, y, w, h]` dp.
+    /// Paints the active theme background (solid, multi-stop gradient, or Blaze art modes) over `[x, y, w, h]` dp.
     pub fn draw_theme_background(&mut self, x: f32, y: f32, w: f32, h: f32, theme: &ResolvedTheme) {
-        if theme.is_gradient {
-            let mid = theme
-                .use_three_stops
-                .then_some((theme.gradient_mid_pos, theme.gradient_mid));
-            self.fill_gradient(
-                x,
-                y,
-                w,
-                h,
-                theme.gradient_direction,
-                theme.gradient_start,
-                theme.gradient_end,
-                mid,
-                20,
-            );
-        } else {
-            self.fill(x, y, w, h, theme.bg_solid);
+        match theme.bg_style() {
+            "oled" => {
+                self.fill(x, y, w, h, color::hex(0x05070A, 255));
+            }
+            "mc" => {
+                self.fill_gradient(
+                    x,
+                    y,
+                    w,
+                    h,
+                    GradientDirection::DiagonalDown,
+                    color::hex(0x04101C, 255),
+                    color::hex(0x0D5C56, 255),
+                    Some((0.45, color::hex(0x0A2E4A, 255))),
+                    24,
+                );
+                let ray_c = color::with_alpha(theme.accent, 0.07);
+                self.rounded(x + w * 0.15, y, w * 0.18, h, 0.0, ray_c);
+                self.rounded(x + w * 0.45, y, w * 0.22, h, 0.0, ray_c);
+                self.rounded(x + w * 0.75, y, w * 0.16, h, 0.0, ray_c);
+            }
+            "shader" => {
+                self.fill(x, y, w, h, color::hex(0x060A12, 255));
+                let t = (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0) % 100_000) as f32 * 0.002;
+                let grid_cols = 16;
+                let box_size = 22.0;
+                for i in 0..grid_cols {
+                    let fi = i as f32;
+                    let px = (x + fi * 55.0 + t * 24.0) % (w + 40.0) - 20.0;
+                    let py = y + h * 0.5 + (t + fi * 0.5).sin() * (h * 0.25);
+                    let c = if i % 2 == 0 {
+                        color::with_alpha(theme.accent, 0.18)
+                    } else {
+                        color::with_alpha(theme.accent_soft, 0.24)
+                    };
+                    self.rounded(px, py, box_size, box_size, 4.0, c);
+                }
+            }
+            _ => {
+                if theme.is_gradient {
+                    let mid = theme
+                        .use_three_stops
+                        .then_some((theme.gradient_mid_pos, theme.gradient_mid));
+                    self.fill_gradient(
+                        x,
+                        y,
+                        w,
+                        h,
+                        theme.gradient_direction,
+                        theme.gradient_start,
+                        theme.gradient_end,
+                        mid,
+                        20,
+                    );
+                } else {
+                    self.fill(x, y, w, h, theme.bg_solid);
+                }
+            }
         }
     }
 
@@ -2345,6 +2389,16 @@ pub const THEME_BG_SWATCHES_LIGHT: [(u32, &str, &str); 6] = [
     (0xF4F5F7, "#F4F5F7", "Pure Alabaster"),
 ];
 
+fn default_glass_opacity() -> f32 {
+    0.72
+}
+fn default_glass_blur() -> f32 {
+    16.0
+}
+fn default_bg_style() -> String {
+    "mc".into()
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct LauncherThemeConfig {
@@ -2360,6 +2414,14 @@ pub struct LauncherThemeConfig {
     pub gradient_end_hex: String,
     pub gradient_mid_pos: f32,
     pub use_three_stops: bool,
+    #[serde(default = "default_glass_opacity")]
+    pub glass_opacity: f32,
+    #[serde(default = "default_glass_blur")]
+    pub glass_blur: f32,
+    #[serde(default = "default_bg_style")]
+    pub bg_style: String,
+    #[serde(default)]
+    pub custom_bg_uri: Option<String>,
 }
 
 impl Default for LauncherThemeConfig {
@@ -2377,6 +2439,10 @@ impl Default for LauncherThemeConfig {
             gradient_end_hex: "#0D0B14".into(),
             gradient_mid_pos: 0.50,
             use_three_stops: true,
+            glass_opacity: 0.72,
+            glass_blur: 16.0,
+            bg_style: "mc".into(),
+            custom_bg_uri: None,
         }
     }
 }
@@ -2448,6 +2514,9 @@ pub struct ResolvedTheme {
     pub gradient_direction: GradientDirection,
     pub use_three_stops: bool,
     pub gradient_mid_pos: f32,
+    pub glass_opacity: f32,
+    pub glass_blur: f32,
+    pub bg_style_id: u8,
     /// Solid fallback background color (always valid even when gradient is enabled).
     pub bg_solid: u32,
     pub gradient_start: u32,
@@ -2471,6 +2540,17 @@ pub struct ResolvedTheme {
     pub danger: u32,
 }
 
+impl ResolvedTheme {
+    pub fn bg_style(&self) -> &'static str {
+        match self.bg_style_id {
+            1 => "shader",
+            2 => "custom",
+            3 => "oled",
+            _ => "mc",
+        }
+    }
+}
+
 impl Default for ResolvedTheme {
     fn default() -> Self {
         LauncherThemeConfig::default().resolve()
@@ -2483,6 +2563,17 @@ impl LauncherThemeConfig {
             self.gradient_mid_pos = 0.50;
         }
         self.gradient_mid_pos = self.gradient_mid_pos.clamp(0.15, 0.85);
+        if !self.glass_opacity.is_finite() {
+            self.glass_opacity = 0.72;
+        }
+        self.glass_opacity = self.glass_opacity.clamp(0.30, 0.95);
+        if !self.glass_blur.is_finite() {
+            self.glass_blur = 16.0;
+        }
+        self.glass_blur = self.glass_blur.clamp(0.0, 32.0);
+        if !matches!(self.bg_style.as_str(), "mc" | "shader" | "custom" | "oled") {
+            self.bg_style = "mc".into();
+        }
         if parse_hex_color(&self.custom_bg_hex).is_none() {
             self.custom_bg_hex = "#13111C".into();
         }
@@ -2639,12 +2730,22 @@ impl LauncherThemeConfig {
             bg_rgb
         };
 
+        let bg_style_id = match self.bg_style.as_str() {
+            "shader" => 1,
+            "custom" => 2,
+            "oled" => 3,
+            _ => 0,
+        };
+
         ResolvedTheme {
             is_light,
             is_gradient: self.background_mode == BackgroundMode::Gradient,
             gradient_direction: self.gradient_direction,
             use_three_stops: self.use_three_stops,
             gradient_mid_pos: self.gradient_mid_pos.clamp(0.15, 0.85),
+            glass_opacity: self.glass_opacity.clamp(0.30, 0.95),
+            glass_blur: self.glass_blur.clamp(0.0, 32.0),
+            bg_style_id,
             bg_solid: color::hex(solid_fallback_rgb, 255),
             gradient_start: color::hex(gs_adj, 255),
             gradient_mid: color::hex(gm_adj, 255),

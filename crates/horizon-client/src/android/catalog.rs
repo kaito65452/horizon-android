@@ -97,6 +97,8 @@ pub struct Config {
     pub svc_enabled: bool,
     #[serde(default = "default_true")]
     pub svc_rnnoise: bool,
+    #[serde(default = "default_true")]
+    pub keepalive_enabled: bool,
     #[serde(default)]
     pub disable_launcher_animations: bool,
     #[serde(default)]
@@ -355,26 +357,42 @@ enum Reply {
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub enum SettingsCategory {
     #[default]
+    Appearance,
+    EngineMemory,
+    DownloadsKeepAlive,
+    Controls,
+    Account,
+    Storage,
+    Experimental,
+    About,
     Overview,
     Video,
     Launcher,
     Theme,
-    Controls,
-    Experimental,
     Diagnostics,
-    Account,
 }
 impl SettingsCategory {
+    pub const ALL: [Self; 8] = [
+        Self::Appearance,
+        Self::EngineMemory,
+        Self::DownloadsKeepAlive,
+        Self::Controls,
+        Self::Account,
+        Self::Storage,
+        Self::Experimental,
+        Self::About,
+    ];
     pub fn title(self) -> &'static str {
         match self {
-            Self::Overview => "Settings",
-            Self::Video => "Video Settings",
-            Self::Launcher => "Launcher Settings",
-            Self::Theme => "Theme Customization",
-            Self::Controls => "Controls & HUD Layout",
-            Self::Experimental => "Experimental Stuff",
-            Self::Diagnostics => "Diagnostics & Logs",
+            Self::Appearance | Self::Theme => "Appearance",
+            Self::EngineMemory | Self::Video => "Engine & Memory",
+            Self::DownloadsKeepAlive => "Downloads & Keep-alive",
+            Self::Controls => "Controls",
             Self::Account => "Account",
+            Self::Storage => "Storage",
+            Self::Experimental => "Experimental",
+            Self::About | Self::Diagnostics => "About & Diagnostics",
+            Self::Overview | Self::Launcher => "Settings",
         }
     }
 }
@@ -617,6 +635,7 @@ pub struct Catalog {
     pub project_modal: Option<ProjectModal>,
     pub modal_worker: Option<mpsc::Receiver<ModalUpdate>>,
     pub settings_category: SettingsCategory,
+    pub settings_query: String,
     pub transfer: TransferTracker,
     pub status: String,
     pub offset: usize,
@@ -675,7 +694,8 @@ impl Catalog {
             enriched_summaries: HashMap::new(),
             project_modal: None,
             modal_worker: None,
-            settings_category: SettingsCategory::Overview,
+            settings_category: SettingsCategory::Appearance,
+            settings_query: String::new(),
             transfer: TransferTracker::default(),
             status: String::new(),
             offset: 0,
@@ -1971,6 +1991,7 @@ impl Catalog {
             Some("theme_grad_mid") => &mut self.config.theme.gradient_mid_hex,
             Some("theme_grad_end") => &mut self.config.theme.gradient_end_hex,
             Some("installed_search") => &mut self.installed_query,
+            Some("settings_search") => &mut self.settings_query,
             Some("fm_rename" | "fm_new_folder") => &mut self.fm_input_text,
             _ => &mut self.query,
         };

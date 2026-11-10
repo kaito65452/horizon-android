@@ -384,6 +384,17 @@ pub(super) enum Action {
     SelectGradStartSwatch(u32),
     SelectGradEndSwatch(u32),
     ResetTheme,
+    // Blaze reference actions
+    SelectAccentPalette(u8),
+    SelectBgStyle(&'static str),
+    GlassOpacityDelta(f32),
+    GlassBlurDelta(f32),
+    ToggleKeepAlive,
+    ResetCategory(SettingsCategory),
+    ExportAllSettings,
+    ImportAllSettings,
+    ClearSettingsSearch,
+    ChooseImportBackground,
     // Intro & Installed / File Manager actions
     SkipIntro,
     SetInstalledSubTab(crate::catalog::InstalledSubTab),
@@ -569,18 +580,17 @@ fn draw_setting_card(
             | SettingControl::Button(_, _, true)
             | SettingControl::TextField { active: true, .. }
     );
-    ui.rounded(
-        x,
-        y,
-        w,
-        h,
-        18.0,
+    let theme = horizon_client::ui_theme::active_theme();
+    let card_fill = color::with_alpha(
         if is_active_card {
             my3_surface_high()
         } else {
             my3_card_bg()
         },
+        theme.glass_opacity,
     );
+    ui.rounded(x, y, w, h, 18.0, card_fill);
+    ui.border(x, y, w, h, 18.0, my3_card_border());
     if is_active_card {
         ui.rounded(
             x + 4.0,
@@ -3762,165 +3772,407 @@ impl Launcher {
         slide_y: f32,
         ime_top_dp: Option<f32>,
     ) {
-        let cat = self.catalog.settings_category;
-        if cat == SettingsCategory::Overview {
-            ui.text(
-                Face::SemiBold,
-                20.0,
-                content_x,
-                62.0 + slide_y,
-                my3_text(),
-                "Settings",
-            );
-
-            let cards: [(Icon, &str, &str, Action); 6] = [
-                (
-                    Icon::Monitor,
-                    "Video Settings",
-                    "Rendering, resolution and performance",
-                    Action::SettingsCat(SettingsCategory::Video),
-                ),
-                (
-                    Icon::Gear,
-                    "Launcher Settings",
-                    "Theme customization, profiles, DPI scale & preferences",
-                    Action::SettingsCat(SettingsCategory::Launcher),
-                ),
-                (
-                    Icon::Gamepad,
-                    "Controls",
-                    "HUD touch layout, buttons, sensitivity and profiles",
-                    Action::SettingsCat(SettingsCategory::Controls),
-                ),
-                (
-                    Icon::Flask,
-                    "Experimental Stuff",
-                    "Unstable features. We put the weird shit here.",
-                    Action::SettingsCat(SettingsCategory::Experimental),
-                ),
-                (
-                    Icon::Terminal,
-                    "Diagnostics",
-                    "Logs, device info and troubleshooting",
-                    Action::SettingsCat(SettingsCategory::Diagnostics),
-                ),
-                (
-                    Icon::MicrosoftGrid,
-                    "Account",
-                    "Microsoft and Xbox sign-in",
-                    Action::Account,
-                ),
-            ];
-
-            let grid_top = 98.0 + slide_y;
-            let gap_x = 14.0;
-            let gap_y = 12.0;
-            let cols = if compact { 1 } else { 2 };
-            let card_w = if cols == 2 {
-                (content_w - gap_x) * 0.5
-            } else {
-                content_w
-            };
-            let card_h = ((h - grid_top - 52.0 - gap_y * 2.0) / 3.0).clamp(68.0, 92.0);
-
-            for (idx, (icon, title, subtitle, action)) in cards.into_iter().enumerate() {
-                let col = idx % cols;
-                let row = idx / cols;
-                let cx = content_x + col as f32 * (card_w + gap_x);
-                let cy = grid_top + row as f32 * (card_h + gap_y);
-                let rect = [cx, cy, card_w, card_h];
-
-                ui.rounded(cx, cy, card_w, card_h, 16.0, my3_card_bg());
-                ui.border(cx, cy, card_w, card_h, 16.0, my3_card_border());
-
-                // Left vector icon + vertical divider line matching 45062.jpg
-                let icon_size = 20.0;
-                ui.icon(
-                    icon,
-                    cx + 20.0,
-                    cy + (card_h - icon_size) * 0.5,
-                    icon_size,
-                    my3_accent(),
-                );
-                ui.rounded(
-                    cx + 54.0,
-                    cy + card_h * 0.26,
-                    1.5,
-                    card_h * 0.48,
-                    0.75,
-                    my3_border(),
-                );
-
-                let text_x = cx + 68.0;
-                let text_max = (card_w - 82.0).max(60.0);
-                let fitted_title = ui.fit_text(Face::SemiBold, 15.5, title, text_max);
-                let fitted_sub = ui.fit_text(Face::Regular, 12.5, subtitle, text_max);
-                let text_block_y = cy + (card_h - 40.0) * 0.5;
-                ui.text(
-                    Face::SemiBold,
-                    15.5,
-                    text_x,
-                    text_block_y,
-                    my3_text(),
-                    &fitted_title,
-                );
-                ui.text(
-                    Face::Regular,
-                    12.5,
-                    text_x,
-                    text_block_y + 22.0,
-                    my3_muted(),
-                    &fitted_sub,
-                );
-
-                self.list_targets.push((rect, action));
-                self.targets.push((rect, action));
-            }
-            return;
-        }
-
-        // Sub-category Header Bar with hierarchical Back button
-        let header_y = 60.0 + slide_y;
-        let back_cat = if cat == SettingsCategory::Theme {
-            SettingsCategory::Launcher
-        } else {
-            SettingsCategory::Overview
+        let active_cat = match self.catalog.settings_category {
+            SettingsCategory::Overview | SettingsCategory::Launcher => SettingsCategory::Appearance,
+            other => other,
         };
-        button(
-            ui,
-            &mut self.targets,
-            [content_x, header_y, 88.0, 32.0],
-            "← Back",
-            Action::SettingsCat(back_cat),
-            false,
-        );
-        let fitted_cat = ui.fit_text(
-            Face::SemiBold,
-            18.5,
-            cat.title(),
-            (content_w - 104.0).max(80.0),
-        );
+
+        let top_y = 56.0 + slide_y;
+        let bottom_y = h - 28.0;
+        let panel_h = (bottom_y - top_y).max(120.0);
+
+        let rail_w = if compact { 160.0 } else { (content_w * 0.28).clamp(160.0, 240.0) };
+        let panel_x = content_x + rail_w + 12.0;
+        let panel_w = (content_w - rail_w - 12.0).max(180.0);
+
+        let theme = horizon_client::ui_theme::active_theme();
+        let glass_card = color::with_alpha(my3_card_bg(), theme.glass_opacity);
+
+        // 1. Left Category Rail (4 cols / ~28% width)
+        ui.rounded(content_x, top_y, rail_w, panel_h, 16.0, glass_card);
+        ui.border(content_x, top_y, rail_w, panel_h, 16.0, my3_card_border());
+
         ui.text(
             Face::SemiBold,
-            18.5,
-            content_x + 100.0,
-            header_y + 3.0,
-            my3_text(),
-            &fitted_cat,
+            11.0,
+            content_x + 16.0,
+            top_y + 16.0,
+            my3_accent(),
+            "SETTINGS",
         );
 
-        let list_top = 102.0 + slide_y;
-        let list_bottom = h - 42.0;
+        let rail_items: [(SettingsCategory, Icon, &str); 8] = [
+            (SettingsCategory::Appearance, Icon::Settings, "Appearance"),
+            (SettingsCategory::EngineMemory, Icon::Monitor, "Engine & Memory"),
+            (SettingsCategory::DownloadsKeepAlive, Icon::Installed, "Downloads & Keep-alive"),
+            (SettingsCategory::Controls, Icon::Gamepad, "Controls"),
+            (SettingsCategory::Account, Icon::MicrosoftGrid, "Account"),
+            (SettingsCategory::Storage, Icon::Folder, "Storage"),
+            (SettingsCategory::Experimental, Icon::Flask, "Experimental"),
+            (SettingsCategory::About, Icon::Terminal, "About & Diagnostics"),
+        ];
+
+        let item_h = 36.0;
+        let item_gap = 5.0;
+        let items_top = top_y + 36.0;
+
+        for (i, (c_enum, icon, label)) in rail_items.into_iter().enumerate() {
+            let iy = items_top + i as f32 * (item_h + item_gap);
+            let is_selected = active_cat == c_enum
+                || (active_cat == SettingsCategory::Theme && c_enum == SettingsCategory::Appearance)
+                || (active_cat == SettingsCategory::Video && c_enum == SettingsCategory::EngineMemory)
+                || (active_cat == SettingsCategory::Diagnostics && c_enum == SettingsCategory::About);
+            let r = [content_x + 8.0, iy, rail_w - 16.0, item_h];
+            self.targets.push((r, Action::SettingsCat(c_enum)));
+
+            if is_selected {
+                ui.rounded(r[0], r[1], r[2], r[3], 10.0, my3_nav_active());
+                ui.border(r[0], r[1], r[2], r[3], 10.0, my3_accent());
+                ui.rounded(r[0] + 3.0, r[1] + 6.0, 3.0, item_h - 12.0, 1.5, my3_accent());
+            }
+
+            let icon_c = if is_selected { my3_accent() } else { my3_muted() };
+            ui.icon(icon, r[0] + 10.0, r[1] + (item_h - 16.0) * 0.5, 16.0, icon_c);
+
+            let text_c = if is_selected { my3_text() } else { my3_muted() };
+            let fit_lbl = ui.fit_text(
+                if is_selected { Face::SemiBold } else { Face::Regular },
+                12.0,
+                label,
+                (rail_w - 52.0).max(40.0),
+            );
+            ui.text(
+                if is_selected { Face::SemiBold } else { Face::Regular },
+                12.0,
+                r[0] + 32.0,
+                r[1] + (item_h - 14.0) * 0.5,
+                text_c,
+                &fit_lbl,
+            );
+        }
+
+        // 2. Right Content Panel (8 cols / ~72% width)
+        ui.rounded(panel_x, top_y, panel_w, panel_h, 16.0, glass_card);
+        ui.border(panel_x, top_y, panel_w, panel_h, 16.0, my3_card_border());
+
+        // Top bar with Search and Action Buttons
+        let bar_y = top_y + 10.0;
+        let bar_h = 32.0;
+
+        let search_w = (panel_w - 240.0).clamp(100.0, 220.0);
+        let search_r = [panel_x + 12.0, bar_y, search_w, bar_h];
+        let is_search_active = self.catalog.editing == Some("settings_search");
+        ui.rounded(search_r[0], search_r[1], search_r[2], search_r[3], 8.0, my3_field_bg());
+        ui.border(
+            search_r[0], search_r[1], search_r[2], search_r[3], 8.0,
+            if is_search_active { my3_accent() } else { my3_border() },
+        );
+        self.targets.push((search_r, Action::Field("settings_search")));
+
+        ui.icon(Icon::Search, search_r[0] + 8.0, search_r[1] + 8.0, 16.0, my3_muted());
+
+        let query_text = if self.catalog.settings_query.is_empty() {
+            "Search settings..."
+        } else {
+            &self.catalog.settings_query
+        };
+        let query_color = if self.catalog.settings_query.is_empty() {
+            my3_muted()
+        } else {
+            my3_text()
+        };
+        let fit_q = ui.fit_text(Face::Regular, 12.0, query_text, (search_w - 56.0).max(30.0));
+        ui.text(Face::Regular, 12.0, search_r[0] + 28.0, search_r[1] + 9.0, query_color, &fit_q);
+
+        if !self.catalog.settings_query.is_empty() {
+            let clear_r = [search_r[0] + search_w - 24.0, bar_y + 6.0, 20.0, 20.0];
+            ui.icon(Icon::Close, clear_r[0] + 2.0, clear_r[1] + 2.0, 16.0, my3_muted());
+            self.targets.push((clear_r, Action::ClearSettingsSearch));
+        }
+
+        let btn_w = 62.0;
+        let btn_gap = 6.0;
+        let btns_x = panel_x + panel_w - (btn_w * 3.0 + btn_gap * 2.0 + 12.0);
+
+        let reset_r = [btns_x, bar_y, btn_w, bar_h];
+        button(ui, &mut self.targets, reset_r, "Reset", Action::ResetCategory(active_cat), false);
+
+        let export_r = [btns_x + btn_w + btn_gap, bar_y, btn_w, bar_h];
+        button(ui, &mut self.targets, export_r, "Export", Action::ExportAllSettings, false);
+
+        let import_r = [btns_x + (btn_w + btn_gap) * 2.0, bar_y, btn_w, bar_h];
+        button(ui, &mut self.targets, import_r, "Import", Action::ImportAllSettings, false);
+
+        let list_top = top_y + 48.0;
+        let list_bottom = bottom_y - 10.0;
         let card_h = 58.0;
         let step_y = 66.0;
+
+        let content_x = panel_x + 12.0;
+        let content_w = panel_w - 24.0;
 
         let game_home = self.catalog.config.game_home(&self.home);
         let opts = horizon_client::settings::Settings::load(&game_home.join("options.txt"));
         let touch_cfg =
             horizon_client::touch::Settings::load_from(&game_home.join("horizon-touch.json"));
 
-        match cat {
-            SettingsCategory::Video => {
+        match active_cat {
+            SettingsCategory::Appearance => {
+                let c = &self.catalog.config;
+                let theme_cfg = &c.theme;
+                let count = 10;
+                let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
+                let max_scroll =
+                    (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+                let palette_label = match theme_cfg.custom_accent_hex.to_uppercase().as_str() {
+                    "#38BDF8" => "Cyan (#38BDF8) ›",
+                    "#34D399" => "Emerald (#34D399) ›",
+                    "#FB7185" => "Crimson (#FB7185) ›",
+                    "#A78BFA" => "Violet (#A78BFA) ›",
+                    "#FBBF24" => "Amber (#FBBF24) ›",
+                    _ => "Custom Accent ›",
+                };
+                let bg_label = match theme_cfg.bg_style.as_str() {
+                    "mc" => "Minecraft Aquatic ›",
+                    "shader" => "Live Voxel Shader ›",
+                    "custom" => "Custom Media ›",
+                    "oled" => "OLED Pitch Black ›",
+                    _ => "Minecraft Aquatic ›",
+                };
+                let opacity_pct = (theme_cfg.glass_opacity * 100.0).round() as i32;
+                let opacity_label = format!("{}%", opacity_pct);
+                let blur_label = format!("{:.0} px", theme_cfg.glass_blur);
+                let ui_scale_str = format!("{} v", c.ui_scale_label());
+
+                let next_palette_action = match theme_cfg.custom_accent_hex.to_uppercase().as_str() {
+                    "#38BDF8" => Action::SelectAccentPalette(1),
+                    "#34D399" => Action::SelectAccentPalette(2),
+                    "#FB7185" => Action::SelectAccentPalette(3),
+                    "#A78BFA" => Action::SelectAccentPalette(4),
+                    _ => Action::SelectAccentPalette(0),
+                };
+                let next_bg_action = match theme_cfg.bg_style.as_str() {
+                    "mc" => Action::SelectBgStyle("shader"),
+                    "shader" => Action::SelectBgStyle("custom"),
+                    "custom" => Action::SelectBgStyle("oled"),
+                    _ => Action::SelectBgStyle("mc"),
+                };
+
+                let rows: [(&str, &str, SettingControl<'_>); 10] = [
+                    (
+                        "THEME & VISUAL STYLING",
+                        "Accent palette, live background wallpaper, dynamic glassmorphism and DPI scaling",
+                        SettingControl::SectionHeader("BLAZE UI", Icon::Settings),
+                    ),
+                    (
+                        "Accent color palette",
+                        "Cycle across 5 curated accents: Cyan, Emerald, Crimson, Violet, Amber",
+                        SettingControl::Button(palette_label, next_palette_action, true),
+                    ),
+                    (
+                        "Background visual style",
+                        "Minecraft Aquatic, Live Animated Voxel Shader, Custom Media, or OLED Pitch Black",
+                        SettingControl::Button(bg_label, next_bg_action, false),
+                    ),
+                    (
+                        "Import custom background",
+                        "Select background image or animation via system Storage Access Framework",
+                        SettingControl::Button("Choose File", Action::ChooseImportBackground, false),
+                    ),
+                    (
+                        "Glassmorphism surface opacity",
+                        "Controls card background transparency level (30% to 95%)",
+                        SettingControl::Stepper(&opacity_label, Action::GlassOpacityDelta(-0.05), Action::GlassOpacityDelta(0.05)),
+                    ),
+                    (
+                        "Glassmorphism blur radius",
+                        "Adjusts frosted glass backdrop filter blur strength (0px to 32px)",
+                        SettingControl::Stepper(&blur_label, Action::GlassBlurDelta(-2.0), Action::GlassBlurDelta(2.0)),
+                    ),
+                    (
+                        "Launcher UI scale (Phone DPI)",
+                        "Adapts launcher cards, text and touch targets to your screen DPI",
+                        SettingControl::Button(&ui_scale_str, Action::UiScale, false),
+                    ),
+                    (
+                        "Disable launcher animations",
+                        "Turn off page transitions, nav rail slides, shimmer & modal animations in launcher",
+                        SettingControl::Toggle(c.disable_launcher_animations, Action::ToggleLauncherAnimations),
+                    ),
+                    (
+                        "Disable in-game animations",
+                        "Disable floating menu open/close slides and action feedback ripples in game",
+                        SettingControl::Toggle(c.disable_game_animations, Action::ToggleGameAnimations),
+                    ),
+                    (
+                        "Advanced Theme Studio",
+                        "Open full multi-stop gradient editor, hex code inputs and preset themes",
+                        SettingControl::Button("Theme Studio ›", Action::SettingsCat(SettingsCategory::Theme), false),
+                    ),
+                ];
+
+                ui.set_clip(Some([
+                    content_x - 2.0,
+                    list_top,
+                    content_w + 4.0,
+                    (list_bottom - list_top).max(1.0),
+                ]));
+                for (i, (title, sub, ctrl)) in rows.into_iter().enumerate() {
+                    let y = list_top + i as f32 * step_y - self.catalog.scroll;
+                    if y + card_h < list_top || y > list_bottom {
+                        continue;
+                    }
+                    draw_setting_card(
+                        ui,
+                        &mut self.targets,
+                        &mut self.list_targets,
+                        content_x,
+                        y,
+                        content_w,
+                        card_h,
+                        title,
+                        sub,
+                        ctrl,
+                    );
+                }
+                ui.set_clip(None);
+            }
+            SettingsCategory::DownloadsKeepAlive => {
+                let c = &self.catalog.config;
+                let count = 4;
+                let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
+                let max_scroll =
+                    (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+                let rows: [(&str, &str, SettingControl<'_>); 4] = [
+                    (
+                        "BACKGROUND DOWNLOADS & PERSISTENCE",
+                        "Manage download continuity, network buffers, and background services",
+                        SettingControl::SectionHeader("KEEPALIVE", Icon::Installed),
+                    ),
+                    (
+                        "Background download keep-alive",
+                        "Prevents Android OS from pausing mod/resource downloads and server connections",
+                        SettingControl::Toggle(c.keepalive_enabled, Action::ToggleKeepAlive),
+                    ),
+                    (
+                        "Starling Voice Chat (SVC)",
+                        "Run proximity voice chat engine service in background during gameplay",
+                        SettingControl::Toggle(c.svc_enabled, Action::VoicechatToggle),
+                    ),
+                    (
+                        "SVC RNNoise input filter",
+                        "AI neural noise suppression on microphone input to eliminate background noise",
+                        SettingControl::Toggle(c.svc_rnnoise, Action::VoicechatRnnoiseToggle),
+                    ),
+                ];
+
+                ui.set_clip(Some([
+                    content_x - 2.0,
+                    list_top,
+                    content_w + 4.0,
+                    (list_bottom - list_top).max(1.0),
+                ]));
+                for (i, (title, sub, ctrl)) in rows.into_iter().enumerate() {
+                    let y = list_top + i as f32 * step_y - self.catalog.scroll;
+                    if y + card_h < list_top || y > list_bottom {
+                        continue;
+                    }
+                    draw_setting_card(
+                        ui,
+                        &mut self.targets,
+                        &mut self.list_targets,
+                        content_x,
+                        y,
+                        content_w,
+                        card_h,
+                        title,
+                        sub,
+                        ctrl,
+                    );
+                }
+                ui.set_clip(None);
+            }
+            SettingsCategory::Storage => {
+                let c = &self.catalog.config;
+                let count = 6;
+                let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
+                let max_scroll =
+                    (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+                let cache_str = if c.cache_budget_mib == 0 {
+                    "Default (80 MiB) v".to_owned()
+                } else {
+                    format!("{} MiB v", c.cache_budget_mib)
+                };
+
+                let rows: [(&str, &str, SettingControl<'_>); 6] = [
+                    (
+                        "STORAGE & BACKUPS",
+                        "Manage game files, world saves, backup exports, and cache allocations",
+                        SettingControl::SectionHeader("FILES", Icon::Folder),
+                    ),
+                    (
+                        "Export settings backup",
+                        "Saves all launcher & engine settings to horizon-settings-backup.json",
+                        SettingControl::Button("Export JSON", Action::ExportAllSettings, false),
+                    ),
+                    (
+                        "Import settings backup",
+                        "Restores all settings from horizon-settings-backup.json or system picker",
+                        SettingControl::Button("Import JSON", Action::ImportAllSettings, false),
+                    ),
+                    (
+                        "Import custom background",
+                        "Streams wallpaper or animated media into app-private storage via SAF",
+                        SettingControl::Button("Choose File", Action::ChooseImportBackground, false),
+                    ),
+                    (
+                        "World files & backups",
+                        "Open worlds directory in system Files to inspect or copy saves",
+                        SettingControl::Button("World Files", Action::WorldFiles, false),
+                    ),
+                    (
+                        "Chunk cache budget",
+                        "Heap memory allocated for meshed chunk geometry cache",
+                        SettingControl::Button(&cache_str, Action::CacheBudget, false),
+                    ),
+                ];
+
+                ui.set_clip(Some([
+                    content_x - 2.0,
+                    list_top,
+                    content_w + 4.0,
+                    (list_bottom - list_top).max(1.0),
+                ]));
+                for (i, (title, sub, ctrl)) in rows.into_iter().enumerate() {
+                    let y = list_top + i as f32 * step_y - self.catalog.scroll;
+                    if y + card_h < list_top || y > list_bottom {
+                        continue;
+                    }
+                    draw_setting_card(
+                        ui,
+                        &mut self.targets,
+                        &mut self.list_targets,
+                        content_x,
+                        y,
+                        content_w,
+                        card_h,
+                        title,
+                        sub,
+                        ctrl,
+                    );
+                }
+                ui.set_clip(None);
+            }
+            SettingsCategory::EngineMemory | SettingsCategory::Video => {
                 let c = &self.catalog.config;
                 let count = 17;
                 let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
@@ -5411,8 +5663,133 @@ impl Launcher {
                 }
                 ui.set_clip(None);
             }
-            // Not reachable from the category grid yet.
-            SettingsCategory::Overview | SettingsCategory::Account => {}
+            SettingsCategory::Account => {
+                let c = &self.catalog.config;
+                let count = 3;
+                let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
+                let max_scroll =
+                    (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+                let server_str = if c.server.is_empty() {
+                    "Singleplayer / Tap to set".to_owned()
+                } else {
+                    c.server.clone()
+                };
+
+                let rows: [(&str, &str, SettingControl<'_>); 3] = [
+                    (
+                        "ACCOUNT & AUTHENTICATION",
+                        "Microsoft account sign-in, Xbox authentication and multiplayer profiles",
+                        SettingControl::SectionHeader("AUTH", Icon::MicrosoftGrid),
+                    ),
+                    (
+                        "Microsoft / Xbox account",
+                        "Sign in to your Microsoft account for authenticated online multiplayer",
+                        SettingControl::Button("Manage Account", Action::Account, true),
+                    ),
+                    (
+                        "Auto-join multiplayer server",
+                        "Directly connect to server address upon launching",
+                        if self.catalog.editing == Some("server") {
+                            SettingControl::TextField {
+                                label: "SERVER IP",
+                                value: &self.catalog.server_text,
+                                hint: "mc.example.com",
+                                active: true,
+                                action: Action::Field("server"),
+                            }
+                        } else {
+                            SettingControl::Button(&server_str, Action::Field("server"), false)
+                        },
+                    ),
+                ];
+
+                ui.set_clip(Some([
+                    content_x - 2.0,
+                    list_top,
+                    content_w + 4.0,
+                    (list_bottom - list_top).max(1.0),
+                ]));
+                for (i, (title, sub, ctrl)) in rows.into_iter().enumerate() {
+                    let y = list_top + i as f32 * step_y - self.catalog.scroll;
+                    if y + card_h < list_top || y > list_bottom {
+                        continue;
+                    }
+                    draw_setting_card(
+                        ui,
+                        &mut self.targets,
+                        &mut self.list_targets,
+                        content_x,
+                        y,
+                        content_w,
+                        card_h,
+                        title,
+                        sub,
+                        ctrl,
+                    );
+                }
+                ui.set_clip(None);
+            }
+            SettingsCategory::About => {
+                let count = 4;
+                let extra_ime = if ime_top_dp.is_some() { 180.0 } else { 0.0 };
+                let max_scroll =
+                    (count as f32 * step_y + extra_ime - (list_bottom - list_top)).max(0.0);
+                self.catalog.scroll = self.catalog.scroll.clamp(0.0, max_scroll);
+                self.list_view = Some([list_top, list_bottom, max_scroll]);
+
+                let rows: [(&str, &str, SettingControl<'_>); 4] = [
+                    (
+                        "HORIZON CLIENT & DIAGNOSTICS",
+                        "Version information, crash telemetry and frame-rate diagnostics",
+                        SettingControl::SectionHeader("ABOUT", Icon::Terminal),
+                    ),
+                    (
+                        "Client version",
+                        "Horizon Android 26.3 • Native ARM64 Vector HUD",
+                        SettingControl::Button("Diagnostics ›", Action::SettingsCat(SettingsCategory::Diagnostics), false),
+                    ),
+                    (
+                        "Record gameplay performance",
+                        "Captures frame-time and chunk-build telemetry during Play (up to 30 min)",
+                        SettingControl::Toggle(self.catalog.config.record_performance, Action::RecordPerformance),
+                    ),
+                    (
+                        "Export raw performance data (.jsonl)",
+                        "Share or inspect recorded frame telemetry in Android Files",
+                        SettingControl::Button("Export JSONL", Action::ExportPerformance, false),
+                    ),
+                ];
+
+                ui.set_clip(Some([
+                    content_x - 2.0,
+                    list_top,
+                    content_w + 4.0,
+                    (list_bottom - list_top).max(1.0),
+                ]));
+                for (i, (title, sub, ctrl)) in rows.into_iter().enumerate() {
+                    let y = list_top + i as f32 * step_y - self.catalog.scroll;
+                    if y + card_h < list_top || y > list_bottom {
+                        continue;
+                    }
+                    draw_setting_card(
+                        ui,
+                        &mut self.targets,
+                        &mut self.list_targets,
+                        content_x,
+                        y,
+                        content_w,
+                        card_h,
+                        title,
+                        sub,
+                        ctrl,
+                    );
+                }
+                ui.set_clip(None);
+            }
+            SettingsCategory::Overview => {}
         }
     }
 
@@ -6324,6 +6701,7 @@ impl Launcher {
                     "theme_grad_mid" => &self.catalog.config.theme.gradient_mid_hex,
                     "theme_grad_end" => &self.catalog.config.theme.gradient_end_hex,
                     "installed_search" => &self.catalog.installed_query,
+                    "settings_search" => &self.catalog.settings_query,
                     "fm_rename" | "fm_new_folder" => &self.catalog.fm_input_text,
                     _ => &self.catalog.query,
                 };
@@ -6583,6 +6961,145 @@ impl Launcher {
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
                 self.catalog.status = "Theme reset to Horizon default (Obsidian Violet).".into();
+            }
+            Some(Action::SelectAccentPalette(idx)) => {
+                let hex = match idx {
+                    0 => "#38BDF8", // Cyan
+                    1 => "#34D399", // Emerald
+                    2 => "#FB7185", // Crimson
+                    3 => "#A78BFA", // Violet
+                    _ => "#FBBF24", // Amber
+                };
+                self.catalog.config.theme.custom_accent_hex = hex.into();
+                self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                self.anim.trigger_theme_pulse();
+                self.catalog.config.save(&self.home)?;
+            }
+            Some(Action::SelectBgStyle(style)) => {
+                self.catalog.config.theme.bg_style = (*style).to_owned();
+                self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
+                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                self.anim.trigger_theme_pulse();
+                self.catalog.config.save(&self.home)?;
+            }
+            Some(Action::GlassOpacityDelta(delta)) => {
+                self.catalog.config.theme.glass_opacity =
+                    (self.catalog.config.theme.glass_opacity + delta).clamp(0.30, 0.95);
+                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                self.anim.trigger_theme_pulse();
+                self.catalog.config.save(&self.home)?;
+            }
+            Some(Action::GlassBlurDelta(delta)) => {
+                self.catalog.config.theme.glass_blur =
+                    (self.catalog.config.theme.glass_blur + delta).clamp(0.0, 32.0);
+                horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                self.anim.trigger_theme_pulse();
+                self.catalog.config.save(&self.home)?;
+            }
+            Some(Action::ToggleKeepAlive) => {
+                self.catalog.config.keepalive_enabled = !self.catalog.config.keepalive_enabled;
+                self.catalog.config.save(&self.home)?;
+                self.catalog.status = if self.catalog.config.keepalive_enabled {
+                    "Background keep-alive enabled.".into()
+                } else {
+                    "Background keep-alive disabled.".into()
+                };
+            }
+            Some(Action::ResetCategory(cat)) => {
+                match cat {
+                    SettingsCategory::Appearance | SettingsCategory::Theme => {
+                        self.catalog.config.theme =
+                            horizon_client::ui_theme::LauncherThemeConfig::default();
+                        self.catalog.config.ui_scale_percent = 100;
+                        self.catalog.config.disable_launcher_animations = false;
+                        self.catalog.config.disable_game_animations = false;
+                        horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                    }
+                    SettingsCategory::EngineMemory | SettingsCategory::Video => {
+                        self.catalog.config.renderer = crate::catalog::RendererMode::Vulkan;
+                        self.catalog.config.render_scale = crate::display::RenderScale::new(100);
+                        self.catalog.config.worker_limit = 0;
+                        self.catalog.config.cache_budget_mib = 256;
+                        self.modify_game_settings(|s| {
+                            s.render_distance = 12;
+                            s.simulation_distance = 10;
+                            s.fov = 70.0;
+                            s.max_fps = 260;
+                            s.vsync = false;
+                        });
+                    }
+                    SettingsCategory::DownloadsKeepAlive => {
+                        self.catalog.config.keepalive_enabled = true;
+                        self.catalog.config.svc_enabled = true;
+                        self.catalog.config.svc_rnnoise = true;
+                    }
+                    SettingsCategory::Controls => {
+                        let game_home = self.catalog.config.game_home(&self.home);
+                        let touch_path = game_home.join("horizon-touch.json");
+                        let default_touch = horizon_client::touch::Settings::default();
+                        let _ = default_touch.save_to(&touch_path);
+                    }
+                    SettingsCategory::Storage => {
+                        self.catalog.config.cache_budget_mib = 256;
+                    }
+                    SettingsCategory::Experimental => {
+                        self.catalog.config.super_perf_mode = false;
+                        self.catalog.config.battery_perf_mode = false;
+                        self.catalog.config.max_fps_mode = false;
+                        self.catalog.config.zero_latency_touch = true;
+                        self.catalog.config.fast_chunk_upload = true;
+                        self.catalog.config.experimental_leaf_culling = false;
+                        self.catalog.config.svc_enabled = true;
+                        self.catalog.config.svc_rnnoise = true;
+                        self.catalog.config.apply_experimental_to_game(&self.home);
+                    }
+                    _ => {}
+                }
+                self.catalog.config.save(&self.home)?;
+                self.catalog.status = format!("Reset {} to defaults.", cat.title());
+            }
+            Some(Action::ExportAllSettings) => {
+                let backup_path = self.home.join("horizon-settings-backup.json");
+                if let Ok(json) = serde_json::to_string_pretty(&self.catalog.config) {
+                    if std::fs::write(&backup_path, json).is_ok() {
+                        self.catalog.status = "Settings exported to horizon-settings-backup.json".into();
+                    } else {
+                        self.catalog.status = "Failed to export settings file.".into();
+                    }
+                }
+            }
+            Some(Action::ImportAllSettings) => {
+                let backup_path = self.home.join("horizon-settings-backup.json");
+                if backup_path.is_file() {
+                    if let Ok(data) = std::fs::read(&backup_path) {
+                        if let Ok(cfg) = serde_json::from_slice::<crate::catalog::Config>(&data) {
+                            self.catalog.config = cfg;
+                            self.catalog.config.save(&self.home)?;
+                            horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                            self.catalog.status = "Settings restored from backup.".into();
+                        } else {
+                            self.catalog.status = "Invalid backup file format.".into();
+                        }
+                    }
+                } else {
+                    let _ = crate::documents::begin_into_dir(self.home.clone());
+                    self.catalog.status = "Select a settings JSON backup via File Picker.".into();
+                }
+            }
+            Some(Action::ClearSettingsSearch) => {
+                self.catalog.settings_query.clear();
+            }
+            Some(Action::ChooseImportBackground) => {
+                let bg_dir = self.home.join("backgrounds");
+                let _ = std::fs::create_dir_all(&bg_dir);
+                if let Err(e) = crate::documents::begin_into_dir(bg_dir) {
+                    self.catalog.status = e;
+                } else {
+                    self.catalog.config.theme.bg_style = "custom".into();
+                    self.catalog.config.save(&self.home)?;
+                    horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                }
             }
             Some(Action::SkipIntro) => {
                 self.anim.intro_done = true;
