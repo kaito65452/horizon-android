@@ -85,7 +85,9 @@ pub(crate) struct AnimState {
     pub last_page: Page,
     pub last_category: SettingsCategory,
     pub last_has_modal: bool,
+    pub nav_pill_x: f32,
     pub nav_pill_y: f32,
+    pub target_nav_x: f32,
     pub target_nav_y: f32,
     pub page_fade: f32,
     pub page_slide: f32,
@@ -106,7 +108,9 @@ impl Default for AnimState {
             last_page: Page::Play,
             last_category: SettingsCategory::Overview,
             last_has_modal: false,
+            nav_pill_x: 62.0,
             nav_pill_y: 62.0,
+            target_nav_x: 62.0,
             target_nav_y: 62.0,
             page_fade: 1.0,
             page_slide: 0.0,
@@ -140,6 +144,7 @@ impl AnimState {
             .clamp(0.001, 0.08);
         self.last_tick = now;
         self.target_nav_y = target_nav_y;
+        self.target_nav_x = target_nav_y;
 
         if horizon_client::ui_theme::motion::reduced_motion() {
             self.intro_done = true;
@@ -147,6 +152,7 @@ impl AnimState {
             self.last_category = category;
             self.last_has_modal = has_modal;
             self.nav_pill_y = target_nav_y;
+            self.nav_pill_x = target_nav_y;
             self.page_fade = 1.0;
             self.page_slide = 0.0;
             self.modal_anim = if has_modal { 1.0 } else { 0.0 };
@@ -182,6 +188,7 @@ impl AnimState {
 
         let speed = (dt * 14.0).min(1.0);
         self.nav_pill_y += (target_nav_y - self.nav_pill_y) * (dt * 18.0).min(1.0);
+        self.nav_pill_x = self.nav_pill_y;
         self.page_fade = (self.page_fade + dt * 7.5).min(1.0);
         self.page_slide *= (1.0 - speed).max(0.0);
         let modal_target = if has_modal { 1.0 } else { 0.0 };
@@ -395,6 +402,7 @@ pub(super) enum Action {
     ImportAllSettings,
     ClearSettingsSearch,
     ChooseImportBackground,
+    DismissStarlingNotice,
     // Intro & Installed / File Manager actions
     SkipIntro,
     SetInstalledSubTab(crate::catalog::InstalledSubTab),
@@ -1113,66 +1121,53 @@ impl Launcher {
         let active_th = horizon_client::ui_theme::active_theme();
         ui.draw_theme_background(0.0, 0.0, w, h, &active_th);
 
-        // ---- Top Header Bar (brand lockup ... account pill) ----
-        ui.horizon_logo(18.0, 12.0, 28.0);
+        // ---- Blaze Launcher Landscape Top Pill Tab Bar ----
+        let margin_x = 16.0;
+        let top_margin = 8.0;
+        let top_h = 42.0;
+
+        // 1. Left Brand Pill
+        let brand_x = margin_x;
+        let brand_y = top_margin;
+        let brand_w = 148.0;
+        ui.horizon_logo(brand_x + 4.0, brand_y + 8.0, 26.0);
+        ui.text(
+            Face::SemiBold,
+            15.0,
+            brand_x + 36.0,
+            brand_y + 4.0,
+            my3_text(),
+            "Blaze Launcher",
+        );
+        ui.text(
+            Face::Regular,
+            10.0,
+            brand_x + 36.0,
+            brand_y + 22.0,
+            my3_muted(),
+            "26.3 • Rust Engine",
+        );
+
+        // 2. Right Action Group (Account chip, GitHub link, Touch Control Editor, Profile selector)
         let account_name = self
             .login
             .profile
             .clone()
             .unwrap_or_else(|| self.catalog.config.name.clone());
-        let account_text_w = ui.measure(Face::Medium, 13.5, &account_name).min(136.0);
-        let pill_w = (account_text_w + 64.0).clamp(114.0, 204.0);
-        let pill_x = (w - 18.0 - pill_w).max(190.0);
-        let pill_y = 11.0;
+        let account_text_w = ui.measure(Face::Medium, 13.0, &account_name).min(110.0);
+        let pill_w = (account_text_w + 58.0).clamp(96.0, 160.0);
+        let pill_x = (w - margin_x - pill_w).max(brand_x + brand_w + 200.0);
+        let pill_y = top_margin + (top_h - 36.0) * 0.5;
         let pill_h = 36.0;
 
-        let eq_btn_rect = [pill_x - 44.0, pill_y, 36.0, pill_h];
-        ui.rounded(
-            eq_btn_rect[0],
-            eq_btn_rect[1],
-            eq_btn_rect[2],
-            eq_btn_rect[3],
-            pill_h * 0.5,
-            my3_surface(),
-        );
-        ui.border(
-            eq_btn_rect[0],
-            eq_btn_rect[1],
-            eq_btn_rect[2],
-            eq_btn_rect[3],
-            pill_h * 0.5,
-            my3_border(),
-        );
-        ui.icon(
-            Icon::MenuEquals,
-            eq_btn_rect[0] + 9.0,
-            eq_btn_rect[1] + 9.0,
-            18.0,
-            my3_accent(),
-        );
-        self.targets.push((eq_btn_rect, Action::OpenControlEditor));
-
-        let brand_w = (eq_btn_rect[0] - 66.0).max(70.0);
-        ui.text(Face::SemiBold, 16.0, 54.0, 10.0, my3_text(), "Horizon");
-        let version_line = format!("Android {}", crate::backend::VERSION);
-        let fitted_version = ui.fit_text(Face::Regular, 11.0, &version_line, brand_w);
-        ui.text(
-            Face::Regular,
-            11.0,
-            54.0,
-            30.0,
-            my3_muted(),
-            &fitted_version,
-        );
-
-        // Top-right Account Selector Pill with circular avatar head, username, and chevron.
+        // Account Avatar Pill
         ui.rounded(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, my3_surface());
         ui.border(pill_x, pill_y, pill_w, pill_h, pill_h * 0.5, my3_border());
-        ui.avatar_head_2d(pill_x + 6.0, pill_y + 4.0, 28.0, &account_name);
+        ui.avatar_head_2d(pill_x + 5.0, pill_y + 4.0, 28.0, &account_name);
         if self.login.signed_in {
-            ui.rounded(pill_x + 26.0, pill_y + 24.0, 9.0, 9.0, 4.5, my3_bg());
+            ui.rounded(pill_x + 25.0, pill_y + 24.0, 9.0, 9.0, 4.5, my3_bg());
             ui.rounded(
-                pill_x + 27.0,
+                pill_x + 26.0,
                 pill_y + 25.0,
                 7.0,
                 7.0,
@@ -1180,18 +1175,18 @@ impl Launcher {
                 color::hex(0x59D98E, 255),
             );
         }
-        let fitted_acct = ui.fit_text(Face::Medium, 13.5, &account_name, pill_w - 62.0);
+        let fitted_acct = ui.fit_text(Face::Medium, 13.0, &account_name, pill_w - 56.0);
         ui.text(
             Face::Medium,
-            13.5,
-            pill_x + 37.0,
+            13.0,
+            pill_x + 36.0,
             pill_y + 8.0,
             my3_text(),
             &fitted_acct,
         );
         ui.icon(
             Icon::ChevronDown,
-            pill_x + pill_w - 22.0,
+            pill_x + pill_w - 20.0,
             pill_y + 12.0,
             12.0,
             my3_muted(),
@@ -1199,24 +1194,104 @@ impl Launcher {
         self.targets
             .push(([pill_x, pill_y, pill_w, pill_h], Action::Account));
 
-        // ---- Left Vertical Navigation Rail + Smooth Gliding Active Pill ----
-        let sidebar_w = if w < 560.0 { 136.0 } else { 184.0 };
+        // GitHub Button
+        let git_w = 34.0;
+        let git_x = pill_x - 8.0 - git_w;
+        let git_y = pill_y;
+        ui.rounded(git_x, git_y, git_w, pill_h, pill_h * 0.5, my3_surface());
+        ui.border(git_x, git_y, git_w, pill_h, pill_h * 0.5, my3_border());
+        ui.icon(Icon::Share, git_x + 9.0, git_y + 10.0, 16.0, my3_muted());
+        self.targets
+            .push(([git_x, git_y, git_w, pill_h], Action::Repository));
+
+        // Touch Control Editor Button
+        let eq_btn_w = 34.0;
+        let eq_btn_x = git_x - 8.0 - eq_btn_w;
+        let eq_btn_y = pill_y;
         ui.rounded(
-            sidebar_w,
-            56.0,
-            1.0,
-            (h - 68.0).max(10.0),
-            0.0,
+            eq_btn_x,
+            eq_btn_y,
+            eq_btn_w,
+            pill_h,
+            pill_h * 0.5,
+            my3_surface(),
+        );
+        ui.border(
+            eq_btn_x,
+            eq_btn_y,
+            eq_btn_w,
+            pill_h,
+            pill_h * 0.5,
             my3_border(),
         );
-        let nav_start_y = 62.0;
-        let nav_step = ((h - nav_start_y - 14.0) / 6.0).clamp(36.0, 48.0);
-        let nav_h = (nav_step - 5.0).clamp(32.0, 41.0);
-        let selected_idx = Page::ALL
-            .iter()
-            .position(|p| *p == self.catalog.page)
-            .unwrap_or(0);
-        let target_nav_y = nav_start_y + selected_idx as f32 * nav_step;
+        ui.icon(
+            Icon::MenuEquals,
+            eq_btn_x + 8.0,
+            eq_btn_y + 9.0,
+            18.0,
+            my3_accent(),
+        );
+        self.targets.push((
+            [eq_btn_x, eq_btn_y, eq_btn_w, pill_h],
+            Action::OpenControlEditor,
+        ));
+
+        // Profile Selector Pill
+        let prof_label = format!("Profile {} v", self.catalog.config.profile + 1);
+        let prof_w = (ui.measure(Face::Medium, 12.0, &prof_label) + 20.0).clamp(84.0, 108.0);
+        let prof_x = eq_btn_x - 8.0 - prof_w;
+        let prof_y = pill_y;
+        ui.rounded(prof_x, prof_y, prof_w, pill_h, pill_h * 0.5, my3_surface());
+        ui.border(prof_x, prof_y, prof_w, pill_h, pill_h * 0.5, my3_border());
+        ui.centered_fit(
+            Face::Medium,
+            12.0,
+            [prof_x, prof_y, prof_w, pill_h],
+            my3_text(),
+            &prof_label,
+        );
+        self.targets
+            .push(([prof_x, prof_y, prof_w, pill_h], Action::Profile));
+
+        // 3. Center Pill Tab Deck (5 tabs: Home, Browse, Manager, Skin, Settings)
+        let deck_left = brand_x + brand_w + 10.0;
+        let deck_right = prof_x - 10.0;
+        let avail_deck_w = (deck_right - deck_left).max(180.0);
+        let deck_w = avail_deck_w.min(410.0);
+        let deck_x = deck_left + (avail_deck_w - deck_w) * 0.5;
+        let deck_y = top_margin + (top_h - 36.0) * 0.5;
+        let deck_h = 36.0;
+
+        ui.rounded(deck_x, deck_y, deck_w, deck_h, deck_h * 0.5, my3_surface());
+        ui.border(deck_x, deck_y, deck_w, deck_h, deck_h * 0.5, my3_border());
+
+        let tabs: [(Page, &'static str, Icon); 5] = [
+            (Page::Play, "Home", Icon::Play),
+            (
+                if matches!(self.catalog.page, Page::Mods | Page::Packs | Page::Shaders) {
+                    self.catalog.page
+                } else {
+                    Page::Mods
+                },
+                "Browse",
+                Icon::Mods,
+            ),
+            (Page::Installed, "Manager", Icon::Folder),
+            (Page::Skins, "Skin", Icon::Check),
+            (Page::Settings, "Settings", Icon::Settings),
+        ];
+
+        let selected_tab_idx = match self.catalog.page {
+            Page::Play => 0,
+            Page::Mods | Page::Packs | Page::Shaders => 1,
+            Page::Installed => 2,
+            Page::Skins => 3,
+            Page::Settings => 4,
+        };
+
+        let tab_w = (deck_w - 6.0) / 5.0;
+        let target_nav_x = deck_x + 3.0 + selected_tab_idx as f32 * tab_w;
+
         let has_any_modal = self.catalog.project_modal.is_some()
             || self.catalog.fm_modal.is_some()
             || self.chooser.is_some()
@@ -1225,51 +1300,60 @@ impl Launcher {
         self.anim.step(
             self.catalog.page,
             self.catalog.settings_category,
-            target_nav_y,
+            target_nav_x,
             has_any_modal,
             self.catalog.sections,
         );
 
-        // Draw gliding MY3 active indicator pill
+        // Draw gliding active indicator pill
+        let pill_glide_x = self.anim.nav_pill_y.clamp(
+            deck_x + 2.0,
+            (deck_x + deck_w - tab_w - 2.0).max(deck_x + 2.0),
+        );
         ui.rounded(
-            10.0,
-            self.anim.nav_pill_y,
-            sidebar_w - 20.0,
-            nav_h,
-            nav_h * 0.5,
+            pill_glide_x,
+            deck_y + 3.0,
+            tab_w,
+            deck_h - 6.0,
+            (deck_h - 6.0) * 0.5,
             my3_nav_active(),
         );
 
-        for (i, page) in Page::ALL.iter().enumerate() {
-            let nx = 10.0;
-            let ny = nav_start_y + i as f32 * nav_step;
-            let nw = sidebar_w - 20.0;
-            let selected = *page == self.catalog.page;
+        for (i, (page_target, name, icon)) in tabs.into_iter().enumerate() {
+            let tx = deck_x + 3.0 + i as f32 * tab_w;
+            let ty = deck_y + 3.0;
+            let th = deck_h - 6.0;
+            let selected = i == selected_tab_idx;
             let fg = if selected { my3_text() } else { my3_muted() };
-            ui.icon(
-                page_icon(*page),
-                nx + 14.0,
-                ny + (nav_h - 17.0) * 0.5,
-                17.0,
-                fg,
-            );
-            let label = ui.fit_text(Face::Medium, 13.5, page.name(), nw - 42.0);
-            ui.text(
-                Face::Medium,
-                13.5,
-                nx + 39.0,
-                ny + (nav_h - 19.0) * 0.5,
-                fg,
-                &label,
-            );
+
+            if tab_w >= 62.0 {
+                ui.icon(icon, tx + 8.0, ty + (th - 14.0) * 0.5, 14.0, fg);
+                let label = ui.fit_text(Face::Medium, 12.0, name, tab_w - 26.0);
+                ui.text(
+                    Face::Medium,
+                    12.0,
+                    tx + 24.0,
+                    ty + (th - 16.0) * 0.5,
+                    fg,
+                    &label,
+                );
+            } else {
+                ui.icon(
+                    icon,
+                    tx + (tab_w - 15.0) * 0.5,
+                    ty + (th - 15.0) * 0.5,
+                    15.0,
+                    fg,
+                );
+            }
             self.targets
-                .push(([nx, ny, nw, nav_h], Action::Page(*page)));
+                .push(([tx, ty, tab_w, th], Action::Page(page_target)));
         }
 
         // ---- Main Content Area (with smooth slide transition offset) ----
-        let content_x = sidebar_w + 22.0;
-        let content_w = (w - content_x - 22.0).max(160.0);
-        let compact = content_w < 430.0;
+        let content_x = 16.0;
+        let content_w = (w - 32.0).max(160.0);
+        let compact = content_w < 500.0;
         let page = self.catalog.page;
         let slide_y = self.anim.page_slide;
 
@@ -1399,126 +1483,267 @@ impl Launcher {
                     Action::CancelInstall,
                 );
             } else {
-                let card_y = 66.0 + slide_y;
-                let card_h = (h - 178.0).clamp(220.0, 280.0);
-                ui.rounded(content_x, card_y, content_w, card_h, 20.0, my3_surface());
-                ui.border(content_x, card_y, content_w, card_h, 20.0, my3_border());
+                let content_top = 58.0;
+                let content_h = (h - content_top - 12.0).max(240.0);
+                let row_gap = 10.0;
+                let avail_h = (content_h - 2.0 * row_gap).max(180.0);
+                let row1_h = (avail_h * 0.46).clamp(115.0, 240.0);
+                let row2_h = (avail_h * 0.20).clamp(46.0, 68.0);
+                let row3_h = (avail_h - row1_h - row2_h).max(64.0);
 
-                ui.text(
-                    Face::SemiBold,
-                    23.0,
-                    content_x + 22.0,
-                    card_y + 18.0,
-                    my3_text(),
-                    if installed {
-                        "Ready to play"
-                    } else if compact {
-                        "Your Java worlds"
-                    } else {
-                        "Your Java worlds, on Android"
-                    },
-                );
-                ui.text(
-                    Face::Regular,
-                    14.0,
-                    content_x + 22.0,
-                    card_y + 52.0,
-                    my3_muted(),
-                    &format!(
-                        "Minecraft 26.3 • Profile {} • {}",
-                        self.catalog.config.profile + 1,
-                        self.catalog.config.renderer.label()
-                    ),
-                );
+                let row1_y = content_top + slide_y;
+                let row2_y = row1_y + row1_h + row_gap;
+                let row3_y = row2_y + row2_h + row_gap;
 
-                ui.text(
-                    Face::SemiBold,
-                    15.0,
-                    content_x + 22.0,
-                    card_y + 84.0,
-                    my3_text(),
-                    "Horizon Android is becoming Starling",
+                // ========================================================
+                // ROW 1 — Hero Banner (~46% height)
+                // ========================================================
+                ui.rounded(content_x, row1_y, content_w, row1_h, 20.0, my3_surface());
+                ui.border(content_x, row1_y, content_w, row1_h, 20.0, my3_border());
+
+                // Top-right Engine Badge
+                let engine_badge = format!(
+                    "26.3 • Blaze Engine • {}",
+                    self.catalog.config.renderer.label()
                 );
-                let notice = "Some Horizon Android features are still being transferred and merged. Export your worlds through Android Files (SAF) before moving.";
-                let mut line_y = card_y + 108.0;
-                let font_size = 11.5;
-                let mut line = String::new();
-                for word in notice.split_whitespace() {
-                    let candidate = if line.is_empty() {
-                        word.to_owned()
-                    } else {
-                        format!("{line} {word}")
-                    };
-                    if !line.is_empty()
-                        && ui.measure(Face::Regular, font_size, &candidate) > content_w - 44.0
-                    {
-                        ui.text(
-                            Face::Regular,
-                            font_size,
-                            content_x + 22.0,
-                            line_y,
-                            my3_muted(),
-                            &line,
-                        );
-                        line_y += 15.0;
-                        line.clear();
-                    }
-                    if !line.is_empty() {
-                        line.push(' ');
-                    }
-                    line.push_str(word);
-                }
-                if !line.is_empty() {
-                    ui.text(
-                        Face::Regular,
-                        font_size,
-                        content_x + 22.0,
-                        line_y,
-                        my3_muted(),
-                        &line,
+                let badge_w =
+                    (ui.measure(Face::Medium, 11.0, &engine_badge) + 24.0).min(content_w * 0.45);
+                let badge_x = content_x + content_w - badge_w - 14.0;
+                let badge_y = row1_y + 12.0;
+                ui.rounded(badge_x, badge_y, badge_w, 26.0, 13.0, my3_surface_high());
+                ui.border(badge_x, badge_y, badge_w, 26.0, 13.0, my3_border());
+                ui.centered_fit(
+                    Face::Medium,
+                    11.0,
+                    [badge_x, badge_y, badge_w, 26.0],
+                    my3_accent(),
+                    &engine_badge,
+                );
+                self.targets.push((
+                    [badge_x, badge_y, badge_w, 26.0],
+                    Action::Page(Page::Settings),
+                ));
+
+                // Dismissible Starling Migration Notice (if not dismissed)
+                if !self.catalog.starling_notice_dismissed {
+                    let notice_x = content_x + 18.0;
+                    let notice_y = row1_y + 12.0;
+                    let notice_w = (badge_x - notice_x - 12.0).max(180.0);
+                    let notice_h = (row1_h - 66.0).clamp(40.0, 60.0);
+
+                    ui.rounded(
+                        notice_x,
+                        notice_y,
+                        notice_w,
+                        notice_h,
+                        12.0,
+                        my3_surface_high(),
                     );
+                    ui.border(notice_x, notice_y, notice_w, notice_h, 12.0, my3_border());
+
+                    ui.text(
+                        Face::SemiBold,
+                        12.0,
+                        notice_x + 10.0,
+                        notice_y + 5.0,
+                        my3_text(),
+                        "Horizon Android is becoming Starling",
+                    );
+
+                    let sub_btn_w = ((notice_w - 56.0) * 0.5).clamp(80.0, 130.0);
+                    button(
+                        &mut ui,
+                        &mut self.targets,
+                        [notice_x + 10.0, notice_y + 24.0, sub_btn_w, 26.0],
+                        "Download Starling",
+                        Action::StarlingDownload,
+                        false,
+                    );
+                    button(
+                        &mut ui,
+                        &mut self.targets,
+                        [
+                            notice_x + 16.0 + sub_btn_w,
+                            notice_y + 24.0,
+                            sub_btn_w,
+                            26.0,
+                        ],
+                        "Export worlds (SAF)",
+                        Action::WorldFiles,
+                        false,
+                    );
+
+                    // Dismiss "X" button
+                    let close_x = notice_x + notice_w - 24.0;
+                    let close_y = notice_y + 6.0;
+                    ui.icon(Icon::Close, close_x, close_y, 14.0, my3_muted());
+                    self.targets.push((
+                        [close_x - 4.0, close_y - 4.0, 22.0, 22.0],
+                        Action::DismissStarlingNotice,
+                    ));
                 }
-                let migration_y = line_y + 24.0;
-                let migration_w = (content_w - 52.0) * 0.5;
-                button(
-                    &mut ui,
-                    &mut self.targets,
-                    [content_x + 22.0, migration_y, migration_w, 34.0],
-                    "Download Starling",
-                    Action::StarlingDownload,
-                    false,
+
+                // Bottom-left Display Title
+                let title_x = content_x + 18.0;
+                let title_y = row1_y + row1_h - 48.0;
+                ui.text(
+                    Face::SemiBold,
+                    22.0,
+                    title_x,
+                    title_y,
+                    my3_text(),
+                    "MINECRAFT",
                 );
-                button(
-                    &mut ui,
-                    &mut self.targets,
-                    [
-                        content_x + 30.0 + migration_w,
-                        migration_y,
-                        migration_w,
-                        34.0,
-                    ],
-                    "Export worlds (SAF)",
-                    Action::WorldFiles,
-                    false,
+                ui.text(
+                    Face::Medium,
+                    10.0,
+                    title_x,
+                    title_y + 24.0,
+                    my3_muted(),
+                    "PLAY WITHOUT LIMITS • YOUR JAVA WORLDS ON ANDROID",
                 );
-                let btn_y = (h - 92.0).max(card_y + card_h + 12.0);
-                let play_w = content_w.min(256.0);
+
+                // Bottom-right Capability Pills ("FAST", "STABLE", "CUSTOMIZABLE")
+                let cap_pills = [
+                    ("FAST", my3_accent()),
+                    ("STABLE", color::hex(0x34D399, 255)),
+                    ("CUSTOMIZABLE", color::hex(0xA78BFA, 255)),
+                ];
+                let mut pill_right = content_x + content_w - 14.0;
+                let cap_y = row1_y + row1_h - 30.0;
+                let cap_h = 22.0;
+                for (cap_label, cap_col) in cap_pills.into_iter().rev() {
+                    let pw = ui.measure(Face::Medium, 10.0, cap_label) + 16.0;
+                    let px = pill_right - pw;
+                    ui.rounded(px, cap_y, pw, cap_h, 11.0, my3_surface_high());
+                    ui.border(px, cap_y, pw, cap_h, 11.0, my3_border());
+                    ui.centered_fit(
+                        Face::Medium,
+                        10.0,
+                        [px, cap_y, pw, cap_h],
+                        cap_col,
+                        cap_label,
+                    );
+                    pill_right = px - 6.0;
+                }
+
+                // ========================================================
+                // ROW 2 — Profile & Primary Action Deck (~20% height)
+                // ========================================================
+                let gap = 10.0;
+                let prof_card_w = (content_w * 0.38).clamp(140.0, 260.0);
+                let edit_btn_w = (content_w * 0.14).clamp(64.0, 100.0);
+                let play_btn_w = content_w - prof_card_w - edit_btn_w - 2.0 * gap;
+
+                // Left: Selected Profile Card
+                let prof_x = content_x;
+                ui.rounded(prof_x, row2_y, prof_card_w, row2_h, 16.0, my3_surface());
+                ui.border(prof_x, row2_y, prof_card_w, row2_h, 16.0, my3_border());
+                let icon_size = (row2_h - 16.0).clamp(24.0, 32.0);
+                ui.rounded(
+                    prof_x + 8.0,
+                    row2_y + (row2_h - icon_size) * 0.5,
+                    icon_size,
+                    icon_size,
+                    8.0,
+                    my3_surface_high(),
+                );
+                ui.icon(
+                    Icon::Gamepad,
+                    prof_x + 8.0 + (icon_size - 16.0) * 0.5,
+                    row2_y + (row2_h - 16.0) * 0.5,
+                    16.0,
+                    my3_accent(),
+                );
+                ui.text(
+                    Face::Medium,
+                    9.0,
+                    prof_x + icon_size + 14.0,
+                    row2_y + 8.0,
+                    my3_muted(),
+                    "SELECTED PROFILE",
+                );
+                let prof_name = format!("Profile {} v", self.catalog.config.profile + 1);
+                ui.text(
+                    Face::SemiBold,
+                    13.5,
+                    prof_x + icon_size + 14.0,
+                    row2_y + 22.0,
+                    my3_text(),
+                    &prof_name,
+                );
+                ui.icon(
+                    Icon::ChevronDown,
+                    prof_x + prof_card_w - 18.0,
+                    row2_y + (row2_h - 12.0) * 0.5,
+                    12.0,
+                    my3_muted(),
+                );
+                self.targets
+                    .push(([prof_x, row2_y, prof_card_w, row2_h], Action::Profile));
+
+                // Center: EDIT Button
+                let edit_x = prof_x + prof_w + gap;
+                ui.rounded(edit_x, row2_y, edit_btn_w, row2_h, 16.0, my3_surface());
+                ui.border(edit_x, row2_y, edit_btn_w, row2_h, 16.0, my3_border());
+                ui.icon(
+                    Icon::Pencil,
+                    edit_x + 12.0,
+                    row2_y + (row2_h - 14.0) * 0.5,
+                    14.0,
+                    my3_accent(),
+                );
+                ui.text(
+                    Face::SemiBold,
+                    13.0,
+                    edit_x + 30.0,
+                    row2_y + (row2_h - 16.0) * 0.5,
+                    my3_text(),
+                    "EDIT",
+                );
+                self.targets.push((
+                    [edit_x, row2_y, edit_btn_w, row2_h],
+                    Action::Page(Page::Skins),
+                ));
+
+                // Right: Primary Play / Download Button
+                let play_x = edit_x + edit_btn_w + gap;
                 let is_launching = self.launching || self.session_worker.is_some();
                 if is_launching && installed {
-                    let radius = 19.0;
-                    ui.rounded(content_x, btn_y, play_w, 46.0, radius, my3_accent_soft());
-                    ui.stroke_rounded(content_x, btn_y, play_w, 46.0, radius, 1.6, my3_accent());
-                    let bar_w = (play_w - 28.0).max(40.0);
-                    let bar_x = content_x + 14.0;
-                    let bar_y = btn_y + 34.0;
-                    ui.rounded(bar_x, bar_y, bar_w, 5.0, 2.5, my3_track());
+                    let radius = 16.0;
+                    ui.rounded(
+                        play_x,
+                        row2_y,
+                        play_btn_w,
+                        row2_h,
+                        radius,
+                        my3_accent_soft(),
+                    );
+                    ui.stroke_rounded(
+                        play_x,
+                        row2_y,
+                        play_btn_w,
+                        row2_h,
+                        radius,
+                        1.6,
+                        my3_accent(),
+                    );
+                    let bar_w = (play_btn_w - 28.0).max(40.0);
+                    let bar_x = play_x + 14.0;
+                    let bar_y = row2_y + row2_h - 10.0;
+                    ui.rounded(bar_x, bar_y, bar_w, 4.0, 2.0, my3_track());
                     let sw = (bar_w * 0.36).clamp(24.0, bar_w);
                     let sx = bar_x + (bar_w - sw) * self.anim.shimmer_phase.clamp(0.0, 1.0);
-                    ui.rounded(sx, bar_y, sw, 5.0, 2.5, my3_accent());
+                    ui.rounded(sx, bar_y, sw, 4.0, 2.0, my3_accent());
                     ui.centered_fit(
                         Face::SemiBold,
                         15.0,
-                        [content_x + 12.0, btn_y + 4.0, play_w - 24.0, 26.0],
+                        [
+                            play_x + 12.0,
+                            row2_y + 4.0,
+                            play_btn_w - 24.0,
+                            row2_h - 16.0,
+                        ],
                         my3_text(),
                         "Launching...",
                     );
@@ -1526,7 +1751,7 @@ impl Launcher {
                     button(
                         &mut ui,
                         &mut self.targets,
-                        [content_x, btn_y, play_w, 46.0],
+                        [play_x, row2_y, play_btn_w, row2_h],
                         if installed {
                             "Play Minecraft 26.3"
                         } else if self.error.is_some() {
@@ -1538,16 +1763,119 @@ impl Launcher {
                         true,
                     );
                 }
-                if content_w > 390.0 && !is_launching {
-                    button(
-                        &mut ui,
-                        &mut self.targets,
-                        [content_x + play_w + 12.0, btn_y, 134.0, 46.0],
-                        &format!("Profile {} v", self.catalog.config.profile + 1),
-                        Action::Profile,
-                        false,
+
+                // ========================================================
+                // ROW 3 — Two Shortcut Cards (~34% height)
+                // ========================================================
+                let card_w = (content_w - gap) * 0.5;
+
+                // Bottom Left: BROWSE RESOURCES Card
+                let left_x = content_x;
+                ui.rounded(left_x, row3_y, card_w, row3_h, 16.0, my3_surface());
+                ui.border(left_x, row3_y, card_w, row3_h, 16.0, my3_border());
+                let c_icon_sz = (row3_h - 16.0).clamp(28.0, 36.0);
+                ui.rounded(
+                    left_x + 10.0,
+                    row3_y + (row3_h - c_icon_sz) * 0.5,
+                    c_icon_sz,
+                    c_icon_sz,
+                    10.0,
+                    my3_surface_high(),
+                );
+                ui.icon(
+                    Icon::Mods,
+                    left_x + 10.0 + (c_icon_sz - 18.0) * 0.5,
+                    row3_y + (row3_h - 18.0) * 0.5,
+                    18.0,
+                    my3_accent(),
+                );
+                ui.text(
+                    Face::SemiBold,
+                    13.5,
+                    left_x + c_icon_sz + 18.0,
+                    row3_y + 10.0,
+                    my3_text(),
+                    "BROWSE RESOURCES",
+                );
+                ui.text(
+                    Face::Regular,
+                    10.5,
+                    left_x + c_icon_sz + 18.0,
+                    row3_y + 26.0,
+                    my3_muted(),
+                    "Mods • Resource Packs • Shaders",
+                );
+                if row3_h >= 68.0 {
+                    ui.text(
+                        Face::Regular,
+                        9.5,
+                        left_x + c_icon_sz + 18.0,
+                        row3_y + 42.0,
+                        my3_muted(),
+                        "100 Horizon mods available (playhorizon.dev/mods)",
                     );
                 }
+                ui.icon(
+                    Icon::ArrowRight,
+                    left_x + card_w - 20.0,
+                    row3_y + (row3_h - 14.0) * 0.5,
+                    14.0,
+                    my3_muted(),
+                );
+                self.targets
+                    .push(([left_x, row3_y, card_w, row3_h], Action::Page(Page::Mods)));
+
+                // Bottom Right: MANAGER Card
+                let right_x = content_x + card_w + gap;
+                ui.rounded(right_x, row3_y, card_w, row3_h, 16.0, my3_surface());
+                ui.border(right_x, row3_y, card_w, row3_h, 16.0, my3_border());
+                ui.rounded(
+                    right_x + 10.0,
+                    row3_y + (row3_h - c_icon_sz) * 0.5,
+                    c_icon_sz,
+                    c_icon_sz,
+                    10.0,
+                    my3_surface_high(),
+                );
+                ui.icon(
+                    Icon::Folder,
+                    right_x + 10.0 + (c_icon_sz - 18.0) * 0.5,
+                    row3_y + (row3_h - 18.0) * 0.5,
+                    18.0,
+                    color::hex(0xF59E0B, 255),
+                );
+                ui.text(
+                    Face::SemiBold,
+                    13.5,
+                    right_x + c_icon_sz + 18.0,
+                    row3_y + 10.0,
+                    my3_text(),
+                    "MANAGER",
+                );
+                ui.text(
+                    Face::Regular,
+                    10.5,
+                    right_x + c_icon_sz + 18.0,
+                    row3_y + 26.0,
+                    my3_muted(),
+                    "Manage Installed Mods, Packs, Worlds & SAF Export",
+                );
+
+                let saf_w = 130.0;
+                let saf_x = right_x + card_w - saf_w - 10.0;
+                let saf_y = row3_y + (row3_h - 26.0) * 0.5;
+                button(
+                    &mut ui,
+                    &mut self.targets,
+                    [saf_x, saf_y, saf_w, 26.0],
+                    "Export worlds (SAF)",
+                    Action::WorldFiles,
+                    false,
+                );
+                self.targets.push((
+                    [right_x, row3_y, card_w - saf_w - 14.0, row3_h],
+                    Action::Page(Page::Installed),
+                ));
             }
         } else if page == Page::Skins {
             self.wardrobe.draw(
@@ -3781,7 +4109,11 @@ impl Launcher {
         let bottom_y = h - 28.0;
         let panel_h = (bottom_y - top_y).max(120.0);
 
-        let rail_w = if compact { 160.0 } else { (content_w * 0.28).clamp(160.0, 240.0) };
+        let rail_w = if compact {
+            160.0
+        } else {
+            (content_w * 0.28).clamp(160.0, 240.0)
+        };
         let panel_x = content_x + rail_w + 12.0;
         let panel_w = (content_w - rail_w - 12.0).max(180.0);
 
@@ -3803,13 +4135,25 @@ impl Launcher {
 
         let rail_items: [(SettingsCategory, Icon, &str); 8] = [
             (SettingsCategory::Appearance, Icon::Settings, "Appearance"),
-            (SettingsCategory::EngineMemory, Icon::Monitor, "Engine & Memory"),
-            (SettingsCategory::DownloadsKeepAlive, Icon::Installed, "Downloads & Keep-alive"),
+            (
+                SettingsCategory::EngineMemory,
+                Icon::Monitor,
+                "Engine & Memory",
+            ),
+            (
+                SettingsCategory::DownloadsKeepAlive,
+                Icon::Installed,
+                "Downloads & Keep-alive",
+            ),
             (SettingsCategory::Controls, Icon::Gamepad, "Controls"),
             (SettingsCategory::Account, Icon::MicrosoftGrid, "Account"),
             (SettingsCategory::Storage, Icon::Folder, "Storage"),
             (SettingsCategory::Experimental, Icon::Flask, "Experimental"),
-            (SettingsCategory::About, Icon::Terminal, "About & Diagnostics"),
+            (
+                SettingsCategory::About,
+                Icon::Terminal,
+                "About & Diagnostics",
+            ),
         ];
 
         let item_h = 36.0;
@@ -3819,30 +4163,58 @@ impl Launcher {
         for (i, (c_enum, icon, label)) in rail_items.into_iter().enumerate() {
             let iy = items_top + i as f32 * (item_h + item_gap);
             let is_selected = active_cat == c_enum
-                || (active_cat == SettingsCategory::Theme && c_enum == SettingsCategory::Appearance)
-                || (active_cat == SettingsCategory::Video && c_enum == SettingsCategory::EngineMemory)
-                || (active_cat == SettingsCategory::Diagnostics && c_enum == SettingsCategory::About);
+                || (active_cat == SettingsCategory::Theme
+                    && c_enum == SettingsCategory::Appearance)
+                || (active_cat == SettingsCategory::Video
+                    && c_enum == SettingsCategory::EngineMemory)
+                || (active_cat == SettingsCategory::Diagnostics
+                    && c_enum == SettingsCategory::About);
             let r = [content_x + 8.0, iy, rail_w - 16.0, item_h];
             self.targets.push((r, Action::SettingsCat(c_enum)));
 
             if is_selected {
                 ui.rounded(r[0], r[1], r[2], r[3], 10.0, my3_nav_active());
                 ui.border(r[0], r[1], r[2], r[3], 10.0, my3_accent());
-                ui.rounded(r[0] + 3.0, r[1] + 6.0, 3.0, item_h - 12.0, 1.5, my3_accent());
+                ui.rounded(
+                    r[0] + 3.0,
+                    r[1] + 6.0,
+                    3.0,
+                    item_h - 12.0,
+                    1.5,
+                    my3_accent(),
+                );
             }
 
-            let icon_c = if is_selected { my3_accent() } else { my3_muted() };
-            ui.icon(icon, r[0] + 10.0, r[1] + (item_h - 16.0) * 0.5, 16.0, icon_c);
+            let icon_c = if is_selected {
+                my3_accent()
+            } else {
+                my3_muted()
+            };
+            ui.icon(
+                icon,
+                r[0] + 10.0,
+                r[1] + (item_h - 16.0) * 0.5,
+                16.0,
+                icon_c,
+            );
 
             let text_c = if is_selected { my3_text() } else { my3_muted() };
             let fit_lbl = ui.fit_text(
-                if is_selected { Face::SemiBold } else { Face::Regular },
+                if is_selected {
+                    Face::SemiBold
+                } else {
+                    Face::Regular
+                },
                 12.0,
                 label,
                 (rail_w - 52.0).max(40.0),
             );
             ui.text(
-                if is_selected { Face::SemiBold } else { Face::Regular },
+                if is_selected {
+                    Face::SemiBold
+                } else {
+                    Face::Regular
+                },
                 12.0,
                 r[0] + 32.0,
                 r[1] + (item_h - 14.0) * 0.5,
@@ -3862,14 +4234,36 @@ impl Launcher {
         let search_w = (panel_w - 240.0).clamp(100.0, 220.0);
         let search_r = [panel_x + 12.0, bar_y, search_w, bar_h];
         let is_search_active = self.catalog.editing == Some("settings_search");
-        ui.rounded(search_r[0], search_r[1], search_r[2], search_r[3], 8.0, my3_card_bg());
-        ui.border(
-            search_r[0], search_r[1], search_r[2], search_r[3], 8.0,
-            if is_search_active { my3_accent() } else { my3_border() },
+        ui.rounded(
+            search_r[0],
+            search_r[1],
+            search_r[2],
+            search_r[3],
+            8.0,
+            my3_card_bg(),
         );
-        self.targets.push((search_r, Action::Field("settings_search")));
+        ui.border(
+            search_r[0],
+            search_r[1],
+            search_r[2],
+            search_r[3],
+            8.0,
+            if is_search_active {
+                my3_accent()
+            } else {
+                my3_border()
+            },
+        );
+        self.targets
+            .push((search_r, Action::Field("settings_search")));
 
-        ui.icon(Icon::Search, search_r[0] + 8.0, search_r[1] + 8.0, 16.0, my3_muted());
+        ui.icon(
+            Icon::Search,
+            search_r[0] + 8.0,
+            search_r[1] + 8.0,
+            16.0,
+            my3_muted(),
+        );
 
         let query_text = if self.catalog.settings_query.is_empty() {
             "Search settings..."
@@ -3882,11 +4276,24 @@ impl Launcher {
             my3_text()
         };
         let fit_q = ui.fit_text(Face::Regular, 12.0, query_text, (search_w - 56.0).max(30.0));
-        ui.text(Face::Regular, 12.0, search_r[0] + 28.0, search_r[1] + 9.0, query_color, &fit_q);
+        ui.text(
+            Face::Regular,
+            12.0,
+            search_r[0] + 28.0,
+            search_r[1] + 9.0,
+            query_color,
+            &fit_q,
+        );
 
         if !self.catalog.settings_query.is_empty() {
             let clear_r = [search_r[0] + search_w - 24.0, bar_y + 6.0, 20.0, 20.0];
-            ui.icon(Icon::Close, clear_r[0] + 2.0, clear_r[1] + 2.0, 16.0, my3_muted());
+            ui.icon(
+                Icon::Close,
+                clear_r[0] + 2.0,
+                clear_r[1] + 2.0,
+                16.0,
+                my3_muted(),
+            );
             self.targets.push((clear_r, Action::ClearSettingsSearch));
         }
 
@@ -3895,13 +4302,34 @@ impl Launcher {
         let btns_x = panel_x + panel_w - (btn_w * 3.0 + btn_gap * 2.0 + 12.0);
 
         let reset_r = [btns_x, bar_y, btn_w, bar_h];
-        button(ui, &mut self.targets, reset_r, "Reset", Action::ResetCategory(active_cat), false);
+        button(
+            ui,
+            &mut self.targets,
+            reset_r,
+            "Reset",
+            Action::ResetCategory(active_cat),
+            false,
+        );
 
         let export_r = [btns_x + btn_w + btn_gap, bar_y, btn_w, bar_h];
-        button(ui, &mut self.targets, export_r, "Export", Action::ExportAllSettings, false);
+        button(
+            ui,
+            &mut self.targets,
+            export_r,
+            "Export",
+            Action::ExportAllSettings,
+            false,
+        );
 
         let import_r = [btns_x + (btn_w + btn_gap) * 2.0, bar_y, btn_w, bar_h];
-        button(ui, &mut self.targets, import_r, "Import", Action::ImportAllSettings, false);
+        button(
+            ui,
+            &mut self.targets,
+            import_r,
+            "Import",
+            Action::ImportAllSettings,
+            false,
+        );
 
         let list_top = top_y + 48.0;
         let list_bottom = bottom_y - 10.0;
@@ -3947,7 +4375,8 @@ impl Launcher {
                 let blur_label = format!("{:.0} px", theme_cfg.glass_blur);
                 let ui_scale_str = format!("{} v", c.ui_scale_label());
 
-                let next_palette_action = match theme_cfg.custom_accent_hex.to_uppercase().as_str() {
+                let next_palette_action = match theme_cfg.custom_accent_hex.to_uppercase().as_str()
+                {
                     "#38BDF8" => Action::SelectAccentPalette(1),
                     "#F59E0B" => Action::SelectAccentPalette(2),
                     "#10B981" => Action::SelectAccentPalette(3),
@@ -3980,17 +4409,29 @@ impl Launcher {
                     (
                         "Import custom background",
                         "Select background image or animation via system Storage Access Framework",
-                        SettingControl::Button("Choose File", Action::ChooseImportBackground, false),
+                        SettingControl::Button(
+                            "Choose File",
+                            Action::ChooseImportBackground,
+                            false,
+                        ),
                     ),
                     (
                         "Glassmorphism surface opacity",
                         "Controls card background transparency level (30% to 95%)",
-                        SettingControl::Stepper(&opacity_label, Action::GlassOpacityDelta(-0.05), Action::GlassOpacityDelta(0.05)),
+                        SettingControl::Stepper(
+                            &opacity_label,
+                            Action::GlassOpacityDelta(-0.05),
+                            Action::GlassOpacityDelta(0.05),
+                        ),
                     ),
                     (
                         "Glassmorphism blur radius",
                         "Adjusts frosted glass backdrop filter blur strength (0px to 32px)",
-                        SettingControl::Stepper(&blur_label, Action::GlassBlurDelta(-2.0), Action::GlassBlurDelta(2.0)),
+                        SettingControl::Stepper(
+                            &blur_label,
+                            Action::GlassBlurDelta(-2.0),
+                            Action::GlassBlurDelta(2.0),
+                        ),
                     ),
                     (
                         "Launcher UI scale (Phone DPI)",
@@ -4000,17 +4441,27 @@ impl Launcher {
                     (
                         "Disable launcher animations",
                         "Turn off page transitions, nav rail slides, shimmer & modal animations in launcher",
-                        SettingControl::Toggle(c.disable_launcher_animations, Action::ToggleLauncherAnimations),
+                        SettingControl::Toggle(
+                            c.disable_launcher_animations,
+                            Action::ToggleLauncherAnimations,
+                        ),
                     ),
                     (
                         "Disable in-game animations",
                         "Disable floating menu open/close slides and action feedback ripples in game",
-                        SettingControl::Toggle(c.disable_game_animations, Action::ToggleGameAnimations),
+                        SettingControl::Toggle(
+                            c.disable_game_animations,
+                            Action::ToggleGameAnimations,
+                        ),
                     ),
                     (
                         "Advanced Theme Studio",
                         "Open full multi-stop gradient editor, hex code inputs and preset themes",
-                        SettingControl::Button("Theme Studio ›", Action::SettingsCat(SettingsCategory::Theme), false),
+                        SettingControl::Button(
+                            "Theme Studio ›",
+                            Action::SettingsCat(SettingsCategory::Theme),
+                            false,
+                        ),
                     ),
                 ];
 
@@ -4132,7 +4583,11 @@ impl Launcher {
                     (
                         "Import custom background",
                         "Streams wallpaper or animated media into app-private storage via SAF",
-                        SettingControl::Button("Choose File", Action::ChooseImportBackground, false),
+                        SettingControl::Button(
+                            "Choose File",
+                            Action::ChooseImportBackground,
+                            false,
+                        ),
                     ),
                     (
                         "World files & backups",
@@ -5749,12 +6204,19 @@ impl Launcher {
                     (
                         "Client version",
                         "Horizon Android 26.3 • Native ARM64 Vector HUD",
-                        SettingControl::Button("Diagnostics ›", Action::SettingsCat(SettingsCategory::Diagnostics), false),
+                        SettingControl::Button(
+                            "Diagnostics ›",
+                            Action::SettingsCat(SettingsCategory::Diagnostics),
+                            false,
+                        ),
                     ),
                     (
                         "Record gameplay performance",
                         "Captures frame-time and chunk-build telemetry during Play (up to 30 min)",
-                        SettingControl::Toggle(self.catalog.config.record_performance, Action::RecordPerformance),
+                        SettingControl::Toggle(
+                            self.catalog.config.record_performance,
+                            Action::RecordPerformance,
+                        ),
                     ),
                     (
                         "Export raw performance data (.jsonl)",
@@ -7015,7 +7477,9 @@ impl Launcher {
                         self.catalog.config.ui_scale_percent = 100;
                         self.catalog.config.disable_launcher_animations = false;
                         self.catalog.config.disable_game_animations = false;
-                        horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                        horizon_client::ui_theme::set_active_theme(
+                            self.catalog.config.theme.resolve(),
+                        );
                     }
                     SettingsCategory::EngineMemory | SettingsCategory::Video => {
                         self.catalog.config.renderer = crate::catalog::RendererMode::Vulkan;
@@ -7064,7 +7528,8 @@ impl Launcher {
                 let backup_path = self.home.join("horizon-settings-backup.json");
                 if let Ok(json) = serde_json::to_string_pretty(&self.catalog.config) {
                     if std::fs::write(&backup_path, json).is_ok() {
-                        self.catalog.status = "Settings exported to horizon-settings-backup.json".into();
+                        self.catalog.status =
+                            "Settings exported to horizon-settings-backup.json".into();
                     } else {
                         self.catalog.status = "Failed to export settings file.".into();
                     }
@@ -7077,7 +7542,9 @@ impl Launcher {
                         if let Ok(cfg) = serde_json::from_slice::<crate::catalog::Config>(&data) {
                             self.catalog.config = cfg;
                             self.catalog.config.save(&self.home)?;
-                            horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
+                            horizon_client::ui_theme::set_active_theme(
+                                self.catalog.config.theme.resolve(),
+                            );
                             self.catalog.status = "Settings restored from backup.".into();
                         } else {
                             self.catalog.status = "Invalid backup file format.".into();
@@ -7101,6 +7568,9 @@ impl Launcher {
                     self.catalog.config.save(&self.home)?;
                     horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
                 }
+            }
+            Some(Action::DismissStarlingNotice) => {
+                self.catalog.starling_notice_dismissed = true;
             }
             Some(Action::SkipIntro) => {
                 self.anim.intro_done = true;

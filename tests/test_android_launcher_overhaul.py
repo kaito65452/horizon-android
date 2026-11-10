@@ -651,6 +651,40 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn("pub button_scale_dragging: bool,", touch_ui)
         self.assertIn("ACTIVE_SLIDER_DRAG", launcher_pages)
 
+    def test_blaze_top_pill_tab_bar_and_3row_home_layout(self) -> None:
+        launcher_pages = (
+            ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
+        ).read_text(encoding="utf-8")
+        catalog = (ROOT / "crates/horizon-client/src/android/catalog.rs").read_text(encoding="utf-8")
+
+        # 1. Top Pill Tab Bar brand, center tabs, and right action group
+        self.assertIn('"Blaze Launcher"', launcher_pages)
+        self.assertIn('"26.3 • Rust Engine"', launcher_pages)
+        self.assertIn('(Page::Play, "Home", Icon::Play)', launcher_pages)
+        self.assertIn('"Browse"', launcher_pages)
+        self.assertIn('(Page::Installed, "Manager", Icon::Folder)', launcher_pages)
+        self.assertIn('(Page::Skins, "Skin", Icon::Check)', launcher_pages)
+        self.assertIn('(Page::Settings, "Settings", Icon::Settings)', launcher_pages)
+        self.assertIn("Action::Repository", launcher_pages)
+        self.assertIn("Action::OpenControlEditor", launcher_pages)
+
+        # 2. 3-Row Landscape Home Layout
+        self.assertIn('"MINECRAFT"', launcher_pages)
+        self.assertIn('"PLAY WITHOUT LIMITS • YOUR JAVA WORLDS ON ANDROID"', launcher_pages)
+        self.assertIn('"FAST"', launcher_pages)
+        self.assertIn('"STABLE"', launcher_pages)
+        self.assertIn('"CUSTOMIZABLE"', launcher_pages)
+        self.assertIn('"SELECTED PROFILE"', launcher_pages)
+        self.assertIn('"EDIT"', launcher_pages)
+        self.assertIn('"BROWSE RESOURCES"', launcher_pages)
+        self.assertIn('"MANAGER"', launcher_pages)
+        self.assertIn('"Export worlds (SAF)"', launcher_pages)
+
+        # 3. Dismissible Starling Migration Notice
+        self.assertIn("pub starling_notice_dismissed: bool,", catalog)
+        self.assertIn("Action::DismissStarlingNotice", launcher_pages)
+        self.assertIn("!self.catalog.starling_notice_dismissed", launcher_pages)
+
 
 if __name__ == "__main__":
 

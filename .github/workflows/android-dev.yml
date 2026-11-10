@@ -3,7 +3,7 @@ run-name: Android dev · ${{ github.sha }}
 
 on:
   push:
-    branches: [android]
+    branches: [android, 'feat/blaze-ui*']
     paths:
       - 'crates/**'
       - 'Cargo.toml'
