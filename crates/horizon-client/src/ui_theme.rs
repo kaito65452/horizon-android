@@ -2795,15 +2795,11 @@ impl LauncherThemeConfig {
     pub fn resolve(&self) -> ResolvedTheme {
         let (def_bg, def_surf, def_acc, def_gs, def_gm, def_ge, preset_light) =
             self.preset.palette_rgb();
-        let is_light = if self.preset == ThemePreset::DaylightFrost {
-            true
-        } else {
-            self.appearance == ThemeAppearance::Light || preset_light
-        };
+        let is_light = self.appearance == ThemeAppearance::Light || preset_light;
 
         let mut bg_rgb = if self.preset == ThemePreset::Custom {
             parse_hex_color(&self.custom_bg_hex).unwrap_or(def_bg)
-        } else if is_light && self.preset != ThemePreset::DaylightFrost {
+        } else if is_light {
             blend_rgb(0xF4F2FA, def_acc, 0.06)
         } else {
             parse_hex_color(&self.custom_bg_hex).unwrap_or(def_bg)
