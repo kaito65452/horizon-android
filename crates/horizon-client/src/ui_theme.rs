@@ -866,54 +866,74 @@ impl Cache {
         self.images.insert(key.to_owned(), rect);
         Some(rect)
     }
-    fn wallpaper(
+    /// Builds a `out_w x out_h` "object-fit: cover" crop of an RGBA image (aspect preserved,
+    /// vertical focus `focus_y` in `0..=1`), bilinear-resampled, with a circular corner mask of
+    /// `radius_px` in output pixels. Keyed by size and radius so a layout change rebuilds it.
+    #[allow(clippy::too_many_arguments)]
+    fn wallpaper_cover(
         &mut self,
         atlas: &HudAtlas,
         key: &str,
-        w: u32,
-        h: u32,
-        rgba: &[u8],
-        radius: f32,
+        src: (u32, u32, &[u8]),
+        out: (u32, u32),
+        radius_px: f32,
+        focus_y: f32,
     ) -> Option<Rect> {
-        if let Some(&rect) = self.images.get(key) {
+        let (w, h, rgba) = src;
+        let (ow, oh) = out;
+        let full_key = format!("{key}@{ow}x{oh}r{}", radius_px.round() as u32);
+        if let Some(&rect) = self.images.get(&full_key) {
             return Some(rect);
         }
-        if w == 0 || h == 0 || rgba.len() != (w * h * 4) as usize {
+        if w == 0 || h == 0 || ow == 0 || oh == 0 || rgba.len() != (w * h * 4) as usize {
             return None;
         }
-        let mut masked = rgba.to_vec();
-        let r = radius.clamp(0.0, (w.min(h) as f32) * 0.5);
-        if r > 0.5 {
-            let (wf, hf) = (w as f32, h as f32);
-            for y in 0..h {
-                for x in 0..w {
-                    let px = x as f32 + 0.5;
-                    let py = y as f32 + 0.5;
-                    let dx = if px < r {
-                        r - px
-                    } else if px > wf - r {
-                        px - (wf - r)
-                    } else {
-                        0.0
-                    };
-                    let dy = if py < r {
-                        r - py
-                    } else if py > hf - r {
-                        py - (hf - r)
-                    } else {
-                        0.0
-                    };
+        let (sw, sh) = (w as f32, h as f32);
+        let dst_aspect = ow as f32 / oh as f32;
+        let (cw, ch) = if dst_aspect > sw / sh {
+            (sw, sw / dst_aspect)
+        } else {
+            (sh * dst_aspect, sh)
+        };
+        let cx0 = (sw - cw) * 0.5;
+        let cy0 = (sh - ch) * focus_y.clamp(0.0, 1.0);
+        let texel = |x: i32, y: i32, c: usize| -> f32 {
+            let xi = x.clamp(0, w as i32 - 1) as usize;
+            let yi = y.clamp(0, h as i32 - 1) as usize;
+            f32::from(rgba[(yi * w as usize + xi) * 4 + c])
+        };
+        let r = radius_px.clamp(0.0, (ow.min(oh) as f32) * 0.5);
+        let (wf, hf) = (ow as f32, oh as f32);
+        let mut outbuf = vec![0u8; (ow * oh * 4) as usize];
+        for oy in 0..oh {
+            let sy = cy0 + (oy as f32 + 0.5) / hf * ch - 0.5;
+            let (y0, fy) = (sy.floor(), sy - sy.floor());
+            for ox in 0..ow {
+                let sx = cx0 + (ox as f32 + 0.5) / wf * cw - 0.5;
+                let (x0, fx) = (sx.floor(), sx - sx.floor());
+                let idx = ((oy * ow + ox) * 4) as usize;
+                for c in 0..4 {
+                    let top = texel(x0 as i32, y0 as i32, c) * (1.0 - fx)
+                        + texel(x0 as i32 + 1, y0 as i32, c) * fx;
+                    let bot = texel(x0 as i32, y0 as i32 + 1, c) * (1.0 - fx)
+                        + texel(x0 as i32 + 1, y0 as i32 + 1, c) * fx;
+                    outbuf[idx + c] = (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8;
+                }
+                if r > 0.5 {
+                    let px = ox as f32 + 0.5;
+                    let py = oy as f32 + 0.5;
+                    let dx = (r - px).max(px - (wf - r)).max(0.0);
+                    let dy = (r - py).max(py - (hf - r)).max(0.0);
                     if dx > 0.0 && dy > 0.0 {
                         let d = (dx * dx + dy * dy).sqrt();
                         let cov = (r + 0.5 - d).clamp(0.0, 1.0);
-                        let idx = ((y * w + x) * 4 + 3) as usize;
-                        masked[idx] = (masked[idx] as f32 * cov).round() as u8;
+                        outbuf[idx + 3] = (f32::from(outbuf[idx + 3]) * cov).round() as u8;
                     }
                 }
             }
         }
-        let rect = self.upload_rgba(atlas, w, h, masked)?;
-        self.images.insert(key.to_owned(), rect);
+        let rect = self.upload_rgba(atlas, ow, oh, outbuf)?;
+        self.images.insert(full_key, rect);
         Some(rect)
     }
 }
@@ -1395,7 +1415,9 @@ impl<'a> Ui<'a> {
         true
     }
 
-    /// Draw a cached RGBA wallpaper/hero background (`w x h`) into `(x, y, dw, dh)` dp with rounded corners `radius`.
+    /// Draw an RGBA wallpaper/hero background into `(x, y, dw, dh)` dp like CSS
+    /// `object-fit: cover`: the image keeps its aspect ratio (centered crop, never stretched) and
+    /// is resampled at display resolution so the `radius` dp corners stay circular and crisp.
     #[allow(clippy::too_many_arguments)]
     pub fn wallpaper(
         &mut self,
@@ -1409,8 +1431,17 @@ impl<'a> Ui<'a> {
         dh: f32,
         radius: f32,
     ) -> bool {
+        if dw < 2.0 || dh < 2.0 {
+            return false;
+        }
         let atlas = self.atlas;
-        let Some(rect) = with_cache(atlas, |c| c.wallpaper(atlas, key, w, h, rgba, radius)) else {
+        // Never upload more texels than the source can fill; 1024 wide caps atlas use.
+        let out_w = ((dw * self.density).round() as u32).clamp(8, 1024);
+        let out_h = ((out_w as f32 * dh / dw).round() as u32).max(8);
+        let radius_px = radius * out_w as f32 / dw;
+        let Some(rect) = with_cache(atlas, |c| {
+            c.wallpaper_cover(atlas, key, (w, h, rgba), (out_w, out_h), radius_px, 0.5)
+        }) else {
             return false;
         };
         let (x0, y0, x1, y1) = (

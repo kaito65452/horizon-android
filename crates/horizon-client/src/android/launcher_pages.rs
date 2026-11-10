@@ -176,6 +176,136 @@ fn blaze_muted() -> u32 {
     horizon_client::ui_theme::active_theme().text_muted
 }
 
+// ------------------------------------------------------------------------
+// Blaze glass geometry — ports of `.horizon-glass`, `.horizon-pill` and
+// `.play-btn-masterix` from `docs/blaze-ui-reference-en.html` onto HudBatch quads.
+// ------------------------------------------------------------------------
+
+/// `rounded-2xl` of the reference scaled to the launcher's dp grid (crisp, not bubbly).
+const GLASS_RADIUS: f32 = 14.0;
+/// Inner icon tiles (`rounded-xl`).
+const TILE_RADIUS: f32 = 10.0;
+
+/// `.horizon-glass` background: `rgba(14,19,28, --card-opacity)` on dark themes, white on light.
+fn glass_fill() -> u32 {
+    let t = horizon_client::ui_theme::active_theme();
+    let rgb = if t.is_light { 0xFFFFFF } else { 0x0E131C };
+    color::with_alpha(color::hex(rgb, 255), t.glass_opacity)
+}
+
+/// `.horizon-glass` 1px border: `rgba(255,255,255,0.09)` (dark) / faint ink (light).
+fn glass_edge(hot: bool) -> u32 {
+    let t = horizon_client::ui_theme::active_theme();
+    match (t.is_light, hot) {
+        (false, false) => color::hex(0xFFFFFF, 23),
+        (false, true) => color::hex(0xFFFFFF, 64),
+        (true, false) => color::hex(0x0F172A, 31),
+        (true, true) => color::hex(0x0F172A, 77),
+    }
+}
+
+/// Soft inner tile fill (`bg-white/5` + `border-white/10`).
+fn tile_fill() -> u32 {
+    if horizon_client::ui_theme::active_theme().is_light {
+        color::hex(0x0F172A, 13)
+    } else {
+        color::hex(0xFFFFFF, 13)
+    }
+}
+
+/// Horizontal inset of a rounded rect's silhouette at `d` dp from its left/right edge
+/// (0 in the straight section).
+fn corner_inset(d: f32, len: f32, r: f32) -> f32 {
+    let edge = d.min(len - d);
+    if r <= 0.0 || edge >= r {
+        0.0
+    } else {
+        r - (r * r - (r - edge) * (r - edge)).max(0.0).sqrt()
+    }
+}
+
+/// Glass card: translucent fill, 1px edge, and a lighter wash while the pointer is over it.
+fn glass_card(ui: &mut Ui, r: horizon_client::ui_theme::LayoutRect, radius: f32) -> bool {
+    let hot = ui.cursor.0 >= r.x
+        && ui.cursor.0 <= r.x + r.w
+        && ui.cursor.1 >= r.y
+        && ui.cursor.1 <= r.y + r.h;
+    ui.rounded(r.x, r.y, r.w, r.h, radius, glass_fill());
+    if hot {
+        ui.rounded(r.x, r.y, r.w, r.h, radius, color::hex(0xFFFFFF, 12));
+    }
+    ui.border(r.x, r.y, r.w, r.h, radius, glass_edge(hot));
+    hot
+}
+
+/// Left→right gradient clipped to a rounded rect, covering `from_frac..1.0` of its width.
+/// Stops `c0 → cm → c1`; strips are inset along the corner arcs so nothing pokes outside.
+#[allow(clippy::too_many_arguments)]
+fn rounded_hgrad(
+    ui: &mut Ui,
+    r: horizon_client::ui_theme::LayoutRect,
+    radius: f32,
+    from_frac: f32,
+    c0: u32,
+    cm: u32,
+    c1: u32,
+) {
+    use horizon_client::ui_theme::lerp_color;
+    let x_start = r.x + r.w * from_frac.clamp(0.0, 0.95);
+    let span = (r.x + r.w - x_start).max(1.0);
+    let step = 2.0f32;
+    let mut sx = x_start;
+    while sx < r.x + r.w - 0.01 {
+        let sw = step.min(r.x + r.w - sx);
+        let t = ((sx + sw * 0.5 - x_start) / span).clamp(0.0, 1.0);
+        let col = if t < 0.5 {
+            lerp_color(c0, cm, t * 2.0)
+        } else {
+            lerp_color(cm, c1, (t - 0.5) * 2.0)
+        };
+        let inset = corner_inset(sx + sw * 0.5 - r.x, r.w, radius) + 0.5;
+        ui.fill(sx, r.y + inset, sw + 0.4, (r.h - inset * 2.0).max(0.0), col);
+        sx += sw;
+    }
+}
+
+/// Top→bottom gradient over `from_frac..1.0` of a rounded rect's height (bottom corners follow
+/// the arc), used for the hero's `from-[#070a10] via-[#070a10]/25 to-transparent` scrim.
+#[allow(clippy::too_many_arguments)]
+fn rounded_vgrad(
+    ui: &mut Ui,
+    r: horizon_client::ui_theme::LayoutRect,
+    radius: f32,
+    from_frac: f32,
+    c0: u32,
+    cm: u32,
+    c1: u32,
+) {
+    use horizon_client::ui_theme::lerp_color;
+    let y_start = r.y + r.h * from_frac.clamp(0.0, 0.95);
+    let span = (r.y + r.h - y_start).max(1.0);
+    let step = 1.5f32;
+    let mut sy = y_start;
+    while sy < r.y + r.h - 0.01 {
+        let sh = step.min(r.y + r.h - sy);
+        let t = ((sy + sh * 0.5 - y_start) / span).clamp(0.0, 1.0);
+        let col = if t < 0.5 {
+            lerp_color(c0, cm, t * 2.0)
+        } else {
+            lerp_color(cm, c1, (t - 0.5) * 2.0)
+        };
+        // Distance from the bottom edge picks the arc inset (top corners are never covered).
+        let d_bottom = r.y + r.h - (sy + sh * 0.5);
+        let inset = if d_bottom < radius {
+            radius - (radius * radius - (radius - d_bottom) * (radius - d_bottom)).max(0.0).sqrt()
+        } else {
+            0.0
+        } + 0.5;
+        ui.fill(r.x + inset, sy, (r.w - inset * 2.0).max(0.0), sh + 0.4, col);
+        sy += sh;
+    }
+}
+
 /// Smooth 60fps UI animation state across navigation, pages, accordions, theme previews, progress bars, and modals.
 /// Automatically respects `motion::reduced_motion()` on low-end Android hardware.
 pub(crate) struct AnimState {
@@ -1655,237 +1785,290 @@ impl Launcher {
                     content_w,
                     content_h,
                 );
-                let [row1, row2, row3] = home_rect.split_rows([6.0, 3.0, 3.0], gap);
+                // Hero ≈ 40% of the content area (5/12), deck and shortcuts 3.5/12 each.
+                let [row1, row2, row3] = home_rect.split_rows([5.0, 3.5, 3.5], gap);
+                let accent = blaze_accent();
+                let ink_dark = color::hex(0x020617, 255);
 
                 // ========================================================
-                // ROW 1 — Hero Banner (6/12 height)
-                // Official Drop Wallpaper (Dynamic per Accent Palette or Winter Easter Egg)
+                // ROW 1 — Hero: `rounded-2xl border-white/10`, artwork covers the
+                // box (never stretched), scrim = `from-[#070a10] via-[#070a10]/25`.
                 // ========================================================
                 let palette = horizon_theme::blaze::AccentPalette::from_u8(
                     self.catalog.config.theme.palette_idx,
                 );
-                if let Some((key, img_w, img_h, rgba)) = load_active_wallpaper(palette) {
-                    ui.wallpaper(
-                        key, img_w, img_h, &rgba, row1.x, row1.y, row1.w, row1.h, 16.0,
-                    );
-                } else {
-                    ui.rounded(row1.x, row1.y, row1.w, row1.h, 16.0, blaze_card_bg());
+                let hero_drawn = match load_active_wallpaper(palette) {
+                    Some((key, img_w, img_h, rgba)) => ui.wallpaper(
+                        key,
+                        img_w,
+                        img_h,
+                        &rgba,
+                        row1.x,
+                        row1.y,
+                        row1.w,
+                        row1.h,
+                        GLASS_RADIUS,
+                    ),
+                    None => false,
+                };
+                if !hero_drawn {
+                    ui.rounded(row1.x, row1.y, row1.w, row1.h, GLASS_RADIUS, blaze_card_bg());
                 }
-
-                // Vignette Gradient Overlay at bottom for readable text & controls
-                ui.fill_gradient(
-                    row1.x,
-                    row1.y + row1.h * 0.35,
-                    row1.w,
-                    row1.h * 0.65,
-                    horizon_client::ui_theme::GradientDirection::Vertical,
-                    color::hex(0x05070B, 0),
-                    color::hex(0x05070B, 230),
-                    Some((0.5, color::hex(0x05070B, 140))),
-                    16,
+                rounded_vgrad(
+                    &mut ui,
+                    row1,
+                    GLASS_RADIUS,
+                    0.30,
+                    color::hex(0x070A10, 0),
+                    color::hex(0x070A10, 90),
+                    color::hex(0x070A10, 235),
                 );
-                ui.border(row1.x, row1.y, row1.w, row1.h, 16.0, blaze_border());
+                ui.border(
+                    row1.x,
+                    row1.y,
+                    row1.w,
+                    row1.h,
+                    GLASS_RADIUS,
+                    color::hex(0xFFFFFF, 26),
+                );
 
-                // Top-right Engine Badge
+                // Top-right engine pill (`.horizon-pill`).
                 let engine_badge = format!(
                     "26.3 • Blaze Engine • {}",
                     self.catalog.config.renderer.label()
                 );
+                let pill_h = 24.0;
                 let badge_w =
-                    (ui.measure(Face::Medium, 11.0, &engine_badge) + 24.0).min(row1.w * 0.45);
+                    (ui.measure(Face::SemiBold, 10.5, &engine_badge) + 34.0).min(row1.w * 0.5);
                 let badge_x = row1.x + row1.w - badge_w - 14.0;
                 let badge_y = row1.y + 12.0;
-                ui.rounded(badge_x, badge_y, badge_w, 26.0, 13.0, blaze_surface_high());
-                ui.border(badge_x, badge_y, badge_w, 26.0, 13.0, blaze_border());
+                ui.rounded(
+                    badge_x,
+                    badge_y,
+                    badge_w,
+                    pill_h,
+                    pill_h * 0.5,
+                    color::hex(0x0A0E16, 199),
+                );
+                ui.border(
+                    badge_x,
+                    badge_y,
+                    badge_w,
+                    pill_h,
+                    pill_h * 0.5,
+                    color::hex(0xFFFFFF, 20),
+                );
                 ui.centered_fit(
-                    Face::Medium,
-                    11.0,
-                    [badge_x, badge_y, badge_w, 26.0],
-                    blaze_accent(),
+                    Face::SemiBold,
+                    10.5,
+                    [badge_x + 6.0, badge_y, badge_w - 22.0, pill_h],
+                    color::hex(0xFFFFFF, 255),
                     &engine_badge,
                 );
+                ui.icon(
+                    Icon::ChevronDown,
+                    badge_x + badge_w - 18.0,
+                    badge_y + (pill_h - 11.0) * 0.5,
+                    11.0,
+                    color::hex(0x94A3B8, 255),
+                );
                 self.targets.push((
-                    [badge_x, badge_y, badge_w, 26.0],
+                    [badge_x, badge_y, badge_w, pill_h],
                     Action::Page(Page::Settings),
                 ));
 
-                // Bottom-left Display Title & Tagline
-                let title_x = row1.x + 18.0;
-                let title_y = row1.y + row1.h - 48.0;
+                // Bottom-left title block (`bottom-3.5 left-5`).
+                let title_size = (row1.h * 0.24).clamp(18.0, 30.0);
+                let tag_size = 9.5;
+                let tag_line = (tag_size * 1.45_f32).round();
+                let title_line = (title_size * 1.45_f32).round();
+                let title_x = row1.x + 20.0;
+                let tag_y = row1.y + row1.h - 14.0 - tag_line;
+                let title_y = tag_y - title_line + 4.0;
                 ui.text(
                     Face::SemiBold,
-                    22.0,
+                    title_size,
                     title_x,
                     title_y,
-                    blaze_text(),
+                    color::hex(0xFFFFFF, 255),
                     "MINECRAFT",
                 );
-                ui.text(
-                    Face::Medium,
-                    10.0,
+                ui.text_clipped(
+                    Face::SemiBold,
+                    tag_size,
                     title_x,
-                    title_y + 24.0,
-                    blaze_muted(),
+                    tag_y,
+                    (row1.w * 0.5).max(40.0),
+                    color::hex(0xCBD5E1, 255),
                     if is_december() {
                         "WINTER CELEBRATION • PLAY WITHOUT LIMITS"
                     } else {
-                        "PLAY WITHOUT LIMITS • YOUR JAVA WORLDS ON ANDROID"
+                        "PLAY WITHOUT LIMITS"
                     },
                 );
 
-                // Bottom-right Capability Pills ("FAST", "STABLE", "CUSTOMIZABLE")
+                // Bottom-right capability pills (`bottom-3 right-3.5`).
                 let cap_pills = [
-                    ("FAST", blaze_accent()),
+                    ("FAST", accent),
                     ("STABLE", color::hex(0x34D399, 255)),
-                    ("CUSTOMIZABLE", color::hex(0xA78BFA, 255)),
+                    ("CUSTOMIZABLE", color::hex(0xFBBF24, 255)),
                 ];
+                let cap_h = 20.0;
+                let cap_y = row1.y + row1.h - 12.0 - cap_h;
                 let mut pill_right = row1.x + row1.w - 14.0;
-                let cap_y = row1.y + row1.h - 30.0;
-                let cap_h = 22.0;
                 for (cap_label, cap_col) in cap_pills.into_iter().rev() {
-                    let pw = ui.measure(Face::Medium, 10.0, cap_label) + 16.0;
+                    let pw = ui.measure(Face::SemiBold, 9.0, cap_label) + 26.0;
                     let px = pill_right - pw;
-                    ui.rounded(px, cap_y, pw, cap_h, 11.0, blaze_surface_high());
-                    ui.border(px, cap_y, pw, cap_h, 11.0, blaze_border());
+                    ui.rounded(px, cap_y, pw, cap_h, cap_h * 0.5, color::hex(0x0A0E16, 199));
+                    ui.border(px, cap_y, pw, cap_h, cap_h * 0.5, color::hex(0xFFFFFF, 20));
+                    ui.rounded(px + 9.0, cap_y + cap_h * 0.5 - 2.0, 4.0, 4.0, 2.0, cap_col);
                     ui.centered_fit(
-                        Face::Medium,
-                        10.0,
-                        [px, cap_y, pw, cap_h],
-                        cap_col,
+                        Face::SemiBold,
+                        9.0,
+                        [px + 12.0, cap_y, pw - 12.0, cap_h],
+                        color::hex(0xE2E8F0, 255),
                         cap_label,
                     );
                     pill_right = px - 6.0;
                 }
 
                 // ========================================================
-                // ROW 2 — Profile & Primary Action Deck (3/12 height)
-                // Split 5 cols (Profile) : 2 cols (Edit) : 5 cols (Play)
+                // ROW 2 — Action deck: 5 cols profile · 2 cols edit · 5 cols play.
                 // ========================================================
                 let [prof_col, edit_col, play_col] = row2.split_cols([5.0, 2.0, 5.0], gap);
+                let tile = (prof_col.h * 0.46).clamp(30.0, 38.0);
 
-                // Left: Selected Profile Card
+                // Selected profile (`horizon-glass rounded-2xl px-3.5`).
+                glass_card(&mut ui, prof_col, GLASS_RADIUS);
+                let tile_y = prof_col.y + (prof_col.h - tile) * 0.5;
+                let emerald = color::hex(0x34D399, 255);
                 ui.rounded(
-                    prof_col.x,
-                    prof_col.y,
-                    prof_col.w,
-                    prof_col.h,
-                    16.0,
-                    blaze_surface(),
+                    prof_col.x + 14.0,
+                    tile_y,
+                    tile,
+                    tile,
+                    TILE_RADIUS,
+                    color::with_alpha(emerald, 0.20),
                 );
                 ui.border(
-                    prof_col.x,
-                    prof_col.y,
-                    prof_col.w,
-                    prof_col.h,
-                    16.0,
-                    blaze_border(),
-                );
-                let icon_size = (prof_col.h - 16.0).clamp(24.0, 32.0);
-                ui.rounded(
-                    prof_col.x + 8.0,
-                    prof_col.y + (prof_col.h - icon_size) * 0.5,
-                    icon_size,
-                    icon_size,
-                    8.0,
-                    blaze_surface_high(),
+                    prof_col.x + 14.0,
+                    tile_y,
+                    tile,
+                    tile,
+                    TILE_RADIUS,
+                    color::with_alpha(emerald, 0.40),
                 );
                 ui.icon(
                     Icon::Gamepad,
-                    prof_col.x + 8.0 + (icon_size - 16.0) * 0.5,
-                    prof_col.y + (prof_col.h - 16.0) * 0.5,
-                    16.0,
-                    blaze_accent(),
+                    prof_col.x + 14.0 + (tile - 18.0) * 0.5,
+                    tile_y + (tile - 18.0) * 0.5,
+                    18.0,
+                    emerald,
                 );
-                ui.text(
+                let chev = 26.0;
+                let chev_x = prof_col.x + prof_col.w - chev - 14.0;
+                let text_x = prof_col.x + 14.0 + tile + 12.0;
+                let text_w = (chev_x - text_x - 8.0).max(24.0);
+                let show_meta = prof_col.h >= 62.0;
+                let block_h = if show_meta { 46.0 } else { 32.0 };
+                let mut ty = prof_col.y + (prof_col.h - block_h) * 0.5;
+                ui.text_clipped(
                     Face::Medium,
-                    9.0,
-                    prof_col.x + icon_size + 14.0,
-                    prof_col.y + 8.0,
+                    8.5,
+                    text_x,
+                    ty,
+                    text_w,
                     blaze_muted(),
                     "SELECTED PROFILE",
                 );
+                ty += 12.0;
                 let prof_name = format!("Profile {}", self.catalog.config.profile + 1);
-                ui.text(
+                ui.text_clipped(
                     Face::SemiBold,
-                    13.5,
-                    prof_col.x + icon_size + 14.0,
-                    prof_col.y + 22.0,
+                    14.0,
+                    text_x,
+                    ty,
+                    text_w,
                     blaze_text(),
                     &prof_name,
                 );
+                if show_meta {
+                    ui.text_clipped(
+                        Face::Regular,
+                        9.5,
+                        text_x,
+                        ty + 20.0,
+                        text_w,
+                        blaze_muted(),
+                        "26.3 • Blaze Engine",
+                    );
+                }
+                ui.rounded(
+                    chev_x,
+                    prof_col.y + (prof_col.h - chev) * 0.5,
+                    chev,
+                    chev,
+                    chev * 0.5,
+                    tile_fill(),
+                );
                 ui.icon(
                     Icon::ChevronDown,
-                    prof_col.x + prof_col.w - 18.0,
+                    chev_x + (chev - 12.0) * 0.5,
                     prof_col.y + (prof_col.h - 12.0) * 0.5,
                     12.0,
-                    blaze_muted(),
+                    blaze_text(),
                 );
                 self.targets.push((prof_col.to_array(), Action::Profile));
 
-                // Center: EDIT Button
-                ui.rounded(
-                    edit_col.x,
-                    edit_col.y,
-                    edit_col.w,
-                    edit_col.h,
-                    16.0,
-                    blaze_surface(),
-                );
-                ui.border(
-                    edit_col.x,
-                    edit_col.y,
-                    edit_col.w,
-                    edit_col.h,
-                    16.0,
-                    blaze_border(),
-                );
-                let edit_icon_x = edit_col.x + (edit_col.w - 56.0) * 0.5;
+                // Edit (`col-span-2 horizon-glass`, icon + label centered).
+                glass_card(&mut ui, edit_col, GLASS_RADIUS);
+                let edit_label_w = ui.measure(Face::SemiBold, 12.0, "EDIT");
+                let edit_total = 14.0 + 6.0 + edit_label_w;
+                let edit_x = edit_col.x + (edit_col.w - edit_total) * 0.5;
                 ui.icon(
                     Icon::Pencil,
-                    edit_icon_x,
+                    edit_x,
                     edit_col.y + (edit_col.h - 14.0) * 0.5,
                     14.0,
-                    blaze_accent(),
+                    accent,
                 );
                 ui.text(
                     Face::SemiBold,
-                    13.0,
-                    edit_icon_x + 18.0,
-                    edit_col.y + (edit_col.h - 16.0) * 0.5,
+                    12.0,
+                    edit_x + 20.0,
+                    edit_col.y + (edit_col.h - (12.0_f32 * 1.45).round()) * 0.5,
                     blaze_text(),
                     "EDIT",
                 );
                 self.targets
                     .push((edit_col.to_array(), Action::Page(Page::Skins)));
 
-                // Right: 3-Element Prominent PLAY Button (Matching Reference)
+                // Play (`.play-btn-masterix`): light→accent gradient, accent glow.
                 let is_launching = self.launching || self.session_worker.is_some();
                 if is_launching && installed {
-                    let radius = 16.0;
                     ui.rounded(
                         play_col.x,
                         play_col.y,
                         play_col.w,
                         play_col.h,
-                        radius,
+                        GLASS_RADIUS,
                         blaze_accent_soft(),
                     );
-                    ui.stroke_rounded(
+                    ui.border(
                         play_col.x,
                         play_col.y,
                         play_col.w,
                         play_col.h,
-                        radius,
-                        1.6,
-                        blaze_accent(),
+                        GLASS_RADIUS,
+                        accent,
                     );
-                    let bar_w = (play_col.w - 28.0).max(40.0);
-                    let bar_x = play_col.x + 14.0;
-                    let bar_y = play_col.y + play_col.h - 10.0;
-                    ui.rounded(bar_x, bar_y, bar_w, 4.0, 2.0, blaze_track());
+                    let bar_w = (play_col.w - 40.0).max(40.0);
+                    let bar_x = play_col.x + 20.0;
+                    let bar_y = play_col.y + play_col.h - 14.0;
+                    ui.rounded(bar_x, bar_y, bar_w, 3.0, 1.5, blaze_track());
                     let sw = (bar_w * 0.36).clamp(24.0, bar_w);
                     let sx = bar_x + (bar_w - sw) * self.anim.shimmer_phase.clamp(0.0, 1.0);
-                    ui.rounded(sx, bar_y, sw, 4.0, 2.0, blaze_accent());
+                    ui.rounded(sx, bar_y, sw, 3.0, 1.5, accent);
                     ui.centered_fit(
                         Face::SemiBold,
                         15.0,
@@ -1893,39 +2076,63 @@ impl Launcher {
                             play_col.x + 12.0,
                             play_col.y + 4.0,
                             play_col.w - 24.0,
-                            play_col.h - 16.0,
+                            play_col.h - 18.0,
                         ],
                         blaze_text(),
                         "Launching...",
                     );
                 } else {
-                    let radius = 16.0;
+                    use horizon_client::ui_theme::lerp_color;
+                    let white = color::hex(0xFFFFFF, 255);
+                    // Outer glow (`0 0 28px accent-glow`), kept inside the 10dp gutter.
+                    for (spread, alpha) in [(6.0_f32, 0.06_f32), (4.0, 0.09), (2.0, 0.13)] {
+                        ui.rounded(
+                            play_col.x - spread,
+                            play_col.y - spread,
+                            play_col.w + spread * 2.0,
+                            play_col.h + spread * 2.0,
+                            GLASS_RADIUS + spread,
+                            color::with_alpha(accent, alpha),
+                        );
+                    }
+                    let g0 = lerp_color(accent, white, 0.86);
+                    let g1 = lerp_color(accent, white, 0.58);
+                    // Base silhouette keeps anti-aliased corners; strips paint the gradient.
                     ui.rounded(
                         play_col.x,
                         play_col.y,
                         play_col.w,
                         play_col.h,
-                        radius,
-                        blaze_accent(),
+                        GLASS_RADIUS,
+                        g1,
                     );
-                    let btn_icon_sz = (play_col.h - 16.0).clamp(26.0, 32.0);
-                    // Element 1: Left rounded icon box with Play icon
+                    rounded_hgrad(&mut ui, play_col, GLASS_RADIUS, 0.0, g0, g1, accent);
+                    // Inner top highlight (`inset 0 2px 4px white/85`).
+                    ui.fill(
+                        play_col.x + GLASS_RADIUS,
+                        play_col.y + 1.0,
+                        (play_col.w - GLASS_RADIUS * 2.0).max(0.0),
+                        1.0,
+                        color::hex(0xFFFFFF, 150),
+                    );
+
+                    let icon_tile = (play_col.h * 0.42).clamp(28.0, 34.0);
+                    let tile_y = play_col.y + (play_col.h - icon_tile) * 0.5;
                     ui.rounded(
-                        play_col.x + 10.0,
-                        play_col.y + (play_col.h - btn_icon_sz) * 0.5,
-                        btn_icon_sz,
-                        btn_icon_sz,
-                        8.0,
-                        color::hex(0x000000, 48),
+                        play_col.x + 14.0,
+                        tile_y,
+                        icon_tile,
+                        icon_tile,
+                        TILE_RADIUS,
+                        color::hex(0x020617, 26),
                     );
                     ui.icon(
                         Icon::Play,
-                        play_col.x + 10.0 + (btn_icon_sz - 16.0) * 0.5 + 1.0,
-                        play_col.y + (play_col.h - 16.0) * 0.5,
+                        play_col.x + 14.0 + (icon_tile - 16.0) * 0.5 + 1.0,
+                        tile_y + (icon_tile - 16.0) * 0.5,
                         16.0,
-                        blaze_on_accent(),
+                        ink_dark,
                     );
-                    // Element 2: Center Title & Subtitle
                     let play_title = if installed {
                         "PLAY"
                     } else if self.error.is_some() {
@@ -1933,172 +2140,129 @@ impl Launcher {
                     } else {
                         "DOWNLOAD"
                     };
+                    let disc = 26.0;
+                    let mid_x = play_col.x + 14.0 + icon_tile + 8.0;
+                    let mid_w = (play_col.w - (14.0 + icon_tile + 8.0) - (disc + 14.0 + 8.0)).max(40.0);
+                    let title_sz = 18.0;
+                    let sub_sz = 9.5;
+                    let stack_h = (title_sz * 1.2_f32).round() + (sub_sz * 1.45_f32).round();
+                    let stack_y = play_col.y + (play_col.h - stack_h) * 0.5;
                     ui.centered_fit(
                         Face::SemiBold,
-                        15.0,
-                        [
-                            play_col.x + btn_icon_sz + 16.0,
-                            play_col.y + 6.0,
-                            play_col.w - btn_icon_sz * 2.0 - 32.0,
-                            18.0,
-                        ],
-                        blaze_on_accent(),
+                        title_sz,
+                        [mid_x, stack_y, mid_w, (title_sz * 1.2_f32).round()],
+                        ink_dark,
                         play_title,
                     );
                     ui.centered_fit(
-                        Face::Medium,
-                        10.0,
+                        Face::SemiBold,
+                        sub_sz,
                         [
-                            play_col.x + btn_icon_sz + 16.0,
-                            play_col.y + 24.0,
-                            play_col.w - btn_icon_sz * 2.0 - 32.0,
-                            14.0,
+                            mid_x,
+                            stack_y + (title_sz * 1.2_f32).round(),
+                            mid_w,
+                            (sub_sz * 1.45_f32).round(),
                         ],
-                        color::with_alpha(blaze_on_accent(), 0.88),
+                        color::hex(0x1E293B, 255),
                         "26.3 • Blaze Engine",
                     );
-                    // Element 3: Right ChevronDown disc
-                    let disc_sz = 26.0;
+                    let disc_x = play_col.x + play_col.w - disc - 14.0;
                     ui.rounded(
-                        play_col.x + play_col.w - disc_sz - 10.0,
-                        play_col.y + (play_col.h - disc_sz) * 0.5,
-                        disc_sz,
-                        disc_sz,
-                        disc_sz * 0.5,
-                        color::hex(0x000000, 48),
+                        disc_x,
+                        play_col.y + (play_col.h - disc) * 0.5,
+                        disc,
+                        disc,
+                        disc * 0.5,
+                        color::hex(0x020617, 26),
                     );
                     ui.icon(
                         Icon::ChevronDown,
-                        play_col.x + play_col.w - disc_sz - 10.0 + (disc_sz - 14.0) * 0.5,
+                        disc_x + (disc - 14.0) * 0.5,
                         play_col.y + (play_col.h - 14.0) * 0.5,
                         14.0,
-                        blaze_on_accent(),
+                        ink_dark,
                     );
                     self.targets.push((play_col.to_array(), Action::Play));
                 }
 
                 // ========================================================
-                // ROW 3 — Two Shortcut Cards (3/12 height)
-                // Split 6 cols (Browse Resources) : 6 cols (Manager)
+                // ROW 3 — Shortcut cards, 6 cols each, `px-4`, right tint wash (2/5 width).
                 // ========================================================
                 let [browse_card, manager_card] = row3.split_cols([6.0, 6.0], gap);
-
-                // Bottom Left: BROWSE RESOURCES Card
-                ui.rounded(
-                    browse_card.x,
-                    browse_card.y,
-                    browse_card.w,
-                    browse_card.h,
-                    16.0,
-                    blaze_surface(),
-                );
-                ui.border(
-                    browse_card.x,
-                    browse_card.y,
-                    browse_card.w,
-                    browse_card.h,
-                    16.0,
-                    blaze_border(),
-                );
-                let c_icon_sz = (browse_card.h - 16.0).clamp(28.0, 36.0);
-                ui.rounded(
-                    browse_card.x + 12.0,
-                    browse_card.y + (browse_card.h - c_icon_sz) * 0.5,
-                    c_icon_sz,
-                    c_icon_sz,
-                    10.0,
-                    blaze_surface_high(),
-                );
-                ui.icon(
-                    Icon::Mods,
-                    browse_card.x + 12.0 + (c_icon_sz - 18.0) * 0.5,
-                    browse_card.y + (browse_card.h - 18.0) * 0.5,
-                    18.0,
-                    blaze_accent(),
-                );
-                ui.text(
-                    Face::SemiBold,
-                    13.5,
-                    browse_card.x + c_icon_sz + 20.0,
-                    browse_card.y + 10.0,
-                    blaze_text(),
-                    "BROWSE RESOURCES",
-                );
-                ui.text(
-                    Face::Regular,
-                    10.5,
-                    browse_card.x + c_icon_sz + 20.0,
-                    browse_card.y + 26.0,
-                    blaze_muted(),
-                    "Mods • Resource Packs • Shaders",
-                );
-                ui.icon(
-                    Icon::ArrowRight,
-                    browse_card.x + browse_card.w - 22.0,
-                    browse_card.y + (browse_card.h - 14.0) * 0.5,
-                    14.0,
-                    blaze_muted(),
-                );
-                self.targets
-                    .push((browse_card.to_array(), Action::Page(Page::Mods)));
-
-                // Bottom Right: MANAGER Card
-                ui.rounded(
-                    manager_card.x,
-                    manager_card.y,
-                    manager_card.w,
-                    manager_card.h,
-                    16.0,
-                    blaze_surface(),
-                );
-                ui.border(
-                    manager_card.x,
-                    manager_card.y,
-                    manager_card.w,
-                    manager_card.h,
-                    16.0,
-                    blaze_border(),
-                );
-                ui.rounded(
-                    manager_card.x + 12.0,
-                    manager_card.y + (manager_card.h - c_icon_sz) * 0.5,
-                    c_icon_sz,
-                    c_icon_sz,
-                    10.0,
-                    blaze_surface_high(),
-                );
-                ui.icon(
-                    Icon::Folder,
-                    manager_card.x + 12.0 + (c_icon_sz - 18.0) * 0.5,
-                    manager_card.y + (manager_card.h - 18.0) * 0.5,
-                    18.0,
-                    color::hex(0xF59E0B, 255),
-                );
-                ui.text(
-                    Face::SemiBold,
-                    13.5,
-                    manager_card.x + c_icon_sz + 20.0,
-                    manager_card.y + 10.0,
-                    blaze_text(),
-                    "MANAGER",
-                );
-                ui.text(
-                    Face::Regular,
-                    10.5,
-                    manager_card.x + c_icon_sz + 20.0,
-                    manager_card.y + 26.0,
-                    blaze_muted(),
-                    "Manage Installed Mods, Packs, Worlds & SAF Export",
-                );
-                ui.icon(
-                    Icon::ArrowRight,
-                    manager_card.x + manager_card.w - 22.0,
-                    manager_card.y + (manager_card.h - 14.0) * 0.5,
-                    14.0,
-                    blaze_muted(),
-                );
-                self.targets
-                    .push((manager_card.to_array(), Action::Page(Page::Installed)));
+                let shortcuts = [
+                    (
+                        browse_card,
+                        Icon::Mods,
+                        accent,
+                        "BROWSER RESOURCES",
+                        "Mods • Resource Packs • Shader Packs",
+                        (color::hex(0x6366F1, 26), color::hex(0x0EA5E9, 51)),
+                        Action::Page(Page::Mods),
+                    ),
+                    (
+                        manager_card,
+                        Icon::Folder,
+                        color::hex(0xFBBF24, 255),
+                        "MANAGER",
+                        "Installed mods, packs, and worlds",
+                        (color::hex(0x10B981, 26), color::hex(0xF59E0B, 51)),
+                        Action::Page(Page::Installed),
+                    ),
+                ];
+                for (card, icon, icon_col, title, sub, (wash_mid, wash_end), action) in shortcuts {
+                    glass_card(&mut ui, card, GLASS_RADIUS);
+                    rounded_hgrad(
+                        &mut ui,
+                        card,
+                        GLASS_RADIUS,
+                        0.6,
+                        color::with_alpha(wash_end, 0.0),
+                        wash_mid,
+                        wash_end,
+                    );
+                    let c_tile = (card.h * 0.46).clamp(30.0, 38.0);
+                    let c_tile_y = card.y + (card.h - c_tile) * 0.5;
+                    ui.rounded(card.x + 16.0, c_tile_y, c_tile, c_tile, TILE_RADIUS, tile_fill());
+                    ui.border(
+                        card.x + 16.0,
+                        c_tile_y,
+                        c_tile,
+                        c_tile,
+                        TILE_RADIUS,
+                        glass_edge(false),
+                    );
+                    ui.icon(
+                        icon,
+                        card.x + 16.0 + (c_tile - 18.0) * 0.5,
+                        c_tile_y + (c_tile - 18.0) * 0.5,
+                        18.0,
+                        icon_col,
+                    );
+                    let arrow = 26.0;
+                    let arrow_x = card.x + card.w - arrow - 16.0;
+                    let t_x = card.x + 16.0 + c_tile + 12.0;
+                    let t_w = (arrow_x - t_x - 8.0).max(24.0);
+                    let stack = 12.0 + 14.0;
+                    let t_y = card.y + (card.h - stack) * 0.5 - 1.0;
+                    ui.text_clipped(Face::SemiBold, 11.5, t_x, t_y, t_w, blaze_text(), title);
+                    ui.text_clipped(Face::Regular, 9.5, t_x, t_y + 15.0, t_w, blaze_muted(), sub);
+                    ui.rounded(
+                        arrow_x,
+                        card.y + (card.h - arrow) * 0.5,
+                        arrow,
+                        arrow,
+                        arrow * 0.5,
+                        tile_fill(),
+                    );
+                    ui.icon(
+                        Icon::ArrowRight,
+                        arrow_x + (arrow - 12.0) * 0.5,
+                        card.y + (card.h - 12.0) * 0.5,
+                        12.0,
+                        blaze_text(),
+                    );
+                    self.targets.push((card.to_array(), action));
+                }
             }
         } else if page == Page::Skins {
             self.wardrobe.draw(

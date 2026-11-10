@@ -124,14 +124,19 @@ class UIReferenceParityTests(unittest.TestCase):
             content_w = screen_w - 2.0 * pad_x
             content_h = screen_h - header_h - pad_bottom
 
-            # 12-row proportional grid (6/12, 3/12, 3/12) with 2 gaps
+            # 12-row proportional grid (hero 5, deck 3.5, shortcuts 3.5) with 2 gaps
             total_gaps = 2.0 * gap
             avail_h = content_h - total_gaps
             h_unit = avail_h / 12.0
 
-            row1_h = 6.0 * h_unit
-            row2_h = 3.0 * h_unit
-            row3_h = 3.0 * h_unit
+            row1_h = 5.0 * h_unit
+            row2_h = 3.5 * h_unit
+            row3_h = 3.5 * h_unit
+
+            # Hero is a widescreen banner: 38%..42% of the content area, never a thin strip.
+            self.assertGreaterEqual(row1_h / content_h, 0.38)
+            self.assertLessEqual(row1_h / content_h, 0.42)
+            self.assertGreater(content_w / row1_h, 2.0)
 
             # Total heights match exactly
             self.assertAlmostEqual(row1_h + row2_h + row3_h + total_gaps, content_h, places=4)
