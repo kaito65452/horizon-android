@@ -2390,7 +2390,7 @@ pub const THEME_BG_SWATCHES_LIGHT: [(u32, &str, &str); 6] = [
 ];
 
 fn default_glass_opacity() -> f32 {
-    0.72
+    0.85
 }
 fn default_glass_blur() -> f32 {
     16.0
@@ -2422,6 +2422,8 @@ pub struct LauncherThemeConfig {
     pub bg_style: String,
     #[serde(default)]
     pub custom_bg_uri: Option<String>,
+    #[serde(default)]
+    pub palette_idx: u8,
 }
 
 impl Default for LauncherThemeConfig {
@@ -2439,10 +2441,11 @@ impl Default for LauncherThemeConfig {
             gradient_end_hex: "#0D0B14".into(),
             gradient_mid_pos: 0.50,
             use_three_stops: true,
-            glass_opacity: 0.72,
+            glass_opacity: 0.85,
             glass_blur: 16.0,
             bg_style: "mc".into(),
             custom_bg_uri: None,
+            palette_idx: 0,
         }
     }
 }
@@ -2517,6 +2520,7 @@ pub struct ResolvedTheme {
     pub glass_opacity: f32,
     pub glass_blur: f32,
     pub bg_style_id: u8,
+    pub palette_id: u8,
     /// Solid fallback background color (always valid even when gradient is enabled).
     pub bg_solid: u32,
     pub gradient_start: u32,
@@ -2564,13 +2568,14 @@ impl LauncherThemeConfig {
         }
         self.gradient_mid_pos = self.gradient_mid_pos.clamp(0.15, 0.85);
         if !self.glass_opacity.is_finite() {
-            self.glass_opacity = 0.72;
+            self.glass_opacity = 0.85;
         }
-        self.glass_opacity = self.glass_opacity.clamp(0.30, 0.95);
+        self.glass_opacity = self.glass_opacity.clamp(0.40, 0.98);
         if !self.glass_blur.is_finite() {
             self.glass_blur = 16.0;
         }
         self.glass_blur = self.glass_blur.clamp(0.0, 32.0);
+        self.palette_idx = self.palette_idx.min(4);
         if !matches!(self.bg_style.as_str(), "mc" | "shader" | "custom" | "oled") {
             self.bg_style = "mc".into();
         }
@@ -2743,9 +2748,10 @@ impl LauncherThemeConfig {
             gradient_direction: self.gradient_direction,
             use_three_stops: self.use_three_stops,
             gradient_mid_pos: self.gradient_mid_pos.clamp(0.15, 0.85),
-            glass_opacity: self.glass_opacity.clamp(0.30, 0.95),
+            glass_opacity: self.glass_opacity.clamp(0.40, 0.98),
             glass_blur: self.glass_blur.clamp(0.0, 32.0),
             bg_style_id,
+            palette_id: self.palette_idx.min(4),
             bg_solid: color::hex(solid_fallback_rgb, 255),
             gradient_start: color::hex(gs_adj, 255),
             gradient_mid: color::hex(gm_adj, 255),

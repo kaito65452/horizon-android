@@ -3928,11 +3928,11 @@ impl Launcher {
                 self.list_view = Some([list_top, list_bottom, max_scroll]);
 
                 let palette_label = match theme_cfg.custom_accent_hex.to_uppercase().as_str() {
-                    "#38BDF8" => "Cyan (#38BDF8) ›",
-                    "#34D399" => "Emerald (#34D399) ›",
-                    "#FB7185" => "Crimson (#FB7185) ›",
-                    "#A78BFA" => "Violet (#A78BFA) ›",
-                    "#FBBF24" => "Amber (#FBBF24) ›",
+                    "#38BDF8" => "Masterix Cyan (#38BDF8) ›",
+                    "#F59E0B" => "Blaze Gold (#F59E0B) ›",
+                    "#10B981" => "Creeper Green (#10B981) ›",
+                    "#F43F5E" => "Nether Crimson (#F43F5E) ›",
+                    "#A855F7" => "Ender Violet (#A855F7) ›",
                     _ => "Custom Accent ›",
                 };
                 let bg_label = match theme_cfg.bg_style.as_str() {
@@ -3949,9 +3949,9 @@ impl Launcher {
 
                 let next_palette_action = match theme_cfg.custom_accent_hex.to_uppercase().as_str() {
                     "#38BDF8" => Action::SelectAccentPalette(1),
-                    "#34D399" => Action::SelectAccentPalette(2),
-                    "#FB7185" => Action::SelectAccentPalette(3),
-                    "#A78BFA" => Action::SelectAccentPalette(4),
+                    "#F59E0B" => Action::SelectAccentPalette(2),
+                    "#10B981" => Action::SelectAccentPalette(3),
+                    "#F43F5E" => Action::SelectAccentPalette(4),
                     _ => Action::SelectAccentPalette(0),
                 };
                 let next_bg_action = match theme_cfg.bg_style.as_str() {
@@ -3969,7 +3969,7 @@ impl Launcher {
                     ),
                     (
                         "Accent color palette",
-                        "Cycle across 5 curated accents: Cyan, Emerald, Crimson, Violet, Amber",
+                        "Cycle across 5 curated accents: Masterix Cyan, Blaze Gold, Creeper Green, Nether Crimson, Ender Violet",
                         SettingControl::Button(palette_label, next_palette_action, true),
                     ),
                     (
@@ -6963,14 +6963,15 @@ impl Launcher {
                 self.catalog.status = "Theme reset to Horizon default (Obsidian Violet).".into();
             }
             Some(Action::SelectAccentPalette(idx)) => {
-                let hex = match idx {
-                    0 => "#38BDF8", // Cyan
-                    1 => "#34D399", // Emerald
-                    2 => "#FB7185", // Crimson
-                    3 => "#A78BFA", // Violet
-                    _ => "#FBBF24", // Amber
+                let (hex, p_id) = match idx {
+                    1 => ("#F59E0B", 1), // Blaze Gold
+                    2 => ("#10B981", 2), // Creeper Green
+                    3 => ("#F43F5E", 3), // Nether Crimson
+                    4 => ("#A855F7", 4), // Ender Violet
+                    _ => ("#38BDF8", 0), // Masterix Cyan
                 };
                 self.catalog.config.theme.custom_accent_hex = hex.into();
+                self.catalog.config.theme.palette_idx = p_id;
                 self.catalog.config.theme.preset = horizon_client::ui_theme::ThemePreset::Custom;
                 horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
                 self.anim.trigger_theme_pulse();
@@ -6985,7 +6986,7 @@ impl Launcher {
             }
             Some(Action::GlassOpacityDelta(delta)) => {
                 self.catalog.config.theme.glass_opacity =
-                    (self.catalog.config.theme.glass_opacity + delta).clamp(0.30, 0.95);
+                    (self.catalog.config.theme.glass_opacity + delta).clamp(0.40, 0.98);
                 horizon_client::ui_theme::set_active_theme(self.catalog.config.theme.resolve());
                 self.anim.trigger_theme_pulse();
                 self.catalog.config.save(&self.home)?;
