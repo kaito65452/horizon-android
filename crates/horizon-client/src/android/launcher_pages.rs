@@ -44,7 +44,7 @@ fn is_december() -> bool {
 fn decode_png_rgba(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let mut buf = vec![0u8; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut buf).ok()?;
     let width = info.width;
     let height = info.height;
@@ -1661,7 +1661,9 @@ impl Launcher {
                 // ROW 1 — Hero Banner (6/12 height)
                 // Official Drop Wallpaper (Dynamic per Accent Palette or Winter Easter Egg)
                 // ========================================================
-                let palette = self.catalog.config.accent_palette;
+                let palette = horizon_theme::blaze::AccentPalette::from_u8(
+                    self.catalog.config.theme.palette_idx,
+                );
                 if let Some((key, img_w, img_h, rgba)) = load_active_wallpaper(palette) {
                     ui.wallpaper(
                         key, img_w, img_h, &rgba, row1.x, row1.y, row1.w, row1.h, 16.0,
@@ -5575,14 +5577,14 @@ impl Launcher {
                 if cy + 52.0 >= list_top && cy <= list_bottom {
                     ui.rounded(content_x, cy, content_w, 50.0, 12.0, blaze_card_bg());
                     ui.border(content_x, cy, content_w, 50.0, 12.0, blaze_card_border());
-                    let bg_swatches = if resolved.is_light {
-                        THEME_BG_SWATCHES_LIGHT
+                    let bg_swatches: &[(u32, &str, &str)] = if resolved.is_light {
+                        &THEME_BG_SWATCHES_LIGHT
                     } else {
-                        THEME_BG_SWATCHES_DARK
+                        &THEME_BG_SWATCHES_DARK
                     };
                     let sw_size = 30.0;
                     let sw_gap = 8.0;
-                    for (i, (rgb, hex_str, _name)) in bg_swatches.into_iter().enumerate() {
+                    for (i, &(rgb, hex_str, _name)) in bg_swatches.iter().enumerate() {
                         let sx = content_x + 12.0 + i as f32 * (sw_size + sw_gap);
                         if sx + sw_size > content_x + content_w - 238.0 {
                             break;
