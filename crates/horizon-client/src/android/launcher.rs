@@ -1,14 +1,14 @@
 //! A native Rust installer and version screen, sharing the game's Vulkan renderer.
 use crate::catalog::{Catalog, Page};
 use crate::game;
+pub(super) mod blaze_ui;
 #[path = "chooser.rs"]
 mod chooser;
 #[path = "launcher_gesture.rs"]
 mod gesture;
 #[path = "login.rs"]
 mod login;
-#[path = "launcher_pages.rs"]
-mod pages;
+use blaze_ui as pages;
 #[path = "wardrobe.rs"]
 mod wardrobe;
 use horizon_client::{

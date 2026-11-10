@@ -89,7 +89,7 @@ class UIReferenceParityTests(unittest.TestCase):
                     text.lower(),
                     f"Legacy token {token} found in {f.relative_to(ROOT)}"
                 )
-            if "launcher_pages.rs" in f.name:
+            if "blaze_ui" in f.name:
                 self.assertNotIn(
                     "my3_",
                     text,
