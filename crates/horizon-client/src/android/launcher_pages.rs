@@ -297,7 +297,10 @@ fn rounded_vgrad(
         // Distance from the bottom edge picks the arc inset (top corners are never covered).
         let d_bottom = r.y + r.h - (sy + sh * 0.5);
         let inset = if d_bottom < radius {
-            radius - (radius * radius - (radius - d_bottom) * (radius - d_bottom)).max(0.0).sqrt()
+            radius
+                - (radius * radius - (radius - d_bottom) * (radius - d_bottom))
+                    .max(0.0)
+                    .sqrt()
         } else {
             0.0
         } + 0.5;
@@ -1812,7 +1815,14 @@ impl Launcher {
                     None => false,
                 };
                 if !hero_drawn {
-                    ui.rounded(row1.x, row1.y, row1.w, row1.h, GLASS_RADIUS, blaze_card_bg());
+                    ui.rounded(
+                        row1.x,
+                        row1.y,
+                        row1.w,
+                        row1.h,
+                        GLASS_RADIUS,
+                        blaze_card_bg(),
+                    );
                 }
                 rounded_vgrad(
                     &mut ui,
@@ -2142,7 +2152,8 @@ impl Launcher {
                     };
                     let disc = 26.0;
                     let mid_x = play_col.x + 14.0 + icon_tile + 8.0;
-                    let mid_w = (play_col.w - (14.0 + icon_tile + 8.0) - (disc + 14.0 + 8.0)).max(40.0);
+                    let mid_w =
+                        (play_col.w - (14.0 + icon_tile + 8.0) - (disc + 14.0 + 8.0)).max(40.0);
                     let title_sz = 18.0;
                     let sub_sz = 9.5;
                     let stack_h = (title_sz * 1.2_f32).round() + (sub_sz * 1.45_f32).round();
@@ -2222,7 +2233,14 @@ impl Launcher {
                     );
                     let c_tile = (card.h * 0.46).clamp(30.0, 38.0);
                     let c_tile_y = card.y + (card.h - c_tile) * 0.5;
-                    ui.rounded(card.x + 16.0, c_tile_y, c_tile, c_tile, TILE_RADIUS, tile_fill());
+                    ui.rounded(
+                        card.x + 16.0,
+                        c_tile_y,
+                        c_tile,
+                        c_tile,
+                        TILE_RADIUS,
+                        tile_fill(),
+                    );
                     ui.border(
                         card.x + 16.0,
                         c_tile_y,
