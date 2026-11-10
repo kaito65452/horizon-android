@@ -187,8 +187,22 @@ pub(super) fn save_from_anywhere(
     result.map(|()| target)
 }
 
-/// Downloads `file` into `folder`, checked as [`save`] does.
+/// Downloads `file` into `folder`, utilizing multithreaded chunk requests when supported.
 pub fn fetch(file: &FileRef, folder: &Path, progress: &dyn Fn(f32)) -> Result<PathBuf, String> {
+    if let Some(why) = refuse(file) {
+        return Err(why);
+    }
+    // Attempt multithreaded chunk download for files >= 1 MiB
+    if file.size >= 1024 * 1024 {
+        if let Ok(path) = fetch_multithreaded(file, folder, progress) {
+            return Ok(path);
+        }
+    }
+    fetch_single(file, folder, progress)
+}
+
+/// Single-stream download fallback.
+pub fn fetch_single(file: &FileRef, folder: &Path, progress: &dyn Fn(f32)) -> Result<PathBuf, String> {
     if let Some(why) = refuse(file) {
         return Err(why);
     }
@@ -200,4 +214,123 @@ pub fn fetch(file: &FileRef, folder: &Path, progress: &dyn Fn(f32)) -> Result<Pa
             ureq::Error::Transport(t) => format!("No connection: {t}"),
         })?;
     save(file, response.into_reader(), folder, progress)
+}
+
+/// Parallel chunk downloader using HTTP Range requests.
+pub fn fetch_multithreaded(
+    file: &FileRef,
+    folder: &Path,
+    progress: &dyn Fn(f32),
+) -> Result<PathBuf, String> {
+    if let Some(why) = refuse(file) {
+        return Err(why);
+    }
+    let (algo, want) = file.checksum().expect("refuse checks for one");
+    fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let target = folder.join(&file.name);
+    let part = folder.join(format!(".{}.part", file.name));
+
+    let total_size = file.size;
+    let num_threads = 4.min((total_size / (256 * 1024)).max(1) as usize);
+    if num_threads <= 1 {
+        return fetch_single(file, folder, progress);
+    }
+
+    let chunk_size = (total_size + num_threads as u64 - 1) / num_threads as u64;
+    let done_bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+
+    let mut handles = Vec::with_capacity(num_threads);
+    for i in 0..num_threads {
+        let start = i as u64 * chunk_size;
+        let end = ((i as u64 + 1) * chunk_size - 1).min(total_size - 1);
+        if start > end {
+            break;
+        }
+        let url = file.url.clone();
+        let chunk_path = folder.join(format!(".{}.chunk.{}", file.name, i));
+        let done_clone = done_bytes.clone();
+
+        handles.push(std::thread::spawn(move || -> Result<PathBuf, String> {
+            let resp = agent(&url)
+                .get(&url)
+                .set("Range", &format!("bytes={start}-{end}"))
+                .call()
+                .map_err(|e| format!("Range request failed: {e}"))?;
+
+            if resp.status() != 206 {
+                return Err(format!("Server does not support range requests (status {})", resp.status()));
+            }
+
+            let mut reader = resp.into_reader();
+            let mut chunk_file = fs::File::create(&chunk_path)
+                .map_err(|e| format!("Failed to create chunk file: {e}"))?;
+            let mut buf = vec![0u8; 1 << 16];
+            loop {
+                let n = reader.read(&mut buf).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    break;
+                }
+                chunk_file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+                done_clone.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
+            }
+            chunk_file.sync_all().map_err(|e| e.to_string())?;
+            Ok(chunk_path)
+        }));
+    }
+
+    let mut chunk_paths = Vec::new();
+    for handle in handles {
+        let chunk_path = match handle.join() {
+            Ok(Ok(p)) => p,
+            _ => {
+                for cp in &chunk_paths {
+                    let _ = fs::remove_file(cp);
+                }
+                return Err("Chunk download worker failed".to_string());
+            }
+        };
+        chunk_paths.push(chunk_path);
+        progress(done_bytes.load(std::sync::atomic::Ordering::Relaxed) as f32 / total_size.max(1) as f32);
+    }
+
+    let stitch_result = (|| -> Result<(), String> {
+        let mut out = fs::File::create(&part).map_err(|e| format!("{}: {e}", part.display()))?;
+        let mut hasher = Hasher::for_file(file);
+        let mut buf = vec![0u8; 1 << 16];
+
+        for chunk_path in &chunk_paths {
+            let mut chunk_file = fs::File::open(chunk_path).map_err(|e| e.to_string())?;
+            loop {
+                let n = chunk_file.read(&mut buf).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+                out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            }
+        }
+
+        let got = hasher.hex();
+        if !got.eq_ignore_ascii_case(want) {
+            return Err(format!(
+                "The {algo} checksum doesn't match: the file isn't the one its source lists."
+            ));
+        }
+
+        out.sync_all().map_err(|e| e.to_string())?;
+        drop(out);
+        fs::rename(&part, &target).map_err(|e| format!("{}: {e}", target.display()))
+    })();
+
+    for chunk_path in &chunk_paths {
+        let _ = fs::remove_file(chunk_path);
+    }
+
+    if stitch_result.is_err() {
+        let _ = fs::remove_file(&part);
+        stitch_result?;
+    }
+
+    progress(1.0);
+    Ok(target)
 }

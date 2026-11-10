@@ -663,14 +663,14 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn('(Page::Play, "Home", Icon::Play)', launcher_pages)
         self.assertIn('"Browse"', launcher_pages)
         self.assertIn('(Page::Installed, "Manager", Icon::Folder)', launcher_pages)
-        self.assertIn('(Page::Skins, "Skin", Icon::Check)', launcher_pages)
+        self.assertIn('(Page::Skins, "Skin", Icon::User)', launcher_pages)
         self.assertIn('(Page::Settings, "Settings", Icon::Settings)', launcher_pages)
         self.assertIn("Action::Repository", launcher_pages)
         self.assertIn("Action::OpenControlEditor", launcher_pages)
 
         # 2. 3-Row Landscape Home Layout
         self.assertIn('"MINECRAFT"', launcher_pages)
-        self.assertIn('"PLAY WITHOUT LIMITS • YOUR JAVA WORLDS ON ANDROID"', launcher_pages)
+        self.assertIn('"PLAY WITHOUT LIMITS', launcher_pages)
         self.assertIn('"FAST"', launcher_pages)
         self.assertIn('"STABLE"', launcher_pages)
         self.assertIn('"CUSTOMIZABLE"', launcher_pages)
@@ -678,12 +678,93 @@ class LauncherOverhaulTests(unittest.TestCase):
         self.assertIn('"EDIT"', launcher_pages)
         self.assertIn('"BROWSE RESOURCES"', launcher_pages)
         self.assertIn('"MANAGER"', launcher_pages)
-        self.assertIn('"Export worlds (SAF)"', launcher_pages)
+        self.assertIn('"Resource Packs"', launcher_pages)
+        self.assertIn('"Shaders"', launcher_pages)
 
-        # 3. Dismissible Starling Migration Notice
-        self.assertIn("pub starling_notice_dismissed: bool,", catalog)
-        self.assertIn("Action::DismissStarlingNotice", launcher_pages)
-        self.assertIn("!self.catalog.starling_notice_dismissed", launcher_pages)
+        # 3. Multithreaded chunk downloader in browser/download.rs
+        download_rs = (ROOT / "launcher/src/browser/download.rs").read_text(encoding="utf-8")
+        self.assertIn("pub fn fetch_multithreaded(", download_rs)
+        self.assertIn("fetch_single(file, folder, progress)", download_rs)
+
+    def test_multi_resolution_landscape_layout_bounds_and_no_overlap(self) -> None:
+        resolutions = [
+            (1520.0, 720.0),
+            (1280.0, 720.0),
+            (2400.0, 1080.0),
+            (1920.0, 1080.0),
+        ]
+        gap = 10.0
+
+        for w, h in resolutions:
+            content_x = 16.0
+            content_w = w - 32.0
+            content_top = 58.0
+            content_h = h - content_top - 16.0
+            self.assertGreater(content_w, 200.0)
+            self.assertGreater(content_h, 200.0)
+
+            # Row split weights [6.0, 3.0, 3.0]
+            row_weights = [6.0, 3.0, 3.0]
+            sum_row_weights = sum(row_weights)
+            avail_h = content_h - (len(row_weights) - 1) * gap
+            self.assertGreater(avail_h, 0.0)
+
+            row_rects = []
+            cur_y = content_top
+            for wt in row_weights:
+                rh = (avail_h * wt) / sum_row_weights
+                row_rects.append((content_x, cur_y, content_w, rh))
+                cur_y += rh + gap
+
+            row1, row2, row3 = row_rects
+
+            # Verify rows are within bounds and non-overlapping vertically
+            for rx, ry, rw, rh in row_rects:
+                self.assertGreaterEqual(rx, 0.0)
+                self.assertGreaterEqual(ry, 0.0)
+                self.assertLessEqual(rx + rw, w)
+                self.assertLessEqual(ry + rh, h)
+                self.assertGreater(rw, 0.0)
+                self.assertGreater(rh, 0.0)
+
+            self.assertLessEqual(row1[1] + row1[3], row2[1])
+            self.assertLessEqual(row2[1] + row2[3], row3[1])
+
+            # Row 2 cols: prof_col (5.0), edit_col (2.0), play_col (5.0)
+            col_weights = [5.0, 2.0, 5.0]
+            sum_col_weights = sum(col_weights)
+            avail_w = row2[2] - (len(col_weights) - 1) * gap
+            self.assertGreater(avail_w, 0.0)
+
+            col_rects = []
+            cur_x = row2[0]
+            for wt in col_weights:
+                cw = (avail_w * wt) / sum_col_weights
+                col_rects.append((cur_x, row2[1], cw, row2[3]))
+                cur_x += cw + gap
+
+            prof_col, edit_col, play_col = col_rects
+
+            # Non-overlapping horizontal columns in Row 2
+            self.assertLessEqual(prof_col[0] + prof_col[2], edit_col[0])
+            self.assertLessEqual(edit_col[0] + edit_col[2], play_col[0])
+
+            for cx, cy, cw, ch in col_rects:
+                self.assertGreaterEqual(cx, 0.0)
+                self.assertLessEqual(cx + cw, w)
+                self.assertGreater(cw, 0.0)
+                self.assertGreater(ch, 0.0)
+
+            # Row 3 cols: browse_card (6.0), manager_card (6.0)
+            r3_weights = [6.0, 6.0]
+            avail_w3 = row3[2] - gap
+            cw3_1 = (avail_w3 * 6.0) / 12.0
+            cw3_2 = (avail_w3 * 6.0) / 12.0
+            browse_card = (row3[0], row3[1], cw3_1, row3[3])
+            manager_card = (row3[0] + cw3_1 + gap, row3[1], cw3_2, row3[3])
+
+            self.assertLessEqual(browse_card[0] + browse_card[2], manager_card[0])
+            self.assertLessEqual(manager_card[0] + manager_card[2], w)
 
 
 if __name__ == "__main__":

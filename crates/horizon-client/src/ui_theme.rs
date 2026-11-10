@@ -80,6 +80,106 @@ pub(crate) const MICRO: f32 = horizon_theme::MICRO.px;
 pub(crate) const RADIUS: f32 = horizon_theme::RADIUS;
 pub(crate) const RADIUS_PLATE: f32 = horizon_theme::RADIUS_PLATE;
 
+/// A responsive 2D layout rectangle with relative subdivision helpers for landscape screens.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LayoutRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl LayoutRect {
+    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h }
+    }
+
+    pub const fn to_array(self) -> [f32; 4] {
+        [self.x, self.y, self.w, self.h]
+    }
+
+    /// Insets this rectangle by `dx` horizontally and `dy` vertically.
+    pub fn inset(self, dx: f32, dy: f32) -> Self {
+        Self {
+            x: self.x + dx,
+            y: self.y + dy,
+            w: (self.w - 2.0 * dx).max(0.0),
+            h: (self.h - 2.0 * dy).max(0.0),
+        }
+    }
+
+    /// Insets this rectangle with asymmetric paddings: `(left, top, right, bottom)`.
+    pub fn pad(self, left: f32, top: f32, right: f32, bottom: f32) -> Self {
+        Self {
+            x: self.x + left,
+            y: self.y + top,
+            w: (self.w - left - right).max(0.0),
+            h: (self.h - top - bottom).max(0.0),
+        }
+    }
+
+    /// Split this rectangle vertically into `N` rows with proportional `weights` and spacing `gap`.
+    pub fn split_rows<const N: usize>(self, weights: [f32; N], gap: f32) -> [LayoutRect; N] {
+        let total_weight: f32 = weights.iter().copied().sum();
+        let total_gaps = gap * (N.saturating_sub(1) as f32);
+        let avail_h = (self.h - total_gaps).max(0.0);
+        let mut out = [Self::new(0.0, 0.0, 0.0, 0.0); N];
+        let mut cur_y = self.y;
+        for i in 0..N {
+            let row_h = if total_weight > 0.0 {
+                (avail_h * (weights[i] / total_weight)).round()
+            } else {
+                0.0
+            };
+            out[i] = Self::new(self.x, cur_y, self.w, row_h);
+            cur_y += row_h + gap;
+        }
+        out
+    }
+
+    /// Split this rectangle horizontally into `N` columns with proportional `weights` and spacing `gap`.
+    pub fn split_cols<const N: usize>(self, weights: [f32; N], gap: f32) -> [LayoutRect; N] {
+        let total_weight: f32 = weights.iter().copied().sum();
+        let total_gaps = gap * (N.saturating_sub(1) as f32);
+        let avail_w = (self.w - total_gaps).max(0.0);
+        let mut out = [Self::new(0.0, 0.0, 0.0, 0.0); N];
+        let mut cur_x = self.x;
+        for i in 0..N {
+            let col_w = if total_weight > 0.0 {
+                (avail_w * (weights[i] / total_weight)).round()
+            } else {
+                0.0
+            };
+            out[i] = Self::new(cur_x, self.y, col_w, self.h);
+            cur_x += col_w + gap;
+        }
+        out
+    }
+
+    /// Subdivide rectangle as a responsive grid column: `col_start` [0..total_cols-1], `col_span` [1..total_cols], with `gap`.
+    pub fn col_cell(self, col_start: usize, col_span: usize, total_cols: usize, gap: f32) -> LayoutRect {
+        let total_cols = total_cols.max(1);
+        let total_gaps = gap * ((total_cols - 1) as f32);
+        let col_unit = (self.w - total_gaps).max(0.0) / (total_cols as f32);
+        let x = self.x + (col_start as f32) * (col_unit + gap);
+        let span_gaps = gap * ((col_span.saturating_sub(1)) as f32);
+        let w = (col_unit * (col_span as f32) + span_gaps).min(self.x + self.w - x);
+        Self::new(x, self.y, w.max(0.0), self.h)
+    }
+}
+
+impl From<LayoutRect> for [f32; 4] {
+    fn from(r: LayoutRect) -> Self {
+        r.to_array()
+    }
+}
+
+impl From<[f32; 4]> for LayoutRect {
+    fn from(r: [f32; 4]) -> Self {
+        Self::new(r[0], r[1], r[2], r[3])
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Face {
     Regular,
@@ -146,6 +246,7 @@ pub enum Icon {
     FileText,
     Trash,
     Share,
+    User,
 }
 
 struct Fonts {
@@ -531,6 +632,13 @@ fn icon_hit(icon: Icon, u: f32, v: f32) -> bool {
             let head_l = seg_dist(u, v, 0.34, 0.36, 0.50, 0.20) <= 0.048;
             let head_r = seg_dist(u, v, 0.66, 0.36, 0.50, 0.20) <= 0.048;
             tray_l || tray_r || tray_b || stem || head_l || head_r
+        }
+        Icon::User => {
+            let head = ((u - 0.50).powi(2) + (v - 0.33).powi(2)).sqrt() <= 0.16;
+            let torso = ((u - 0.50).powi(2) + (v - 0.95).powi(2)).sqrt() <= 0.44
+                && (0.56..=0.86).contains(&v)
+                && (0.18..=0.82).contains(&u);
+            head || torso
         }
     }
 }
@@ -3012,5 +3120,28 @@ mod tests {
         let grad = cfg.resolve();
         assert!(grad.is_gradient);
         assert_ne!(grad.bg_solid >> 24, 0, "solid fallback is always opaque");
+    }
+
+    #[test]
+    fn layout_rect_subdivision_and_bounds_are_exact() {
+        let root = LayoutRect::new(0.0, 0.0, 1200.0, 600.0);
+        let rows = root.split_rows([6.0, 3.0, 3.0], 10.0);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].y, 0.0);
+        assert!(rows[0].h > rows[1].h);
+        assert_eq!(rows[1].h, rows[2].h);
+        assert_eq!(rows[1].y, rows[0].y + rows[0].h + 10.0);
+        assert_eq!(rows[2].y, rows[1].y + rows[1].h + 10.0);
+
+        let cols = rows[1].split_cols([5.0, 2.0, 5.0], 10.0);
+        assert_eq!(cols.len(), 3);
+        assert_eq!(cols[0].x, rows[1].x);
+        assert_eq!(cols[0].w, cols[2].w);
+        assert_eq!(cols[1].x, cols[0].x + cols[0].w + 10.0);
+        assert_eq!(cols[2].x, cols[1].x + cols[1].w + 10.0);
+
+        let cell = root.col_cell(0, 5, 12, 10.0);
+        assert_eq!(cell.x, 0.0);
+        assert!(cell.w > 0.0);
     }
 }

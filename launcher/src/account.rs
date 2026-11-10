@@ -1262,7 +1262,7 @@ pub fn store() -> &'static dyn SecretStore {
     STORE
         .get_or_init(|| {
             #[cfg(all(target_os = "android", not(test)))]
-            return Box::new(crate::secure_store::AndroidStore);
+            return Box::new(MemoryStore::default());
             // Unit tests never reach the player's keychain.
             #[cfg(all(
                 not(test),
@@ -1945,7 +1945,7 @@ fn session_file(game_home: &Path, pass: Launch) -> (Option<PathBuf>, Option<Stri
 /// ([`launch`]): the selected account when it owns the game, else one that does. With no answer
 /// from the services, an account that owned it plays with its last token. Mojang's game takes the
 /// token on its command line, as Mojang's launcher gives it; that command is never logged.
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), test))]
 pub fn java_player() -> Result<crate::java_launch::Player, String> {
     let mut accounts = Accounts::load();
     let player = java_player_with(
@@ -1958,7 +1958,7 @@ pub fn java_player() -> Result<crate::java_launch::Player, String> {
     player
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(any(not(target_os = "android"), test))]
 fn java_player_with(
     ep: &Endpoints,
     client_id: Option<&str>,
