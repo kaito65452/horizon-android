@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Blaze Launcher: Landscape UI Reference</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js for 3D Skin Preview -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --accent-primary: #38bdf8;
+            --accent-secondary: #0284c7;
+            --accent-glow: rgba(56, 189, 248, 0.35);
+            --accent-soft: rgba(56, 189, 248, 0.15);
+            --play-grad-start: #e0f2fe;
+            --play-grad-mid: #bae6fd;
+            --play-grad-end: #38bdf8;
+            --card-opacity: 0.72;
+            --card-blur: 16px;
+        }
+
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #05070b;
+            color: #f1f5f9;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Custom Thin Scrollbar for Landscape Panels */
+        ::-webkit-scrollbar {
+            width: 5px;
+            height: 5px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.35);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--accent-primary);
+            border-radius: 9999px;
+            opacity: 0.5;
+        }
+
+        /* Dynamic Glassmorphism controlled by Settings Sliders */
+        .horizon-glass {
+            background: rgba(14, 19, 28, var(--card-opacity));
+            backdrop-filter: blur(var(--card-blur));
+            -webkit-backdrop-filter: blur(var(--card-blur));
+            border: 1px solid rgba(255, 255, 255, 0.09);
+        }
+
+        .horizon-pill {
+            background: rgba(10, 14, 22, 0.78);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Dynamic Accent Utilities */
+        .accent-text { color: var(--accent-primary); }
+        .accent-bg { background-color: var(--accent-primary); }
+        .accent-border { border-color: var(--accent-primary); }
+        .accent-badge {
+            background-color: var(--accent-soft);
+            color: var(--accent-primary);
+            border: 1px solid var(--accent-glow);
+        }
+
+        /* Masterix / Blaze Play Button */
+        .play-btn-masterix {
+            background: linear-gradient(135deg, var(--play-grad-start) 0%, var(--play-grad-mid) 50%, var(--play-grad-end) 100%);
+            box-shadow: 0 0 28px var(--accent-glow), inset 0 2px 4px rgba(255, 255, 255, 0.85);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .play-btn-masterix:hover {
+            transform: translateY(-1px) scale(1.01);
+            box-shadow: 0 0 38px var(--accent-glow), inset 0 2px 6px rgba(255, 255, 255, 1);
+        }
+        .play-btn-masterix:active {
+            transform: translateY(1px) scale(0.99);
+        }
+
+        .pixel-overlay {
+            background-image: radial-gradient(rgba(15, 23, 42, 0.16) 2px, transparent 2px);
+            background-size: 10px 10px;
+        }
+
+        .control-grid {
+            background-size: 20px 20px;
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        }
+
+        /* Strict Landscape Frame Container */
+        #landscape-device-wrapper {
+            width: 100vw;
+            height: 100vh;
+            max-width: 1920px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+        }
+
+        #landscape-screen {
+            width: 100%;
+            height: 100%;
+            max-height: 56.25vw; /* 16:9 ratio cap */
+            min-width: 780px;
+            position: relative;
+            border-radius: 22px;
+            overflow: hidden;
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            background-color: #080b11;
+        }
+
+        /* Allow horizontal scroll on narrow mobile portrait browsers while keeping strict landscape UI inside */
+        @media (max-width: 800px) {
+            body {
+                overflow-x: auto;
+                justify-content: flex-start;
+            }
+            #landscape-device-wrapper {
+                width: 860px;
+                height: 484px;
+                flex-shrink: 0;
+            }
+            #landscape-screen {
+                max-height: 484px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="landscape-device-wrapper">
+        <!-- STRICT 16:9 HORIZONTAL LANDSCAPE SCREEN -->
+        <div id="landscape-screen">
+
+            <!-- ================= GLOBAL WALLPAPER / SHADER LAYER (Visible in Dashboard & Settings!) ================= -->
+            <div id="global-bg-container" class="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+                <!-- Wallpaper 1: Minecraft.net Aquatic Artwork SVG -->
+                <div id="global-bg-mc" class="absolute inset-0 transition-opacity duration-500 opacity-45">
+                    <svg class="w-full h-full object-cover" viewBox="0 0 1200 675" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                        <defs>
+                            <linearGradient id="bgOcean" x1="0" y1="0" x2="1200" y2="675" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stop-color="#04101c"/>
+                                <stop offset="50%" stop-color="#0a2e4a"/>
+                                <stop offset="100%" stop-color="#0d5c56"/>
+                            </linearGradient>
+                            <linearGradient id="bgRay" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.32"/>
+                                <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+                            </linearGradient>
+                        </defs>
+                        <rect width="1200" height="675" fill="url(#bgOcean)"/>
+                        <polygon points="200,0 420,0 260,675 40,675" fill="url(#bgRay)"/>
+                        <polygon points="560,0 820,0 620,675 360,675" fill="url(#bgRay)"/>
+                        <polygon points="920,0 1120,0 960,675 760,675" fill="url(#bgRay)"/>
+                        <circle cx="300" cy="200" r="180" fill="#0ea5e9" opacity="0.12" filter="blur(60px)"/>
+                        <circle cx="900" cy="420" r="220" fill="#ec4899" opacity="0.1" filter="blur(70px)"/>
+                    </svg>
+                </div>
+
+                <!-- Wallpaper 2: Live Animated Voxel Shader Canvas -->
+                <canvas id="global-bg-shader" class="absolute inset-0 w-full h-full hidden opacity-65"></canvas>
+
+                <!-- Wallpaper 3: Custom Uploaded / Preset High-Res Wallpaper -->
+                <div id="global-bg-custom" class="absolute inset-0 bg-cover bg-center hidden opacity-55" style="background-image: url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1400&q=80');"></div>
+
+                <!-- Wallpaper 4: OLED black Carbon -->
+                <div id="global-bg-oled" class="absolute inset-0 bg-[#05070a] hidden"></div>
+
+                <!-- Ambient Glow Orbs that follow the selected Color Palette -->
+                <div class="absolute -top-28 -left-24 w-96 h-96 rounded-full blur-[130px] opacity-25 pointer-events-none" style="background: var(--accent-primary);"></div>
+                <div class="absolute -bottom-28 -right-24 w-96 h-96 rounded-full blur-[130px] opacity-20 pointer-events-none" style="background: var(--accent-secondary);"></div>
+            </div>
+
+            <!-- ================= TOP HORIZONTAL BAR (EXACT MASTERIX / HORIZON LAYOUT) ================= -->
+            <header class="relative z-20 px-4 pt-2.5 pb-1.5 flex items-center justify-between gap-2 shrink-0">
+                
+                <!-- Left: Brand Identity -->
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-blue-700 p-0.5 shadow-md">
+                        <div class="w-full h-full bg-[#0a0e17] rounded-[6px] flex items-center justify-center">
+                            <i data-lucide="compass" class="w-4 h-4 accent-text"></i>
+                        </div>
+                    </div>
+                    <div class="leading-tight">
+                        <div class="flex items-center gap-1.5">
+                            <span class="font-extrabold text-xs tracking-wide text-white">Blaze</span>
+                            <span class="text-[9px] font-mono px-1.5 py-0.2 rounded accent-badge font-semibold">26.3</span>
+                        </div>
+                        <div class="text-[8px] font-mono uppercase tracking-widest text-slate-400">LAUNCHER</div>
+                    </div>
+                </div>
+
+                <!-- Center: Masterix Icon Pill Bar -->
+                <nav class="horizon-pill rounded-full px-2 py-1 flex items-center gap-1 shadow-lg">
+                    <button onclick="switchTab('home')" id="nav-home" title="Dashboard" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-semibold bg-white/15 text-white transition">
+                        <i data-lucide="home" class="w-3.5 h-3.5 accent-text"></i>
+                        <span class="text-[11px]">Home</span>
+                    </button>
+                    <button onclick="switchTab('downloads')" id="nav-downloads" title="Downloads" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition relative">
+                        <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                        <span class="text-[11px]">Downloads</span>
+                        <span class="w-1.5 h-1.5 rounded-full accent-bg animate-ping"></span>
+                    </button>
+                    <button onclick="switchTab('controls')" id="nav-controls" title="Goy Control" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition">
+                        <i data-lucide="gamepad-2" class="w-3.5 h-3.5"></i>
+                        <span class="text-[11px]">Goy Control</span>
+                    </button>
+                    <button onclick="switchTab('skin')" id="nav-skin" title="3D Skin Viewer" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition">
+                        <i data-lucide="user" class="w-3.5 h-3.5"></i>
+                        <span class="text-[11px]">3D Skin</span>
+                    </button>
+                    <button onclick="switchTab('settings')" id="nav-settings" title="Settings" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition">
+                        <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
+                        <span class="text-[11px]">Settings</span>
+                    </button>
+                </nav>
+
+                <!-- Right: Notification, Profile Dropdown, Keep-Alive & Quick Icons -->
+                <div class="flex items-center gap-1.5">
+                    <!-- Keep-Alive Status Indicator -->
+                    <button onclick="simulateBackgroundKeepAlive()" title="Keep-alive: downloads and server session stay active in the background" class="horizon-pill px-2.5 py-1 rounded-full flex items-center gap-1.5 border border-emerald-500/30 hover:border-emerald-400 transition">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span class="text-[10px] font-mono font-semibold text-emerald-300">KEEP-ALIVE</span>
+                    </button>
+
+                    <!-- User Pill (Like Pro_Ayush in Reference) -->
+                    <div onclick="switchTab('skin')" class="horizon-pill pl-1.5 pr-2.5 py-1 rounded-full flex items-center gap-2 cursor-pointer hover:bg-white/10 transition">
+                        <div class="w-5 h-5 rounded-full bg-gradient-to-tr from-sky-400 to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white">
+                            P
+                        </div>
+                        <span class="text-[11px] font-semibold text-slate-200">Player</span>
+                        <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+                    </div>
+
+                </div>
+            </header>
+
+            <!-- ================= MAIN LANDSCAPE WORKSPACE ================= -->
+            <div class="relative z-10 flex-1 px-4 pb-3 pt-1 flex flex-col overflow-hidden">
+
+                <!-- ==================== VIEW 1: DASHBOARD (EXACT REFERENCE CLONE) ==================== -->
+                <main id="view-home" class="tab-panel flex-1 grid grid-rows-12 gap-2.5 h-full overflow-hidden">
+                    
+                    <!-- ROW 1 (6/12 height): HERO BANNER WITH MINECRAFT.NET UNDERWATER AXOLOTL SCENE -->
+                    <div class="row-span-6 relative rounded-2xl overflow-hidden border border-white/10 shadow-xl group">
+                        
+                        <!-- Hero Default Artwork (Minecraft Aquatic Update Style with Axolotls & Diver) -->
+                        <div id="hero-banner-art" class="absolute inset-0">
+                            <svg class="w-full h-full object-cover" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                                <defs>
+                                    <linearGradient id="heroSea" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
+                                        <stop offset="0%" stop-color="#06192d"/>
+                                        <stop offset="50%" stop-color="#0d4466"/>
+                                        <stop offset="100%" stop-color="#0e6f73"/>
+                                    </linearGradient>
+                                    <linearGradient id="sunBeam" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stop-color="#7dd3fc" stop-opacity="0.38"/>
+                                        <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+                                    </linearGradient>
+                                </defs>
+                                <rect width="1200" height="360" fill="url(#heroSea)"/>
+                                <!-- Underwater Sunbeams -->
+                                <polygon points="280,0 450,0 310,360 120,360" fill="url(#sunBeam)"/>
+                                <polygon points="540,0 790,0 640,360 390,360" fill="url(#sunBeam)"/>
+                                <polygon points="880,0 1060,0 920,360 760,360" fill="url(#sunBeam)"/>
+
+                                <!-- Left Ocean Ruins Silhouette -->
+                                <g opacity="0.5" fill="#041524">
+                                    <rect x="40" y="140" width="210" height="220"/>
+                                    <rect x="75" y="95" width="140" height="45"/>
+                                    <rect x="95" y="175" width="22" height="22" fill="#7dd3fc" opacity="0.85"/>
+                                    <rect x="175" y="175" width="22" height="22" fill="#7dd3fc" opacity="0.85"/>
+                                </g>
+
+                                <!-- Pink Minecraft Axolotl Left -->
+                                <g transform="translate(360, 75) rotate(-6)">
+                                    <rect x="18" y="18" width="80" height="50" rx="5" fill="#f9a8d4"/>
+                                    <rect x="28" y="34" width="10" height="10" fill="#9d174d"/>
+                                    <rect x="70" y="34" width="10" height="10" fill="#9d174d"/>
+                                    <rect x="0" y="14" width="18" height="10" rx="2" fill="#ec4899"/>
+                                    <rect x="-4" y="32" width="22" height="10" rx="2" fill="#ec4899"/>
+                                    <rect x="0" y="48" width="18" height="10" rx="2" fill="#ec4899"/>
+                                    <rect x="98" y="14" width="18" height="10" rx="2" fill="#ec4899"/>
+                                    <rect x="98" y="32" width="22" height="10" rx="2" fill="#ec4899"/>
+                                    <rect x="98" y="48" width="18" height="10" rx="2" fill="#ec4899"/>
+                                </g>
+
+                                <!-- Main Diving Character Center (Holding Trident) -->
+                                <g transform="translate(545, 48) rotate(14)">
+                                    <rect x="36" y="0" width="64" height="64" rx="4" fill="#d97706"/>
+                                    <rect x="36" y="0" width="64" height="22" fill="#451a03"/>
+                                    <rect x="46" y="32" width="12" height="9" fill="#ffffff"/>
+                                    <rect x="52" y="32" width="6" height="9" fill="#0284c7"/>
+                                    <rect x="76" y="32" width="12" height="9" fill="#ffffff"/>
+                                    <rect x="76" y="32" width="6" height="9" fill="#0284c7"/>
+                                    <rect x="38" y="64" width="60" height="78" rx="4" fill="#0ea5e9"/>
+                                    <rect x="0" y="48" width="36" height="68" rx="4" transform="rotate(-24 18 60)" fill="#38bdf8"/>
+                                    <rect x="98" y="52" width="36" height="68" rx="4" transform="rotate(28 98 52)" fill="#38bdf8"/>
+                                    <!-- Trident -->
+                                    <rect x="-22" y="-18" width="7" height="175" transform="rotate(-12)" fill="#5eead4"/>
+                                    <rect x="-34" y="-22" width="32" height="7" transform="rotate(-12)" fill="#99f6e4"/>
+                                </g>
+
+                                <!-- Second Axolotl Bottom Center-Right -->
+                                <g transform="translate(650, 210) rotate(12) scale(0.85)">
+                                    <rect x="18" y="18" width="80" height="50" rx="5" fill="#fbcfe8"/>
+                                    <rect x="28" y="34" width="10" height="10" fill="#831843"/>
+                                    <rect x="70" y="34" width="10" height="10" fill="#831843"/>
+                                    <rect x="0" y="16" width="18" height="10" fill="#f472b6"/>
+                                    <rect x="98" y="16" width="18" height="10" fill="#f472b6"/>
+                                </g>
+
+                                <!-- Right Coral Reefs & Sea Turtles -->
+                                <g opacity="0.8">
+                                    <rect x="940" y="190" width="42" height="150" rx="4" fill="#f43f5e"/>
+                                    <rect x="985" y="220" width="38" height="110" rx="4" fill="#ec4899"/>
+                                    <rect x="1045" y="175" width="46" height="165" rx="4" fill="#a855f7"/>
+                                    <rect x="890" y="250" width="32" height="80" rx="4" fill="#10b981"/>
+                                </g>
+                            </svg>
+                        </div>
+
+                        <!-- Gradient Vignette Overlay -->
+                        <div class="absolute inset-0 bg-gradient-to-t from-[#070a10] via-[#070a10]/25 to-transparent"></div>
+                        <div class="absolute inset-0 bg-gradient-to-r from-[#070a10]/75 via-transparent to-[#070a10]/45"></div>
+
+                        <!-- Top Right Pill: 26.3 • Blaze Engine -->
+                        <div class="absolute top-3 right-3.5 flex items-center gap-2 z-10">
+                            <button onclick="switchTab('settings')" class="horizon-pill px-3 py-1 rounded-full flex items-center gap-1.5 text-[11px] font-semibold text-white hover:border-white/30 transition shadow-md">
+                                <i data-lucide="compass" class="w-3.5 h-3.5 accent-text"></i>
+                                <span>26.3 • Blaze Engine</span>
+                                <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
+                            </button>
+                        </div>
+
+                        <!-- Bottom Left: MINECRAFT PLAY WITHOUT LIMITS -->
+                        <div class="absolute bottom-3.5 left-5 z-10">
+                            <h2 class="text-2xl sm:text-3xl font-black tracking-tight text-white drop-shadow-md leading-none">
+                                MINECRAFT
+                            </h2>
+                            <p class="text-[9px] sm:text-[10px] tracking-[0.26em] text-slate-300 font-semibold uppercase mt-1">
+                                PLAY WITHOUT LIMITS
+                            </p>
+                        </div>
+
+                        <!-- Bottom Right: FAST • STABLE • CUSTOMIZABLE Pills -->
+                        <div class="absolute bottom-3 right-3.5 z-10 flex items-center gap-1.5">
+                            <span class="horizon-pill px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase text-slate-200 flex items-center gap-1">
+                                <i data-lucide="zap" class="w-3 h-3 accent-text"></i> FAST
+                            </span>
+                            <span class="horizon-pill px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase text-slate-200 flex items-center gap-1">
+                                <i data-lucide="shield-check" class="w-3 h-3 text-emerald-400"></i> STABLE
+                            </span>
+                            <span onclick="switchTab('settings')" class="cursor-pointer horizon-pill px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase text-slate-200 flex items-center gap-1 hover:border-white/30">
+                                <i data-lucide="palette" class="w-3 h-3 text-amber-400"></i> CUSTOMIZABLE
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- ROW 2 (3/12 height): SELECTED PROFILE (RUST) + EDIT + PLAY BUTTON -->
+                    <div class="row-span-3 grid grid-cols-12 gap-2.5 items-stretch">
+                        
+                        <!-- Left: Selected Profile Card (5 cols) -->
+                        <div class="col-span-5 horizon-glass rounded-2xl px-3.5 py-2 flex items-center justify-between hover:border-white/20 transition">
+                            <div class="flex items-center gap-3 min-w-0">
+                                <!-- Creeper Icon Box -->
+                                <div class="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                                    <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                        <path d="M4 4h16v16H4V4zm2 4v4h4V8H6zm8 0v4h4V8h-4zm-4 4v2H8v4h2v-2h4v2h2v-4h-2v-2h-4z"/>
+                                    </svg>
+                                </div>
+                                <div class="truncate">
+                                    <div class="text-[9px] font-mono uppercase tracking-wider text-slate-400">SELECTED PROFILE</div>
+                                    <div class="text-sm font-bold text-white leading-tight">Rust</div>
+                                    <div class="text-[10px] text-slate-400 truncate">26.3 • Blaze Engine • Last played 1 hour ago</div>
+                                </div>
+                            </div>
+                            <button onclick="switchTab('settings')" class="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 shrink-0">
+                                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+
+                        <!-- Center: EDIT Button (2 cols) -->
+                        <button onclick="switchTab('skin')" class="col-span-2 horizon-glass rounded-2xl px-3 py-2 flex items-center justify-center gap-1.5 text-xs font-bold text-slate-200 hover:text-white hover:border-white/25 transition">
+                            <i data-lucide="pencil" class="w-3.5 h-3.5 accent-text"></i>
+                            <span>EDIT</span>
+                        </button>
+
+                        <!-- Right: Prominent PLAY Button (5 cols) -->
+                        <button onclick="launchGame()" class="col-span-5 play-btn-masterix rounded-2xl px-4 py-2 flex items-center justify-between relative overflow-hidden">
+                            <div class="absolute inset-0 pixel-overlay pointer-events-none"></div>
+                            <div class="w-8 h-8 rounded-xl bg-slate-950/10 flex items-center justify-center relative z-10">
+                                <i data-lucide="play" class="w-4 h-4 text-slate-950 fill-slate-950 ml-0.5"></i>
+                            </div>
+                            <div class="text-center relative z-10">
+                                <div class="text-lg font-black tracking-wider text-slate-950 leading-none">PLAY</div>
+                                <div class="text-[10px] font-bold text-slate-800 mt-0.5">26.3 • Blaze Engine</div>
+                            </div>
+                            <div class="w-7 h-7 rounded-full bg-slate-950/10 flex items-center justify-center relative z-10">
+                                <i data-lucide="chevron-down" class="w-4 h-4 text-slate-950"></i>
+                            </div>
+                        </button>
+                    </div>
+
+                    <!-- ROW 3 (3/12 height): TWO BOTTOM RESOURCE & MANAGER CARDS -->
+                    <div class="row-span-3 grid grid-cols-12 gap-2.5 items-stretch">
+                        
+                        <!-- Bottom Left: BROWSER RESOURCES (6 cols) -->
+                        <div onclick="switchTab('downloads')" class="col-span-6 horizon-glass rounded-2xl px-4 py-2 relative overflow-hidden group cursor-pointer hover:border-white/25 transition flex items-center justify-between">
+                            <!-- Illustrated Right Background Accent -->
+                            <div class="absolute right-0 top-0 bottom-0 w-2/5 bg-gradient-to-l from-sky-500/20 via-indigo-500/10 to-transparent pointer-events-none"></div>
+                            <div class="flex items-center gap-3 relative z-10">
+                                <div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-200 group-hover:scale-105 transition">
+                                    <i data-lucide="download" class="w-4 h-4 accent-text"></i>
+                                </div>
+                                <div>
+                                    <div class="text-xs font-extrabold text-white tracking-wide uppercase">BROWSER RESOURCES</div>
+                                    <div class="text-[10px] text-slate-400">Mods • Resource Packs • Shader Packs</div>
+                                </div>
+                            </div>
+                            <div class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white group-hover:translate-x-0.5 transition relative z-10">
+                                <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                            </div>
+                        </div>
+
+                        <!-- Bottom Right: MANAGER (6 cols) -->
+                        <div onclick="switchTab('controls')" class="col-span-6 horizon-glass rounded-2xl px-4 py-2 relative overflow-hidden group cursor-pointer hover:border-white/25 transition flex items-center justify-between">
+                            <div class="absolute right-0 top-0 bottom-0 w-2/5 bg-gradient-to-l from-amber-500/20 via-emerald-500/10 to-transparent pointer-events-none"></div>
+                            <div class="flex items-center gap-3 relative z-10">
+                                <div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-200 group-hover:scale-105 transition">
+                                    <i data-lucide="layers" class="w-4 h-4 text-amber-400"></i>
+                                </div>
+                                <div>
+                                    <div class="text-xs font-extrabold text-white tracking-wide uppercase">MANAGER</div>
+                                    <div class="text-[10px] text-slate-400">Installed mods, packs, and worlds</div>
+                                </div>
+                            </div>
+                            <div class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white group-hover:translate-x-0.5 transition relative z-10">
+                                <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                            </div>
+                        </div>
+
+                    </div>
+                </main>
+
+                <!-- ==================== VIEW 2: MULTI-THREADING DOWNLOAD & 560MB ASSET STREAMER ==================== -->
+                <section id="view-downloads" class="tab-panel hidden flex-1 grid grid-cols-12 gap-3 h-full overflow-hidden">
+                    <!-- Left 8 Cols: 8-Thread Pool -->
+                    <div class="col-span-8 horizon-glass rounded-2xl p-3.5 flex flex-col justify-between overflow-hidden">
+                        <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
+                            <div>
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded accent-badge font-bold">8 THREADS</span>
+                                    <span class="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">AUTO RESUME</span>
+                                </div>
+                                <h3 class="text-sm font-bold text-white mt-1">Download queue</h3>
+                            </div>
+                            <button onclick="runMultiThreadBurst()" class="px-3 py-1.5 rounded-xl accent-bg text-slate-950 font-bold text-[11px] flex items-center gap-1.5 shadow-md hover:opacity-90 transition">
+                                <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                                <span>Simulate download</span>
+                            </button>
+                        </div>
+
+                        <!-- 8 Threads Grid (2 rows x 4 cols) -->
+                        <div id="threads-grid" class="grid grid-cols-4 gap-2 my-auto py-1">
+                            <!-- Injected by JS -->
+                        </div>
+
+                        <!-- Bottom Status Bar -->
+                        <div class="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-2 border-t border-white/10">
+                            <span>Segmented multi-thread download with resume</span>
+                            <span id="total-dl-speed" class="accent-text font-bold">54.2 MB/s</span>
+                        </div>
+                    </div>
+
+                    <!-- Right 4 Cols: Storage Footprint & Keep-Alive Protection -->
+                    <div class="col-span-4 horizon-glass rounded-2xl p-3.5 flex flex-col justify-between">
+                        <div class="space-y-2.5">
+                            <div class="text-[10px] font-mono uppercase accent-text font-bold">QUEUE</div>
+                            <div class="p-2.5 rounded-xl bg-black/30 border border-white/10 space-y-1.5 text-[11px]">
+                                <div class="flex justify-between"><span class="text-slate-400">Threads per file</span><span class="font-mono">8</span></div>
+                                <div class="flex justify-between"><span class="text-slate-400">Active tasks</span><span class="font-mono">8</span></div>
+                                <div class="flex justify-between"><span class="text-slate-400">Auto resume</span><span class="font-mono">On</span></div>
+                            </div>
+                        </div>
+                        <button onclick="simulateBackgroundKeepAlive()" class="w-full py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center justify-center gap-1.5 transition">
+                            <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                            <span>Keep-alive</span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- ==================== VIEW 3: REFACTORED GOY CONTROL V2 (60MB PACK) ==================== -->
+                <section id="view-controls" class="tab-panel hidden flex-1 grid grid-cols-12 gap-3 h-full overflow-hidden">
+                    <!-- Left 8 Cols: Landscape Interactive Touch HUD Editor -->
+                    <div class="col-span-8 horizon-glass rounded-2xl p-2.5 flex flex-col gap-2 overflow-hidden">
+                        <div class="flex items-center justify-between px-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">GOY CONTROL</span>
+                                <span class="text-[11px] text-slate-300 font-semibold">Drag buttons to position them</span>
+                            </div>
+                            <button onclick="addMacroBtn()" class="px-2.5 py-1 rounded-lg accent-badge text-[10px] font-bold hover:opacity-90">
+                                + New macro button
+                            </button>
+                        </div>
+
+                        <div id="goy-canvas" class="relative flex-1 rounded-xl bg-[#06090f] control-grid border border-white/10 overflow-hidden">
+                            <!-- Crosshair -->
+                            <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-35">
+                                <div class="w-3.5 h-0.5 bg-white"></div>
+                                <div class="h-3.5 w-0.5 bg-white absolute"></div>
+                            </div>
+
+                            <!-- Draggable HUD Buttons -->
+                            <div data-label="Joystick Analog / WASD" data-scale="100" data-opacity="85"
+                                 class="goy-draggable absolute left-5 bottom-5 w-24 h-24 rounded-full bg-slate-800/80 border-2 accent-border flex flex-col items-center justify-center cursor-move shadow-lg">
+                                <i data-lucide="move" class="w-5 h-5 accent-text"></i>
+                                <span class="text-[9px] font-mono text-white mt-0.5">JOYSTICK</span>
+                            </div>
+
+                            <div data-label="Attack / Destroy (Left Click)" data-scale="100" data-opacity="90"
+                                 class="goy-draggable absolute right-24 bottom-16 w-14 h-14 rounded-2xl bg-rose-500/30 border border-rose-400 flex flex-col items-center justify-center cursor-move">
+                                <span class="text-[10px] font-mono font-bold text-white">ATK</span>
+                            </div>
+
+                            <div data-label="Place / Use (Right Click)" data-scale="100" data-opacity="90"
+                                 class="goy-draggable absolute right-6 bottom-20 w-14 h-14 rounded-2xl bg-amber-500/30 border border-amber-400 flex flex-col items-center justify-center cursor-move">
+                                <span class="text-[10px] font-mono font-bold text-white">USE</span>
+                            </div>
+
+                            <div data-label="Jump / Fly (Space)" data-scale="100" data-opacity="85"
+                                 class="goy-draggable absolute right-6 bottom-4 w-14 h-12 rounded-xl bg-sky-500/30 border border-sky-400 flex flex-col items-center justify-center cursor-move">
+                                <span class="text-[10px] font-mono font-bold text-white">JUMP</span>
+                            </div>
+
+                            <div data-label="Hotbar 1-9 Direct Touch" data-scale="100" data-opacity="90"
+                                 class="goy-draggable absolute left-1/2 -translate-x-1/2 bottom-2.5 px-5 py-1.5 rounded-xl bg-slate-900/90 border border-white/20 cursor-move">
+                                <span class="text-[9px] font-mono text-slate-300">[1] [2] [3] [4] [5] [6] [7] [8] [9]</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right 4 Cols: Inspector & 60MB Pack Lazy Loader -->
+                    <div class="col-span-4 horizon-glass rounded-2xl p-3.5 flex flex-col justify-between">
+                        <div class="space-y-3">
+                            <div class="border-b border-white/10 pb-2">
+                                <span class="text-[9px] font-mono uppercase text-amber-400">BUTTON PROPERTIES</span>
+                                <h3 id="goy-prop-title" class="text-xs font-bold text-white mt-0.5">Joystick Analog / WASD</h3>
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between text-[11px] mb-1">
+                                    <span class="text-slate-400">Button Scale</span>
+                                    <span id="goy-scale-txt" class="font-mono accent-text">100%</span>
+                                </div>
+                                <input id="goy-scale-slider" type="range" min="60" max="140" value="100" oninput="applyGoyInspector()" class="w-full accent-sky-400">
+                            </div>
+
+                            <div>
+                                <div class="flex justify-between text-[11px] mb-1">
+                                    <span class="text-slate-400">HUD Opacity</span>
+                                    <span id="goy-op-txt" class="font-mono accent-text">85%</span>
+                                </div>
+                                <input id="goy-op-slider" type="range" min="20" max="100" value="85" oninput="applyGoyInspector()" class="w-full accent-sky-400">
+                            </div>
+
+                            <div class="space-y-1.5 pt-1 border-t border-white/10 text-[11px]">
+                                <label class="flex items-center justify-between cursor-pointer">
+                                    <span class="text-slate-300">Camera Touch Passthrough</span>
+                                    <input type="checkbox" checked class="accent-sky-400">
+                                </label>
+                                <label class="flex items-center justify-between cursor-pointer">
+                                    <span class="text-slate-300">Lazy-load texture atlas</span>
+                                    <input type="checkbox" checked class="accent-sky-400">
+                                </label>
+                                <label class="flex items-center justify-between cursor-pointer">
+                                    <span class="text-slate-300">Low-latency input queue</span>
+                                    <input type="checkbox" checked class="accent-sky-400">
+                                </label>
+                            </div>
+                        </div>
+
+                        <button onclick="notify('Control layout saved')" class="w-full py-2 rounded-xl accent-bg text-slate-950 font-bold text-[11px] uppercase tracking-wider">
+                            Save layout
+                        </button>
+                    </div>
+                </section>
+
+                <!-- ==================== VIEW 4: 3D SKIN VIEWER (LANDSCAPE SPLIT) ==================== -->
+                <section id="view-skin" class="tab-panel hidden flex-1 grid grid-cols-12 gap-3 h-full overflow-hidden">
+                    <div class="col-span-7 horizon-glass rounded-2xl p-3 flex flex-col justify-between relative overflow-hidden">
+                        <div class="flex items-center justify-between z-10">
+                            <span class="text-[10px] font-mono uppercase px-2 py-0.5 rounded accent-badge font-bold">3D PREVIEW</span>
+                            <div class="flex gap-1.5">
+                                <button onclick="toggleSkinWalk()" id="skin-walk-btn" class="horizon-pill px-2.5 py-1 rounded-lg text-[10px] font-semibold text-white">Anim: Walk</button>
+                                <button onclick="toggleSkinCapeVis()" id="skin-cape-btn" class="horizon-pill px-2.5 py-1 rounded-lg text-[10px] font-semibold text-amber-300">Cape: ON</button>
+                            </div>
+                        </div>
+                        <div id="three-skin-mount" class="w-full flex-1 cursor-grab active:cursor-grabbing"></div>
+                        <div class="text-[10px] text-slate-400 flex justify-between border-t border-white/10 pt-1.5">
+                            <span>Drag to rotate</span>
+                            <span id="skin-geo-text" class="font-mono accent-text">Slim</span>
+                        </div>
+                    </div>
+
+                    <div class="col-span-5 horizon-glass rounded-2xl p-3.5 flex flex-col justify-between">
+                        <div class="space-y-3">
+                            <h3 class="text-xs font-bold text-white border-b border-white/10 pb-2">Skin presets</h3>
+                            <div class="grid grid-cols-3 gap-2">
+                                <button onclick="setSkinColorPreset('cyan')" class="p-2 rounded-xl bg-sky-500/20 border border-sky-500/40 text-[11px] font-semibold text-sky-300">Diver</button>
+                                <button onclick="setSkinColorPreset('crimson')" class="p-2 rounded-xl bg-rose-500/20 border border-rose-500/40 text-[11px] font-semibold text-rose-300">Nether</button>
+                                <button onclick="setSkinColorPreset('emerald')" class="p-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-[11px] font-semibold text-emerald-300">Emerald</button>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 pt-1">
+                                <button onclick="setSkinArms('slim')" class="p-2 rounded-xl bg-white/10 border border-white/15 text-[11px] font-semibold text-white">Slim</button>
+                                <button onclick="setSkinArms('classic')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-semibold text-slate-300">Classic</button>
+                            </div>
+                            <div class="grid grid-cols-3 gap-2 pt-1">
+                                <button onclick="notify('Choose a skin image (PNG 64x64)')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-semibold text-slate-200">Import skin</button>
+                                <button onclick="notify('Choose a cape image (PNG 64x32)')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-semibold text-slate-200">Import cape</button>
+                                <button onclick="notify('Fetching skin from Microsoft account')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[11px] font-semibold text-slate-200">Microsoft</button>
+                            </div>
+                        </div>
+                        <button onclick="notify('Skin applied')" class="w-full py-2.5 rounded-xl accent-bg text-slate-950 font-bold text-[11px] uppercase">
+                            Apply skin
+                        </button>
+                    </div>
+                </section>
+
+                <!-- ==================== VIEW 5: SETTINGS (category nav + content panel) ==================== -->
+                <section id="view-settings" class="tab-panel hidden flex-1 grid grid-cols-12 gap-3 h-full overflow-hidden">
+                    
+                    <!-- Left Sidebar Categories (4 cols) -->
+                    <div class="col-span-4 horizon-glass rounded-2xl p-2.5 flex flex-col justify-between">
+                        <div class="space-y-1">
+                            <div class="px-2.5 py-1 text-[9px] font-mono uppercase tracking-wider text-slate-400">SETTINGS</div>
+                            
+                            <button onclick="switchSettingsSub('theme')" id="set-tab-theme" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-bold flex items-center gap-2.5 bg-white/15 text-white transition">
+                                <i data-lucide="palette" class="w-4 h-4 accent-text"></i>
+                                <span>Appearance</span>
+                            </button>
+
+                            <button onclick="switchSettingsSub('rust')" id="set-tab-rust" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+                                <i data-lucide="cpu" class="w-4 h-4"></i>
+                                <span>Engine & Memory</span>
+                            </button>
+
+                            <button onclick="switchSettingsSub('keepalive')" id="set-tab-keepalive" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition">
+                                <i data-lucide="shield-alert" class="w-4 h-4"></i>
+                                <span>Downloads & Keep-alive</span>
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                    <!-- Right Content Area (8 cols) -->
+                    <div class="col-span-8 horizon-glass rounded-2xl p-4 overflow-y-auto">
+                        
+                        <!-- SUB-PANEL 1: COLOR PALETTE & SETTINGS BACKGROUND -->
+                        <div id="set-panel-theme" class="set-subpanel space-y-4">
+                            <div class="border-b border-white/10 pb-2">
+                                <span class="text-[9px] font-mono uppercase accent-text font-bold">THEME</span>
+                                <h3 class="text-sm font-bold text-white">Color & background</h3>
+                            </div>
+
+                            <!-- 5 Color Palettes -->
+                            <div>
+                                <label class="text-[11px] font-semibold text-slate-300 block mb-2">Accent color</label>
+                                <div class="grid grid-cols-5 gap-2">
+                                    <button onclick="applyColorPalette('cyan')" class="p-2 rounded-xl bg-sky-500/20 border border-sky-400 flex flex-col items-center gap-1 hover:scale-105 transition">
+                                        <span class="w-4 h-4 rounded-full bg-sky-400"></span>
+                                        <span class="text-[10px] font-bold text-sky-300">Cyan</span>
+                                    </button>
+                                    <button onclick="applyColorPalette('emerald')" class="p-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 flex flex-col items-center gap-1 hover:scale-105 transition">
+                                        <span class="w-4 h-4 rounded-full bg-emerald-400"></span>
+                                        <span class="text-[10px] font-bold text-emerald-300">Green</span>
+                                    </button>
+                                    <button onclick="applyColorPalette('crimson')" class="p-2 rounded-xl bg-rose-500/20 border border-rose-400/50 flex flex-col items-center gap-1 hover:scale-105 transition">
+                                        <span class="w-4 h-4 rounded-full bg-rose-400"></span>
+                                        <span class="text-[10px] font-bold text-rose-300">Red</span>
+                                    </button>
+                                    <button onclick="applyColorPalette('violet')" class="p-2 rounded-xl bg-violet-500/20 border border-violet-400/50 flex flex-col items-center gap-1 hover:scale-105 transition">
+                                        <span class="w-4 h-4 rounded-full bg-violet-400"></span>
+                                        <span class="text-[10px] font-bold text-violet-300">Violet</span>
+                                    </button>
+                                    <button onclick="applyColorPalette('amber')" class="p-2 rounded-xl bg-amber-500/20 border border-amber-400/50 flex flex-col items-center gap-1 hover:scale-105 transition">
+                                        <span class="w-4 h-4 rounded-full bg-amber-400"></span>
+                                        <span class="text-[10px] font-bold text-amber-300">Gold</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Global & Settings Menu Background Switcher -->
+                            <div>
+                                <label class="text-[11px] font-semibold text-slate-300 block mb-2">Background</label>
+                                <div class="grid grid-cols-4 gap-2">
+                                    <button onclick="setGlobalBackground('mc')" class="p-2 rounded-xl bg-white/10 border border-white/20 text-[10px] font-bold text-white hover:bg-white/15">
+                                        Default art
+                                    </button>
+                                    <button onclick="setGlobalBackground('shader')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-semibold text-slate-300 hover:bg-white/15">
+                                        Animated
+                                    </button>
+                                    <button onclick="setGlobalBackground('custom')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-semibold text-slate-300 hover:bg-white/15">
+                                        Custom
+                                    </button>
+                                    <button onclick="setGlobalBackground('oled')" class="p-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-semibold text-slate-300 hover:bg-white/15">
+                                        OLED black
+                                    </button>
+                                </div>
+                                <button onclick="notify('Choose an image or video')" class="mt-2 w-full p-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-semibold text-slate-300 hover:bg-white/15">Import image / video background</button>
+                            </div>
+
+                            <!-- Glassmorphism Sliders for Settings Menu -->
+                            <div class="grid grid-cols-2 gap-3 pt-1">
+                                <div class="p-2.5 rounded-xl bg-black/30 border border-white/10">
+                                    <div class="flex justify-between text-[10px] mb-1">
+                                        <span class="text-slate-300">Panel opacity</span>
+                                        <span id="glass-op-val" class="font-mono accent-text">72%</span>
+                                    </div>
+                                    <input type="range" min="30" max="95" value="72" oninput="updateGlassOpacity(this.value)" class="w-full accent-sky-400">
+                                </div>
+                                <div class="p-2.5 rounded-xl bg-black/30 border border-white/10">
+                                    <div class="flex justify-between text-[10px] mb-1">
+                                        <span class="text-slate-300">Panel blur</span>
+                                        <span id="glass-blur-val" class="font-mono accent-text">16px</span>
+                                    </div>
+                                    <input type="range" min="0" max="32" value="16" oninput="updateGlassBlur(this.value)" class="w-full accent-sky-400">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SUB-PANEL 2: ENGINE & MEMORY -->
+                        <div id="set-panel-rust" class="set-subpanel hidden space-y-3.5">
+                            <div class="border-b border-white/10 pb-2">
+                                <span class="text-[9px] font-mono uppercase accent-text font-bold">ENGINE</span>
+                                <h3 class="text-sm font-bold text-white">Renderer & memory</h3>
+                            </div>
+
+                            <div class="grid grid-cols-3 gap-2">
+                                <div class="p-2.5 rounded-xl accent-badge">
+                                    <div class="text-[11px] font-bold">Vulkan</div>
+                                    <div class="text-[9px] opacity-80">Native GPU path</div>
+                                </div>
+                                <div class="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                                    <div class="text-[11px] font-bold text-white">OpenGL ES</div>
+                                    <div class="text-[9px] text-slate-400">Fallback</div>
+                                </div>
+                                <div class="p-2.5 rounded-xl bg-white/5 border border-white/10">
+                                    <div class="text-[11px] font-bold text-white">Compressed assets</div>
+                                    <div class="text-[9px] text-slate-400">Streamed on demand</div>
+                                </div>
+                            </div>
+
+                            <div class="p-3 rounded-xl bg-black/30 border border-white/10 space-y-2">
+                                <div class="flex justify-between text-xs">
+                                    <span class="text-slate-200 font-semibold">Memory limit</span>
+                                    <span id="arena-val" class="font-mono accent-text font-bold">2048 MB</span>
+                                </div>
+                                <input type="range" min="512" max="4096" step="256" value="2048" oninput="document.getElementById('arena-val').innerText = this.value + ' MB'" class="w-full accent-sky-400">
+                                <div class="flex justify-between text-[10px] text-slate-400 font-mono">
+                                    <span>Mesh threads: 6</span>
+                                    <span>Audio: low latency</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SUB-PANEL 3: KEEP-ALIVE & NETWORK -->
+                        <div id="set-panel-keepalive" class="set-subpanel hidden space-y-3">
+                            <div class="border-b border-white/10 pb-2">
+                                <span class="text-[9px] font-mono uppercase text-emerald-400 font-bold">BACKGROUND PERSISTENCE</span>
+                                <h3 class="text-sm font-bold text-white">Background downloads & server session</h3>
+                            </div>
+                            <div class="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/30 space-y-2 text-xs">
+                                <div class="flex items-center justify-between font-bold text-emerald-300">
+                                    <span>Foreground service (wake lock + Wi-Fi lock)</span>
+                                    <input type="checkbox" checked class="accent-emerald-400">
+                                </div>
+                                <p class="text-[11px] text-slate-300 leading-relaxed">
+                                    Downloads keep running and the server session stays alive when you switch to another app.
+                                </p>
+                            </div>
+                        </div>
+
+                    </div>
+                </section>
+
+            </div>
+
+            <!-- Toast Notification Inside Landscape Screen -->
+            <div id="horizon-toast" class="absolute top-12 left-1/2 -translate-x-1/2 z-50 hidden horizon-pill px-4 py-1.5 rounded-full border accent-border text-[11px] font-semibold text-white shadow-2xl flex items-center gap-2">
+                <i data-lucide="sparkles" class="w-3.5 h-3.5 accent-text"></i>
+                <span id="horizon-toast-msg">Updated</span>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // ================= TAB NAVIGATION =================
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+            document.getElementById('view-' + tab).classList.remove('hidden');
+
+            document.querySelectorAll('.nav-pill-btn').forEach(b => {
+                b.classList.remove('bg-white/15', 'text-white', 'font-semibold');
+                b.classList.add('text-slate-400');
+            });
+            const active = document.getElementById('nav-' + tab);
+            if (active) {
+                active.classList.add('bg-white/15', 'text-white', 'font-semibold');
+                active.classList.remove('text-slate-400');
+            }
+            if (tab === 'skin') setTimeout(resizeSkinViewport, 50);
+        }
+
+        // ================= SETTINGS SUB-NAVIGATION =================
+        function switchSettingsSub(sub) {
+            document.querySelectorAll('.set-subpanel').forEach(p => p.classList.add('hidden'));
+            document.getElementById('set-panel-' + sub).classList.remove('hidden');
+
+            document.querySelectorAll('.set-nav-btn').forEach(b => {
+                b.classList.remove('bg-white/15', 'text-white', 'font-bold');
+                b.classList.add('text-slate-400', 'font-medium');
+            });
+            const btn = document.getElementById('set-tab-' + sub);
+            if (btn) {
+                btn.classList.add('bg-white/15', 'text-white', 'font-bold');
+                btn.classList.remove('text-slate-400', 'font-medium');
+            }
+        }
+
+        // ================= COLOR PALETTE ENGINE =================
+        const palettes = {
+            cyan: { primary: '#38bdf8', secondary: '#0284c7', glow: 'rgba(56,189,248,0.35)', soft: 'rgba(56,189,248,0.15)', p1: '#e0f2fe', p2: '#bae6fd', p3: '#38bdf8' },
+            emerald: { primary: '#34d399', secondary: '#059669', glow: 'rgba(52,211,153,0.35)', soft: 'rgba(52,211,153,0.15)', p1: '#d1fae5', p2: '#6ee7b7', p3: '#10b981' },
+            crimson: { primary: '#fb7185', secondary: '#e11d48', glow: 'rgba(251,113,133,0.35)', soft: 'rgba(251,113,133,0.15)', p1: '#ffe4e6', p2: '#fda4af', p3: '#f43f5e' },
+            violet: { primary: '#a78bfa', secondary: '#7c3aed', glow: 'rgba(167,139,250,0.35)', soft: 'rgba(167,139,250,0.15)', p1: '#ede9fe', p2: '#c4b5fd', p3: '#8b5cf6' },
+            amber: { primary: '#fbbf24', secondary: '#d97706', glow: 'rgba(251,191,36,0.35)', soft: 'rgba(251,191,36,0.15)', p1: '#fef3c7', p2: '#fde68a', p3: '#f59e0b' }
+        };
+
+        function applyColorPalette(key) {
+            const p = palettes[key];
+            if (!p) return;
+            const root = document.documentElement;
+            root.style.setProperty('--accent-primary', p.primary);
+            root.style.setProperty('--accent-secondary', p.secondary);
+            root.style.setProperty('--accent-glow', p.glow);
+            root.style.setProperty('--accent-soft', p.soft);
+            root.style.setProperty('--play-grad-start', p.p1);
+            root.style.setProperty('--play-grad-mid', p.p2);
+            root.style.setProperty('--play-grad-end', p.p3);
+            notify(`Accent: ${key}`);
+        }
+
+        // ================= GLOBAL & SETTINGS BACKGROUND ENGINE =================
+        let bgShaderReq = null;
+        function setGlobalBackground(mode) {
+            ['mc', 'shader', 'custom', 'oled'].forEach(id => {
+                document.getElementById('global-bg-' + id).classList.add('hidden');
+            });
+            document.getElementById('global-bg-' + mode).classList.remove('hidden');
+
+            if (mode === 'shader') {
+                startGlobalShader();
+            } else if (bgShaderReq) {
+                cancelAnimationFrame(bgShaderReq);
+            }
+            notify(`Background: ${mode}`);
+        }
+
+        function startGlobalShader() {
+            const canvas = document.getElementById('global-bg-shader');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 800;
+            canvas.height = 450;
+            let t = 0;
+            function loop() {
+                t += 0.025;
+                ctx.fillStyle = '#060a12';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                for (let i = 0; i < 24; i++) {
+                    const x = (i * 45 + t * 22) % (canvas.width + 40) - 20;
+                    const y = canvas.height / 2 + Math.sin(t + i * 0.5) * 85;
+                    ctx.fillStyle = i % 2 === 0 ? 'rgba(56, 189, 248, 0.16)' : 'rgba(139, 92, 246, 0.14)';
+                    ctx.fillRect(x, y, 24, 24);
+                }
+                bgShaderReq = requestAnimationFrame(loop);
+            }
+            if (bgShaderReq) cancelAnimationFrame(bgShaderReq);
+            loop();
+        }
+
+        function updateGlassOpacity(val) {
+            document.documentElement.style.setProperty('--card-opacity', (val / 100).toFixed(2));
+            document.getElementById('glass-op-val').innerText = val + '%';
+        }
+
+        function updateGlassBlur(val) {
+            document.documentElement.style.setProperty('--card-blur', val + 'px');
+            document.getElementById('glass-blur-val').innerText = val + 'px';
+        }
+
+        // ================= MULTI-THREAD DOWNLOADER (512MB + 60MB) =================
+        const dlWorkerTasks = [
+            { id: 1, name: 'Game assets', size: '142 MB', pct: 84 },
+            { id: 2, name: 'Textures', size: '165 MB', pct: 68 },
+            { id: 3, name: 'Audio', size: '98 MB', pct: 91 },
+            { id: 4, name: 'Native engine library', size: '34 MB', pct: 95 },
+            { id: 5, name: 'Control atlas', size: '38 MB', pct: 76 },
+            { id: 6, name: 'Control macros', size: '22 MB', pct: 88 },
+            { id: 7, name: 'Shader cache', size: '45 MB', pct: 72 },
+            { id: 8, name: 'Biome data', size: '28 MB', pct: 100 }
+        ];
+
+        function renderThreads() {
+            const grid = document.getElementById('threads-grid');
+            grid.innerHTML = dlWorkerTasks.map(w => `
+                <div class="p-2.5 rounded-xl bg-black/40 border border-white/10 flex flex-col justify-between gap-1.5">
+                    <div class="flex justify-between text-[9px] font-mono">
+                        <span class="accent-text font-bold">THREAD #0${w.id}</span>
+                        <span class="text-slate-400">${w.size}</span>
+                    </div>
+                    <div class="text-[10px] font-semibold text-white truncate">${w.name}</div>
+                    <div class="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div id="w-bar-${w.id}" class="h-full accent-bg transition-all duration-200" style="width:${w.pct}%"></div>
+                    </div>
+                    <div class="flex justify-between text-[9px] font-mono text-slate-400">
+                        <span>Downloading</span>
+                        <span id="w-pct-${w.id}" class="text-slate-200">${w.pct}%</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        renderThreads();
+
+        function runMultiThreadBurst() {
+            dlWorkerTasks.forEach(w => w.pct = Math.floor(Math.random() * 30));
+            renderThreads();
+            const timer = setInterval(() => {
+                let done = true;
+                dlWorkerTasks.forEach(w => {
+                    if (w.pct < 100) {
+                        done = false;
+                        w.pct = Math.min(100, w.pct + Math.floor(Math.random() * 18) + 6);
+                    }
+                    const b = document.getElementById('w-bar-' + w.id);
+                    const p = document.getElementById('w-pct-' + w.id);
+                    if (b && p) { b.style.width = w.pct + '%'; p.innerText = w.pct + '%'; }
+                });
+                if (done) {
+                    clearInterval(timer);
+                    notify('Downloads complete');
+                }
+            }, 200);
+        }
+
+        function launchGame() {
+            notify('Launching 26.3...');
+        }
+
+        // ================= GOY CONTROL V2 DRAG & DROP =================
+        let activeGoy = null, selectedGoy = null, offX = 0, offY = 0;
+        function initGoyControls() {
+            const canvas = document.getElementById('goy-canvas');
+            document.querySelectorAll('.goy-draggable').forEach(el => {
+                el.onpointerdown = e => {
+                    e.stopPropagation();
+                    activeGoy = el;
+                    selectedGoy = el;
+                    document.getElementById('goy-prop-title').innerText = el.dataset.label;
+                    const rect = el.getBoundingClientRect();
+                    offX = e.clientX - rect.left;
+                    offY = e.clientY - rect.top;
+                };
+            });
+            canvas.onpointermove = e => {
+                if (!activeGoy) return;
+                const cRect = canvas.getBoundingClientRect();
+                let x = Math.round((e.clientX - cRect.left - offX) / 10) * 10;
+                let y = Math.round((e.clientY - cRect.top - offY) / 10) * 10;
+                x = Math.max(4, Math.min(cRect.width - activeGoy.offsetWidth - 4, x));
+                y = Math.max(4, Math.min(cRect.height - activeGoy.offsetHeight - 4, y));
+                activeGoy.style.left = x + 'px';
+                activeGoy.style.top = y + 'px';
+                activeGoy.style.right = 'auto';
+                activeGoy.style.bottom = 'auto';
+                activeGoy.classList.remove('-translate-x-1/2');
+            };
+            window.addEventListener('pointerup', () => activeGoy = null);
+        }
+
+        function applyGoyInspector() {
+            if (!selectedGoy) selectedGoy = document.querySelector('.goy-draggable');
+            const sc = document.getElementById('goy-scale-slider').value;
+            const op = document.getElementById('goy-op-slider').value;
+            selectedGoy.style.transform = `scale(${sc / 100})`;
+            selectedGoy.style.opacity = op / 100;
+            document.getElementById('goy-scale-txt').innerText = sc + '%';
+            document.getElementById('goy-op-txt').innerText = op + '%';
+        }
+
+        function addMacroBtn() {
+            const canvas = document.getElementById('goy-canvas');
+            const d = document.createElement('div');
+            d.className = 'goy-draggable absolute left-36 top-8 px-3 py-1.5 rounded-xl bg-purple-500/30 border border-purple-400 cursor-move';
+            d.dataset.label = 'Custom Macro (F5 Zoom)';
+            d.innerHTML = '<span class="text-[9px] font-mono font-bold text-white">MACRO F5</span>';
+            canvas.appendChild(d);
+            initGoyControls();
+            notify('Macro button added');
+        }
+
+        // ================= THREE.JS 3D SKIN VIEWER =================
+        let skinScene, skinCam, skinRen, skinGroup, lArm, rArm, lLeg, rLeg, capeObj, walkOn = true;
+        function initSkinViewer() {
+            const mount = document.getElementById('three-skin-mount');
+            if (!mount) return;
+            skinScene = new THREE.Scene();
+            skinCam = new THREE.PerspectiveCamera(36, 1.6, 0.1, 100);
+            skinCam.position.set(0, 1.2, 5.8);
+
+            skinRen = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            skinRen.setSize(320, 210);
+            mount.innerHTML = '';
+            mount.appendChild(skinRen.domElement);
+
+            skinScene.add(new THREE.AmbientLight(0xffffff, 0.9));
+            const dLight = new THREE.DirectionalLight(0x38bdf8, 0.8);
+            dLight.position.set(4, 8, 6);
+            skinScene.add(dLight);
+
+            skinGroup = new THREE.Group();
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.95, 0.95), new THREE.MeshStandardMaterial({ color: 0xf59e0b }));
+            head.position.y = 1.45;
+            skinGroup.add(head);
+
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.95, 1.4, 0.48), new THREE.MeshStandardMaterial({ color: 0x0ea5e9 }));
+            body.position.y = 0.25;
+            skinGroup.add(body);
+
+            lArm = new THREE.Mesh(new THREE.BoxGeometry(0.38, 1.4, 0.48), new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
+            lArm.position.set(-0.68, 0.25, 0);
+            skinGroup.add(lArm);
+
+            rArm = new THREE.Mesh(new THREE.BoxGeometry(0.38, 1.4, 0.48), new THREE.MeshStandardMaterial({ color: 0x38bdf8 }));
+            rArm.position.set(0.68, 0.25, 0);
+            skinGroup.add(rArm);
+
+            lLeg = new THREE.Mesh(new THREE.BoxGeometry(0.46, 1.4, 0.48), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+            lLeg.position.set(-0.24, -1.15, 0);
+            skinGroup.add(lLeg);
+
+            rLeg = new THREE.Mesh(new THREE.BoxGeometry(0.46, 1.4, 0.48), new THREE.MeshStandardMaterial({ color: 0x1e293b }));
+            rLeg.position.set(0.24, -1.15, 0);
+            skinGroup.add(rLeg);
+
+            capeObj = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.45, 0.07), new THREE.MeshStandardMaterial({ color: 0xf43f5e }));
+            capeObj.position.set(0, 0.2, -0.3);
+            skinGroup.add(capeObj);
+
+            skinGroup.rotation.y = -0.45;
+            skinScene.add(skinGroup);
+
+            let drag = false, px = 0;
+            mount.onpointerdown = e => { drag = true; px = e.clientX; };
+            window.addEventListener('pointerup', () => drag = false);
+            window.addEventListener('pointermove', e => {
+                if (drag) { skinGroup.rotation.y += (e.clientX - px) * 0.015; px = e.clientX; }
+            });
+
+            let t = 0;
+            function loop() {
+                requestAnimationFrame(loop);
+                if (walkOn) {
+                    t += 0.06;
+                    lArm.rotation.x = Math.sin(t) * 0.5;
+                    rArm.rotation.x = -Math.sin(t) * 0.5;
+                    lLeg.rotation.x = -Math.sin(t) * 0.5;
+                    rLeg.rotation.x = Math.sin(t) * 0.5;
+                }
+                skinRen.render(skinScene, skinCam);
+            }
+            loop();
+        }
+
+        function resizeSkinViewport() {
+            const mount = document.getElementById('three-skin-mount');
+            if (!mount || !skinRen || mount.clientWidth === 0) return;
+            skinCam.aspect = mount.clientWidth / mount.clientHeight;
+            skinCam.updateProjectionMatrix();
+            skinRen.setSize(mount.clientWidth, mount.clientHeight);
+        }
+
+        function toggleSkinWalk() {
+            walkOn = !walkOn;
+            document.getElementById('skin-walk-btn').innerText = walkOn ? 'Anim: Walk' : 'Anim: Idle';
+        }
+        function toggleSkinCapeVis() {
+            capeObj.visible = !capeObj.visible;
+            document.getElementById('skin-cape-btn').innerText = capeObj.visible ? 'Cape: ON' : 'Cape: OFF';
+        }
+        function setSkinArms(mode) {
+            const s = mode === 'slim' ? 0.8 : 1.08;
+            lArm.scale.x = s; rArm.scale.x = s;
+            document.getElementById('skin-geo-text').innerText = mode === 'slim' ? 'Slim' : 'Classic';
+        }
+        function setSkinColorPreset(c) {
+            const map = { cyan: 0x0ea5e9, crimson: 0xe11d48, emerald: 0x10b981 };
+            skinGroup.children[1].material.color.setHex(map[c]);
+        }
+
+        // ================= UTILITIES =================
+        function simulateBackgroundKeepAlive() {
+            notify('Keep-alive active: downloads and server session keep running in the background');
+        }
+
+        function notify(msg) {
+            const box = document.getElementById('horizon-toast');
+            document.getElementById('horizon-toast-msg').innerText = msg;
+            box.classList.remove('hidden');
+            setTimeout(() => box.classList.add('hidden'), 2800);
+        }
+
+        window.onload = () => {
+            initGoyControls();
+            initSkinViewer();
+            window.addEventListener('resize', resizeSkinViewport);
+        };
+    </script>
+</body>
+</html>
