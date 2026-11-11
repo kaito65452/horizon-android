@@ -210,7 +210,13 @@ pub(crate) fn capitalize(s: &str) -> String {
     }
 }
 
-pub(crate) fn wrap_text_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
+pub(crate) fn wrap_text_lines(
+    ui: &Ui,
+    face: Face,
+    size: f32,
+    text: &str,
+    max_w: f32,
+) -> Vec<String> {
     let mut lines = Vec::new();
     for raw_line in text.lines() {
         let trimmed = raw_line.trim();
@@ -1481,7 +1487,7 @@ impl Launcher {
                 banner_x + 32.0,
                 banner_y + 9.0,
                 blaze_text(),
-                "Built-in Starling Voice Chat enabled",
+                "Built-in Complex Voice Chat (ported by Asano Saryu) enabled",
             );
 
             button(
@@ -2223,7 +2229,7 @@ impl Launcher {
             Some(Action::WorldFiles) => {
                 let id = crate::document_store::folder_id(self.catalog.config.profile, "worlds");
                 self.catalog.status = if crate::platform::open_documents(&id) {
-                    "In Android Files, select a complete world folder, then Copy to a folder you choose. Keep Horizon Android installed until you verify your worlds in Starling."
+                    "In Android Files, select a complete world folder, then Copy to a folder you choose."
                 } else { "Open system Files > Horizon Android > Worlds. Copy complete world folders while the game is closed." }.into();
             }
             Some(Action::WorkerLimit) => self.open_chooser(chooser::Kind::WorkerLimit),

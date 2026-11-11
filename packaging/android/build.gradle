@@ -1,4 +1,8 @@
-plugins { id 'com.android.application' version '8.11.1' }
+plugins {
+    id 'com.android.application' version '8.11.1'
+    id 'org.jetbrains.kotlin.android' version '2.0.21'
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.0.21'
+}
 
 android {
     namespace 'dev.horizon.android'
@@ -29,10 +33,11 @@ android {
             debuggable false
             jniDebuggable false
             minifyEnabled false
-            // Retain the existing installation's signing identity for upgrades.
-            // Only the public certificate enters the APK; the key stays in .local/.
             signingConfig signingConfigs.development
         }
+    }
+    buildFeatures {
+        compose true
     }
     sourceSets.main {
         java.srcDirs = ['java']
@@ -41,6 +46,22 @@ android {
         assets.srcDirs = ['../../.local/android/gradle-assets']
         res.srcDirs = ['res']
     }
-    packaging { jniLibs { useLegacyPackaging = true; keepDebugSymbols += '**/*.so' } }
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += '**/*.so'
+        }
+    }
 }
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.activity:activity-compose:1.9.3'
+    implementation 'androidx.compose.ui:ui:1.7.5'
+    implementation 'androidx.compose.ui:ui-graphics:1.7.5'
+    implementation 'androidx.compose.foundation:foundation:1.7.5'
+    implementation 'androidx.compose.runtime:runtime:1.7.5'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+}
+
 layout.buildDirectory = file('../../.local/android/gradle-build')

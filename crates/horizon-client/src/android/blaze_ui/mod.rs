@@ -1,9 +1,6 @@
 use super::*;
 use crate::catalog::SettingsCategory;
-use horizon_client::{
-    gfx::Renderer,
-    osk::Output,
-};
+use horizon_client::{gfx::Renderer, osk::Output};
 use std::sync::atomic::Ordering;
 use winit::{
     event::{KeyEvent, Touch, TouchPhase},
@@ -11,23 +8,23 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
+pub mod browse;
 pub mod components;
+pub mod home;
+pub mod manager;
+pub mod settings;
 pub mod settings_components;
 pub mod shell;
-pub mod home;
-pub mod browse;
-pub mod manager;
 pub mod skin;
-pub mod settings;
 
+pub use browse::*;
 pub use components::*;
+pub use home::*;
+pub use manager::*;
+pub use settings::*;
 pub use settings_components::*;
 pub(crate) use shell::*;
-pub use home::*;
-pub use browse::*;
-pub use manager::*;
 pub use skin::*;
-pub use settings::*;
 
 const WALLPAPER_CYAN: &[u8] = include_bytes!("../wallpapers/cyan.png");
 const WALLPAPER_EMERALD: &[u8] = include_bytes!("../wallpapers/emerald.png");

@@ -476,8 +476,10 @@ pub fn draw_settings_view(
                 cy,
                 panel_w,
                 row_h,
-                "Starling voice chat",
-                Some("Proximity audio"),
+                "Complex Voice Chat (ported by Asano Saryu)",
+                Some(
+                    "Native 3D proximity UDP voice chat with RNNoise & AGC (ported by Asano Saryu)",
+                ),
                 launcher.catalog.config.svc_enabled,
                 Action::ToggleExperimentalSvc,
             );
@@ -562,7 +564,8 @@ pub fn draw_settings_view(
             cy += row_h;
 
             let game_home = launcher.catalog.config.game_home(&launcher.home);
-            let touch_cfg = horizon_client::touch::Settings::load_from(&game_home.join("horizon-touch.json"));
+            let touch_cfg =
+                horizon_client::touch::Settings::load_from(&game_home.join("horizon-touch.json"));
 
             draw_switch_row(
                 ui,
