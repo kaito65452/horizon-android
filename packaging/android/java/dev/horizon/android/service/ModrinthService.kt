@@ -92,7 +92,8 @@ class ModrinthService(
                         source = "Modrinth",
                         downloads = hit.downloads,
                         installed = false,
-                        unsupported = hit.clientSide == "unsupported"
+                        unsupported = hit.clientSide == "unsupported",
+                        iconUrl = hit.iconUrl
                     )
                 }
                 NetLog.logSuccess("Modrinth", url.toString(), items.size)

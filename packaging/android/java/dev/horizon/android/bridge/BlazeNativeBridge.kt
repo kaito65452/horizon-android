@@ -111,8 +111,26 @@ object BlazeNativeBridge {
     external fun nativeStartMicrosoftDeviceLogin(): String
     external fun nativePollMicrosoftDeviceLogin(): String
     external fun nativeDeleteAccount(provider: String, idOrName: String): Boolean
+    external fun nativeGetActiveAccessToken(): String
 
     // Safe helper accessors
+    fun getActiveAccessToken(): String {
+        return try {
+            nativeGetActiveAccessToken()
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    fun getActiveAccountUUID(): String {
+        return try {
+            val json = JSONObject(nativeGetAccountsJson())
+            json.optString("active_uuid", "")
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
     fun getAccounts(): List<BlazeAccount> {
         return try {
             val json = JSONObject(nativeGetAccountsJson())
@@ -126,7 +144,10 @@ object BlazeNativeBridge {
                         uuid = item.optString("uuid", ""),
                         name = item.optString("name", "Player"),
                         key = item.optString("key", ""),
-                        isActive = item.optBoolean("is_active", false)
+                        isActive = item.optBoolean("is_active", false),
+                        skinUrl = item.optString("skin_url", null),
+                        skinModel = item.optString("skin_model", null),
+                        capeUrl = item.optString("cape_url", null)
                     )
                 )
             }
@@ -216,7 +237,10 @@ data class BlazeAccount(
     val uuid: String,
     val name: String,
     val key: String,
-    val isActive: Boolean
+    val isActive: Boolean,
+    val skinUrl: String? = null,
+    val skinModel: String? = null,
+    val capeUrl: String? = null
 )
 
 data class AssetComponent(
@@ -253,5 +277,6 @@ data class CatalogItem(
     val source: String,
     val downloads: Long,
     val installed: Boolean,
-    val unsupported: Boolean
+    val unsupported: Boolean,
+    val iconUrl: String? = null
 )

@@ -314,6 +314,9 @@ fn android_main(app: AndroidApp) {
             event: winit::event::WindowEvent,
         ) {
             self.0.window_event(event_loop, window_id, event);
+            if horizon_client::android_runtime::take_launcher_return() {
+                event_loop.exit();
+            }
         }
         fn device_event(
             &mut self,
@@ -324,6 +327,10 @@ fn android_main(app: AndroidApp) {
             self.0.device_event(event_loop, device_id, event);
         }
         fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            if horizon_client::android_runtime::take_launcher_return() {
+                event_loop.exit();
+                return;
+            }
             self.0.about_to_wait(event_loop);
         }
         fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {

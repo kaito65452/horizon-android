@@ -1,5 +1,9 @@
 package dev.horizon.android.ui.views
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.LruCache
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,9 +20,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.CatalogItem
@@ -27,7 +34,92 @@ import dev.horizon.android.ui.animation.pressBounce
 import dev.horizon.android.ui.components.HorizonGlass
 import dev.horizon.android.ui.components.HorizonPill
 import dev.horizon.android.ui.theme.LocalBlazeColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
+
+private object BrowseIconCache {
+    val cache = LruCache<String, Bitmap>(128)
+    val client = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+}
+
+@Composable
+fun BrowseProjectIcon(
+    iconUrl: String?,
+    title: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 44.dp
+) {
+    val colors = LocalBlazeColors.current
+    var bitmap by remember(iconUrl) { mutableStateOf(iconUrl?.let { BrowseIconCache.cache.get(it) }) }
+
+    LaunchedEffect(iconUrl) {
+        if (iconUrl.isNullOrEmpty()) {
+            bitmap = null
+            return@LaunchedEffect
+        }
+        val cached = BrowseIconCache.cache.get(iconUrl)
+        if (cached != null) {
+            bitmap = cached
+            return@LaunchedEffect
+        }
+        withContext(Dispatchers.IO) {
+            try {
+                val req = Request.Builder()
+                    .url(iconUrl)
+                    .header("User-Agent", "BlazeLauncher/0.7.8")
+                    .build()
+                BrowseIconCache.client.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        resp.body?.byteStream()?.use { stream ->
+                            val decoded = BitmapFactory.decodeStream(stream)
+                            if (decoded != null) {
+                                BrowseIconCache.cache.put(iconUrl, decoded)
+                                bitmap = decoded
+                            }
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0x26FFFFFF))
+            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(10.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        val bmp = bitmap
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            val initial = title.firstOrNull()?.uppercaseChar()?.toString() ?: "P"
+            BasicText(
+                text = initial,
+                style = TextStyle(
+                    color = colors.activePalette.primary,
+                    fontSize = (size.value * 0.42f).sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+            )
+        }
+    }
+}
 
 @Composable
 fun BrowseView(
@@ -203,6 +295,11 @@ fun BrowseView(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            BrowseProjectIcon(
+                                iconUrl = item.iconUrl,
+                                title = item.title,
+                                modifier = Modifier.padding(end = 10.dp)
+                            )
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,

@@ -21,7 +21,16 @@ pub(super) struct Noop;
 
 #[cfg(target_os = "android")]
 impl EventLoopCtl for Noop {
-    fn exit(&self) {}
+    fn exit(&self) {
+        horizon_client::android_runtime::return_to_launcher();
+        crate::document_store::set_game_active(false);
+        crate::diagnostics::finish();
+        crate::platform::finish();
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            std::process::exit(0);
+        });
+    }
     fn set_control_flow(&self, _flow: ControlFlow) {}
 }
 

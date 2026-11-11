@@ -94,13 +94,37 @@ fun SettingsView(
             val theme = root.optJSONObject("theme")
             if (theme != null) {
                 backgroundMode = theme.optString("bg_style", "mc")
-                val preset = theme.optInt("preset", 0)
-                selectedPalette = when (preset) {
-                    0 -> "cyan"
-                    1 -> "emerald"
-                    2 -> "crimson"
-                    3 -> "violet"
-                    4 -> "amber"
+                val presetStr = when {
+                    theme.has("preset") -> {
+                        val p = theme.get("preset")
+                        if (p is Number) {
+                            when (p.toInt()) {
+                                1 -> "emerald"
+                                2 -> "crimson"
+                                3 -> "violet"
+                                4 -> "amber"
+                                else -> "cyan"
+                            }
+                        } else {
+                            p.toString()
+                        }
+                    }
+                    theme.has("palette_idx") -> {
+                        when (theme.optInt("palette_idx", 0)) {
+                            1 -> "emerald"
+                            2 -> "crimson"
+                            3 -> "violet"
+                            4 -> "amber"
+                            else -> "cyan"
+                        }
+                    }
+                    else -> "cyan"
+                }
+                selectedPalette = when (presetStr.lowercase()) {
+                    "emerald", "green" -> "emerald"
+                    "crimson", "red" -> "crimson"
+                    "violet" -> "violet"
+                    "amber", "gold" -> "amber"
                     else -> "cyan"
                 }
                 if (theme.has("glass_opacity")) {
@@ -329,20 +353,27 @@ fun SettingsView(
                             HorizonSwatchRow(
                                 selectedKey = selectedPalette,
                                 onSelect = {
-                                    selectedPalette = it
-                                    val preset = when (it) {
-                                        "cyan" -> 0
-                                        "emerald", "green" -> 1
-                                        "crimson", "red" -> 2
+                                    val presetKey = when (it.lowercase()) {
+                                        "emerald", "green" -> "emerald"
+                                        "crimson", "red" -> "crimson"
+                                        "violet" -> "violet"
+                                        "amber", "gold" -> "amber"
+                                        else -> "cyan"
+                                    }
+                                    val paletteIdx = when (presetKey) {
+                                        "emerald" -> 1
+                                        "crimson" -> 2
                                         "violet" -> 3
-                                        "amber", "gold" -> 4
+                                        "amber" -> 4
                                         else -> 0
                                     }
-                                    ThemeState.update(accentKey = it)
-                                    onPaletteChanged(it)
+                                    selectedPalette = presetKey
+                                    ThemeState.update(accentKey = presetKey)
+                                    onPaletteChanged(presetKey)
                                     mutateAndSaveConfig { root ->
                                         val theme = root.optJSONObject("theme") ?: JSONObject()
-                                        theme.put("preset", preset)
+                                        theme.put("preset", presetKey)
+                                        theme.put("palette_idx", paletteIdx)
                                         root.put("theme", theme)
                                     }
                                     onThemeChanged?.invoke()

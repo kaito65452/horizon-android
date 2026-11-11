@@ -6,11 +6,22 @@ import android.graphics.Canvas
 import dev.horizon.android.diagnostics.NetLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+
+data class SkinCapeResult(
+    val skin: Bitmap,
+    val model: String,
+    val cape: Bitmap? = null,
+    val capeName: String? = null
+)
 
 object WardrobeService {
     private val client = OkHttpClient.Builder()
@@ -117,6 +128,175 @@ object WardrobeService {
                isStripTransparent(54..55, 20..31) &&
                isStripTransparent(42..43, 48..51) &&
                isStripTransparent(46..47, 52..63)
+    }
+
+    /**
+     * Downloads active skin and cape from Mojang Session Server by UUID (Zalith Launcher 2 Parity).
+     * Endpoint: https://sessionserver.mojang.com/session/minecraft/profile/<uuid>
+     */
+    suspend fun fetchMojangSessionProfile(uuid: String): SkinCapeResult? = withContext(Dispatchers.IO) {
+        val cleanUuid = uuid.replace("-", "").trim()
+        val url = "https://sessionserver.mojang.com/session/minecraft/profile/$cleanUuid"
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "BlazeLauncher/0.7.8 (Zalith-Parity)")
+                .build()
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) throw IOException("HTTP ${res.code}: ${res.message}")
+                val body = res.body?.string() ?: throw IOException("Empty session profile body")
+                val json = JSONObject(body)
+                val properties = json.optJSONArray("properties") ?: throw IOException("No properties in profile")
+                var texturesBase64: String? = null
+                for (i in 0 until properties.length()) {
+                    val p = properties.getJSONObject(i)
+                    if (p.optString("name") == "textures") {
+                        texturesBase64 = p.optString("value")
+                        break
+                    }
+                }
+                if (texturesBase64.isNullOrEmpty()) throw IOException("No textures base64 found")
+
+                val decodedBytes = android.util.Base64.decode(texturesBase64, android.util.Base64.DEFAULT)
+                val decodedJson = JSONObject(String(decodedBytes, Charsets.UTF_8))
+                val texturesObj = decodedJson.optJSONObject("textures") ?: throw IOException("Invalid textures format")
+
+                val skinObj = texturesObj.optJSONObject("SKIN") ?: throw IOException("No SKIN object in textures")
+                val skinUrl = skinObj.optString("url")
+                val metadata = skinObj.optJSONObject("metadata")
+                val isSlim = metadata?.optString("model")?.equals("slim", ignoreCase = true) ?: false
+
+                val skinBmp = downloadBitmap(skinUrl) ?: throw IOException("Could not download skin bitmap from $skinUrl")
+
+                val capeObj = texturesObj.optJSONObject("CAPE")
+                val capeUrl = capeObj?.optString("url")
+                val capeBmp = if (!capeUrl.isNullOrEmpty()) downloadBitmap(capeUrl) else null
+
+                val modernSkin = if (skinBmp.width == 64 && skinBmp.height == 32) convertLegacySkin(skinBmp) else skinBmp
+                val model = if (isSlim || isSlimArm(modernSkin)) "slim" else "classic"
+
+                NetLog.logSuccess("Mojang Session Textures", url, 1)
+                SkinCapeResult(
+                    skin = modernSkin,
+                    model = model,
+                    cape = capeBmp,
+                    capeName = if (capeBmp != null) "Mojang Active Cape" else null
+                )
+            }
+        } catch (e: Throwable) {
+            NetLog.logError("Mojang Session Textures", url, e)
+            null
+        }
+    }
+
+    /**
+     * Looks up Minecraft username to UUID, then fetches session textures.
+     */
+    suspend fun fetchProfileByName(username: String): SkinCapeResult? = withContext(Dispatchers.IO) {
+        val cleanName = username.trim()
+        val url = "https://api.mojang.com/users/profiles/minecraft/$cleanName"
+        try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "BlazeLauncher/0.7.8 (Zalith-Parity)")
+                .build()
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) throw IOException("HTTP ${res.code}: ${res.message}")
+                val body = res.body?.string() ?: throw IOException("Empty profile body")
+                val json = JSONObject(body)
+                val uuid = json.optString("id")
+                if (uuid.isEmpty()) throw IOException("No UUID for player $cleanName")
+                fetchMojangSessionProfile(uuid)
+            }
+        } catch (e: Throwable) {
+            NetLog.logError("Mojang Name Lookup", url, e)
+            null
+        }
+    }
+
+    /**
+     * Downloads active skin and cape/cloak from Ely.by textures system.
+     */
+    suspend fun fetchElyBySkinAndCape(username: String): SkinCapeResult? = withContext(Dispatchers.IO) {
+        val cleanName = username.trim()
+        val skinUrl = "http://skinsystem.ely.by/textures/$cleanName"
+        val capeUrl = "http://skinsystem.ely.by/cloaks/$cleanName"
+        try {
+            val skinBmp = downloadBitmap(skinUrl) ?: throw IOException("Could not download Ely.by skin")
+            val capeBmp = downloadBitmap(capeUrl)
+            val modernSkin = if (skinBmp.width == 64 && skinBmp.height == 32) convertLegacySkin(skinBmp) else skinBmp
+            val model = if (isSlimArm(modernSkin)) "slim" else "classic"
+            NetLog.logSuccess("Ely.by Textures", skinUrl, 1)
+            SkinCapeResult(
+                skin = modernSkin,
+                model = model,
+                cape = capeBmp,
+                capeName = if (capeBmp != null) "Ely.by Cloak" else null
+            )
+        } catch (e: Throwable) {
+            NetLog.logError("Ely.by Textures", skinUrl, e)
+            null
+        }
+    }
+
+    /**
+     * Uploads skin to authentic Microsoft Minecraft account via official API.
+     * Endpoint: POST https://api.minecraftservices.com/minecraft/profile/skins
+     */
+    suspend fun uploadSkinToMicrosoft(
+        accessToken: String,
+        skinBitmap: Bitmap,
+        isSlim: Boolean
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val url = "https://api.minecraftservices.com/minecraft/profile/skins"
+        try {
+            val stream = ByteArrayOutputStream()
+            skinBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            val bytes = stream.toByteArray()
+
+            val mediaType = "image/png".toMediaTypeOrNull()
+            val filePart = bytes.toRequestBody(mediaType)
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("variant", if (isSlim) "slim" else "classic")
+                .addFormDataPart("file", "skin.png", filePart)
+                .build()
+
+            val req = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $accessToken")
+                .header("User-Agent", "BlazeLauncher/0.7.8 (Zalith-Parity)")
+                .post(body)
+                .build()
+
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) {
+                    val errBody = res.body?.string().orEmpty()
+                    throw IOException("HTTP ${res.code}: $errBody")
+                }
+                NetLog.logSuccess("Upload Microsoft Skin", url, 1)
+                Result.success("Skin uploaded successfully to Microsoft account!")
+            }
+        } catch (e: Throwable) {
+            NetLog.logError("Upload Microsoft Skin", url, e)
+            Result.failure(e)
+        }
+    }
+
+    private fun downloadBitmap(url: String): Bitmap? {
+        return try {
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "BlazeLauncher/0.7.8")
+                .build()
+            client.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) return null
+                val bytes = res.body?.bytes() ?: return null
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     /**

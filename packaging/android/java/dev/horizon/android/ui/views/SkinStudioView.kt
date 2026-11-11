@@ -39,6 +39,7 @@ import dev.horizon.android.service.WardrobeService
 import dev.horizon.android.ui.animation.pressBounce
 import dev.horizon.android.ui.components.*
 import dev.horizon.android.ui.theme.LocalBlazeColors
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.abs
@@ -56,6 +57,12 @@ fun SkinStudioView(
 ) {
     val colors = LocalBlazeColors.current
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var activeName by remember { mutableStateOf(BlazeNativeBridge.getActiveAccountName()) }
+    var activeType by remember { mutableStateOf(BlazeNativeBridge.getActiveAccountType()) }
+    var activeUUID by remember { mutableStateOf(BlazeNativeBridge.getActiveAccountUUID()) }
+    var isOperating by remember { mutableStateOf(false) }
 
     var rotationYaw by remember { mutableFloatStateOf(-25f) }
     var rotationPitch by remember { mutableFloatStateOf(-6f) }
@@ -110,9 +117,13 @@ fun SkinStudioView(
         }
     }
 
-    // Load existing skin on startup
+    // Load existing skin and account info on startup
     LaunchedEffect(Unit) {
         try {
+            activeName = BlazeNativeBridge.getActiveAccountName()
+            activeType = BlazeNativeBridge.getActiveAccountType()
+            activeUUID = BlazeNativeBridge.getActiveAccountUUID()
+
             val wardrobeSkin = File(context.filesDir, "wardrobe/skins/current.png")
             if (wardrobeSkin.exists()) {
                 val bmp = BitmapFactory.decodeFile(wardrobeSkin.absolutePath)
@@ -126,7 +137,19 @@ fun SkinStudioView(
             } else {
                 loadDefaultSteve()
             }
-            setCape("migrator")
+
+            val wardrobeCape = File(context.filesDir, "wardrobe/capes/current.png")
+            if (wardrobeCape.exists()) {
+                val cape = BitmapFactory.decodeFile(wardrobeCape.absolutePath)
+                if (cape != null) {
+                    capeBitmap = cape
+                    selectedCapePreset = "custom"
+                } else {
+                    setCape("migrator")
+                }
+            } else {
+                setCape("migrator")
+            }
         } catch (_: Throwable) {
             loadDefaultSteve()
         }
@@ -333,6 +356,187 @@ fun SkinStudioView(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     HorizonSectionHeader(tag = "WARDROBE", title = "Skin & Cape Options")
 
+                    // Active Account Card & Online Sync
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.cardBg)
+                            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = activeName,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        )
+                                        val isMs = activeType.equals("microsoft", ignoreCase = true)
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(
+                                                    if (isMs) Color(0xFF00A4EF).copy(alpha = 0.25f)
+                                                    else colors.activePalette.soft
+                                                )
+                                                .border(
+                                                    1.dp,
+                                                    if (isMs) Color(0xFF00A4EF) else colors.activePalette.primary,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 1.dp)
+                                        ) {
+                                            androidx.compose.foundation.text.BasicText(
+                                                text = activeType.uppercase(),
+                                                style = androidx.compose.ui.text.TextStyle(
+                                                    color = if (isMs) Color(0xFF38BDF8) else colors.activePalette.primary,
+                                                    fontSize = 8.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            )
+                                        }
+                                    }
+                                    if (activeUUID.isNotEmpty()) {
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = "UUID: ${activeUUID.take(16)}...",
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                color = Color(0xFF64748B),
+                                                fontSize = 9.sp,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        )
+                                    }
+                                }
+
+                                HorizonPill(onClick = {
+                                    activeName = BlazeNativeBridge.getActiveAccountName()
+                                    activeType = BlazeNativeBridge.getActiveAccountType()
+                                    activeUUID = BlazeNativeBridge.getActiveAccountUUID()
+                                }) {
+                                    androidx.compose.foundation.text.BasicText(
+                                        text = "Refresh",
+                                        style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp)
+                                    )
+                                }
+                            }
+
+                            // Online Sync Actions
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                HorizonButton(
+                                    text = if (isOperating) "Fetching..." else "Fetch Account Skin",
+                                    active = true,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (isOperating) return@HorizonButton
+                                        coroutineScope.launch {
+                                            isOperating = true
+                                            statusMessage = "Fetching skin & cape for $activeName..."
+                                            try {
+                                                val result = when (activeType.lowercase()) {
+                                                    "microsoft" -> {
+                                                        if (activeUUID.isNotEmpty()) {
+                                                            WardrobeService.fetchMojangSessionProfile(activeUUID)
+                                                        } else {
+                                                            WardrobeService.fetchProfileByName(activeName)
+                                                        }
+                                                    }
+                                                    "elyby", "ely.by" -> {
+                                                        WardrobeService.fetchElyBySkinAndCape(activeName)
+                                                    }
+                                                    else -> {
+                                                        WardrobeService.fetchProfileByName(activeName)
+                                                    }
+                                                }
+
+                                                if (result != null) {
+                                                    skinBitmap = result.skin
+                                                    armGeometry = result.model
+                                                    selectedPreset = "account"
+                                                    if (result.cape != null) {
+                                                        capeBitmap = result.cape
+                                                        selectedCapePreset = "account"
+                                                        statusMessage = "Loaded ${result.model} skin & ${result.capeName ?: "cape"}!"
+                                                    } else {
+                                                        capeBitmap = null
+                                                        selectedCapePreset = "none"
+                                                        statusMessage = "Loaded ${result.model} skin for $activeName (no cape found)"
+                                                    }
+                                                } else {
+                                                    statusMessage = "Could not find online skin for $activeName"
+                                                }
+                                            } catch (e: Exception) {
+                                                statusMessage = "Fetch error: ${e.message}"
+                                            } finally {
+                                                isOperating = false
+                                            }
+                                        }
+                                    }
+                                )
+
+                                val isMicrosoft = activeType.equals("microsoft", ignoreCase = true)
+                                HorizonButton(
+                                    text = if (isOperating) "Uploading..." else "Upload to Microsoft",
+                                    accent = isMicrosoft,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (isOperating) return@HorizonButton
+                                        if (!isMicrosoft) {
+                                            statusMessage = "Active account is $activeType. Microsoft account required to upload."
+                                            return@HorizonButton
+                                        }
+                                        val token = BlazeNativeBridge.getActiveAccessToken()
+                                        if (token.isEmpty()) {
+                                            statusMessage = "No Microsoft access token. Re-login in Accounts dialog."
+                                            return@HorizonButton
+                                        }
+                                        val current = skinBitmap
+                                        if (current == null) {
+                                            statusMessage = "No skin loaded in studio to upload."
+                                            return@HorizonButton
+                                        }
+                                        coroutineScope.launch {
+                                            isOperating = true
+                                            statusMessage = "Uploading ${armGeometry} skin to Microsoft account..."
+                                            try {
+                                                val res = WardrobeService.uploadSkinToMicrosoft(
+                                                    accessToken = token,
+                                                    skinBitmap = current,
+                                                    isSlim = armGeometry == "slim"
+                                                )
+                                                if (res.isSuccess) {
+                                                    statusMessage = res.getOrNull() ?: "Skin uploaded successfully to Microsoft account!"
+                                                } else {
+                                                    statusMessage = "Upload error: ${res.exceptionOrNull()?.message}"
+                                                }
+                                            } catch (e: Exception) {
+                                                statusMessage = "Upload error: ${e.message}"
+                                            } finally {
+                                                isOperating = false
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
                     // Skin Presets Row
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         androidx.compose.foundation.text.BasicText(
@@ -506,6 +710,17 @@ fun SkinStudioView(
                                 target.outputStream().use { out ->
                                     bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
                                 }
+                            }
+
+                            val capesDir = File(context.filesDir, "wardrobe/capes")
+                            capesDir.mkdirs()
+                            val capeTarget = File(capesDir, "current.png")
+                            if (capeBitmap != null && selectedCapePreset != "none") {
+                                capeTarget.outputStream().use { out ->
+                                    capeBitmap?.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                }
+                            } else if (selectedCapePreset == "none") {
+                                if (capeTarget.exists()) capeTarget.delete()
                             }
 
                             val configJson = JSONObject(BlazeNativeBridge.nativeGetConfigJson())

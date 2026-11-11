@@ -700,6 +700,12 @@ pub struct AccountItemPayload {
     pub name: String,
     pub key: String,
     pub is_active: bool,
+    #[serde(default)]
+    pub skin_url: Option<String>,
+    #[serde(default)]
+    pub skin_model: Option<String>,
+    #[serde(default)]
+    pub cape_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -710,6 +716,14 @@ pub struct AccountsPayload {
     pub offline_selected: Option<String>,
     pub active_name: String,
     pub active_type: String,
+    #[serde(default)]
+    pub active_uuid: Option<String>,
+    #[serde(default)]
+    pub active_skin_url: Option<String>,
+    #[serde(default)]
+    pub active_skin_model: Option<String>,
+    #[serde(default)]
+    pub active_cape_url: Option<String>,
 }
 
 /// Get all saved accounts and active profile.
@@ -722,15 +736,26 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeG
     let home = resolve_home();
     let config = catalog::Config::load(&home);
 
-    let active_name = if let Some(selected_acc) = accounts.selected() {
-        selected_acc.name.clone()
-    } else if let Some(ref offline_name) = accounts.offline_selected {
-        offline_name.clone()
-    } else if !config.name.is_empty() {
-        config.name.clone()
-    } else {
-        "Player".to_string()
-    };
+    let (active_name, active_uuid, active_skin_url, active_skin_model, active_cape_url) =
+        if let Some(selected_acc) = accounts.selected() {
+            let (s_url, s_model) = match &selected_acc.skin {
+                Some((url, model)) => (Some(url.clone()), Some(model.clone())),
+                None => (None, None),
+            };
+            (
+                selected_acc.name.clone(),
+                Some(selected_acc.uuid.clone()),
+                s_url,
+                s_model,
+                selected_acc.cape.clone(),
+            )
+        } else if let Some(ref offline_name) = accounts.offline_selected {
+            (offline_name.clone(), None, None, None, None)
+        } else if !config.name.is_empty() {
+            (config.name.clone(), None, None, None, None)
+        } else {
+            ("Player".to_string(), None, None, None, None)
+        };
 
     let active_type = if let Some(selected_acc) = accounts.selected() {
         match selected_acc.provider {
@@ -749,6 +774,10 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeG
         .map(|a| {
             let key = a.key();
             let is_active = Some(&key) == selected_key.as_ref();
+            let (skin_url, skin_model) = match &a.skin {
+                Some((url, model)) => (Some(url.clone()), Some(model.clone())),
+                None => (None, None),
+            };
             AccountItemPayload {
                 provider: match a.provider {
                     Provider::Microsoft => "microsoft".to_string(),
@@ -758,6 +787,9 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeG
                 name: a.name.clone(),
                 key,
                 is_active,
+                skin_url,
+                skin_model,
+                cape_url: a.cape.clone(),
             }
         })
         .collect();
@@ -769,10 +801,33 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeG
         offline_selected: accounts.offline_selected,
         active_name,
         active_type,
+        active_uuid,
+        active_skin_url,
+        active_skin_model,
+        active_cape_url,
     };
 
     let json_str = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
     str_to_jstring(&mut env, &json_str)
+}
+
+/// Get active account's access token if available.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeGetActiveAccessToken(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let accounts = Accounts::load();
+    if let Some(key) = &accounts.selected {
+        if let Some(raw) = account::store().get(key) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(token) = val.get("minecraft_token").and_then(|t| t.as_str()) {
+                    return str_to_jstring(&mut env, token);
+                }
+            }
+        }
+    }
+    str_to_jstring(&mut env, "")
 }
 
 /// Select active account.

@@ -65,7 +65,7 @@ public final class HorizonActivity extends android.app.NativeActivity {
             .setMessage(R.string.quit_dialog_message)
             .setPositiveButton(R.string.confirm, (dialog, which) -> {
                 dialog.dismiss();
-                dev.horizon.android.ui.components.TeardownLifecycleManager.INSTANCE.executeTeardown(this);
+                finish();
             })
             .setNegativeButton(R.string.cancel, (dialog, which) -> {
                 dialog.dismiss();

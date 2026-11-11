@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.horizon.android.HorizonActivity
 import dev.horizon.android.bridge.BlazeNativeBridge
+import dev.horizon.android.diagnostics.ProcessTracker
 import dev.horizon.android.service.BlazeKeepAliveService
 import dev.horizon.android.ui.animation.horizontalSlideFadeTransition
 import dev.horizon.android.ui.components.AccountManagerDialog
@@ -77,13 +78,37 @@ class BlazeLauncherActivity : ComponentActivity() {
                     val bgStyle = theme?.optString("bg_style", "mc") ?: "mc"
                     val customBgUri = theme?.optString("custom_bg_uri", null)
                     val customBgType = theme?.optString("custom_bg_type", null)
-                    val preset = theme?.optInt("preset", 0) ?: 0
-                    val activePaletteKey = when (preset) {
-                        0 -> "cyan"
-                        1 -> "emerald"
-                        2 -> "crimson"
-                        3 -> "violet"
-                        4 -> "amber"
+                    val presetStr = when {
+                        theme?.has("preset") == true -> {
+                            val p = theme.get("preset")
+                            if (p is Number) {
+                                when (p.toInt()) {
+                                    1 -> "emerald"
+                                    2 -> "crimson"
+                                    3 -> "violet"
+                                    4 -> "amber"
+                                    else -> "cyan"
+                                }
+                            } else {
+                                p.toString()
+                            }
+                        }
+                        theme?.has("palette_idx") == true -> {
+                            when (theme.optInt("palette_idx", 0)) {
+                                1 -> "emerald"
+                                2 -> "crimson"
+                                3 -> "violet"
+                                4 -> "amber"
+                                else -> "cyan"
+                            }
+                        }
+                        else -> "cyan"
+                    }
+                    val activePaletteKey = when (presetStr.lowercase()) {
+                        "emerald", "green" -> "emerald"
+                        "crimson", "red" -> "crimson"
+                        "violet" -> "violet"
+                        "amber", "gold" -> "amber"
                         else -> "cyan"
                     }
                     val opacity = if (theme != null && theme.has("glass_opacity")) {
@@ -260,12 +285,18 @@ class BlazeLauncherActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        ProcessTracker.isGameRunning = false
+    }
+
     override fun onDestroy() {
         BlazeKeepAliveService.stop(this)
         super.onDestroy()
     }
 
     private fun launchGame() {
+        ProcessTracker.isGameRunning = true
         BlazeNativeBridge.nativeLaunchGame(0)
         val intent = Intent(this, HorizonActivity::class.java)
         startActivity(intent)

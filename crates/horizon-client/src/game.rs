@@ -18374,6 +18374,11 @@ impl Game<'_> {
                 crate::performance::active() || crate::device_runtime::preferences().gpu_profile,
             );
         }
+        #[cfg(target_os = "android")]
+        if horizon_client::android_runtime::take_launcher_return() {
+            crate::game::exit_app(event_loop);
+            return;
+        }
         if horizon_threads::stop_requests() > 0
             && !self.options.split_guest
             && self.pending_save.as_ref().is_none_or(|save| !save.quit)
@@ -20411,11 +20416,17 @@ fn write_report(game: &Game<'_>) -> Result<()> {
 
 fn exit_app(events: &dyn event_loop::EventLoopCtl) {
     #[cfg(target_os = "android")]
-    horizon_client::android_runtime::return_to_launcher();
-    #[cfg(not(target_os = "android"))]
+    {
+        horizon_client::android_runtime::return_to_launcher();
+        crate::document_store::set_game_active(false);
+        crate::diagnostics::finish();
+        crate::platform::finish();
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            std::process::exit(0);
+        });
+    }
     events.exit();
-    #[cfg(target_os = "android")]
-    let _ = events;
 }
 /// The window system ended the event loop with a failure (on Linux, a compositor dropping the
 /// connection after a protocol error) while fullscreen was on: the next start opens windowed, so a
