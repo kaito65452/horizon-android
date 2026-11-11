@@ -131,7 +131,7 @@ fun DownloadsView(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth(th.progress.coerceIn(0f, 1f))
+                                            .fillMaxWidth(th.progress.coerceIn(0.001f, 1f))
                                             .height(4.dp)
                                             .clip(RoundedCornerShape(2.dp))
                                             .background(colors.activePalette.primary)

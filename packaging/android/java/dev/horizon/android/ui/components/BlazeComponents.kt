@@ -19,6 +19,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.ui.theme.BlazePalettes
@@ -193,7 +194,7 @@ fun HorizonSlider(
         // Fill
         Box(
             modifier = Modifier
-                .fillMaxWidth(fraction)
+                .fillMaxWidth(fraction.coerceIn(0.001f, 1f))
                 .height(6.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .background(colors.activePalette.primary)
@@ -201,7 +202,12 @@ fun HorizonSlider(
         // Thumb
         Box(
             modifier = Modifier
-                .offset(x = ((widthPx * fraction) - 9f).coerceAtLeast(0f).dp / 2.75f)
+                .offset {
+                    IntOffset(
+                        x = ((widthPx * fraction) - 9f).coerceAtLeast(0f).toInt(),
+                        y = 0
+                    )
+                }
                 .size(18.dp)
                 .clip(CircleShape)
                 .background(Color.White)
