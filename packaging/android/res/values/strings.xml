@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Blaze Launcher</string>
+    <string name="app_version">0.7.8</string>
+    <string name="notification_channel_name">Blaze Launcher Service</string>
+    <string name="notification_channel_desc">Keeps downloads, voice chat, and game active</string>
+    <string name="notification_running_title">Blaze Engine Active</string>
+    <string name="notification_running_desc">Game instance running in background</string>
+    <string name="quit_dialog_title">Quit Game</string>
+    <string name="quit_dialog_message">Are you sure you want to stop the game session and exit?</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+</resources>

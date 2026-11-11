@@ -28,6 +28,7 @@ fun BlazeTopBar(
     onAccountClick: (() -> Unit)? = null,
     keepAliveActive: Boolean = true,
     downloadCount: Int = 0,
+    onQuitClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
@@ -227,6 +228,32 @@ fun BlazeTopBar(
                         fontSize = 13.sp
                     )
                 )
+            }
+
+            // Quick Exit Button
+            if (onQuitClick != null) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0x1AEF4444))
+                        .border(1.dp, Color(0x33EF4444), RoundedCornerShape(8.dp))
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                            onClick = onQuitClick
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.foundation.text.BasicText(
+                        text = "⏻",
+                        style = androidx.compose.ui.text.TextStyle(
+                            color = Color(0xFFEF4444),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
             }
         }
     }

@@ -4,15 +4,12 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.graphics.SurfaceTexture
 import android.media.ExifInterface
-import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.util.Log
-import android.view.Surface
-import android.view.TextureView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.Image
@@ -20,23 +17,29 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.dp
 import dev.horizon.android.HorizonActivity
 import dev.horizon.android.bridge.BlazeNativeBridge
 import dev.horizon.android.service.BlazeKeepAliveService
 import dev.horizon.android.ui.animation.horizontalSlideFadeTransition
 import dev.horizon.android.ui.components.AccountManagerDialog
+import dev.horizon.android.ui.components.QuitDialog
+import dev.horizon.android.ui.components.TeardownLifecycleManager
+import dev.horizon.android.ui.components.VideoPlayer
 import dev.horizon.android.ui.theme.BlazeColors
 import dev.horizon.android.ui.theme.BlazePalettes
 import dev.horizon.android.ui.theme.BlazeTheme
+import dev.horizon.android.ui.theme.ThemeState
 import dev.horizon.android.ui.topbar.BlazeTopBar
 import dev.horizon.android.ui.views.*
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Root Launcher Activity hosting the lightweight Jetpack Compose Landscape Frontend.
@@ -53,32 +56,53 @@ class BlazeLauncherActivity : ComponentActivity() {
 
         setContent {
             var currentTab by remember { mutableStateOf("home") }
-            var activePaletteKey by remember { mutableStateOf("cyan") }
             var activeAccountName by remember { mutableStateOf(BlazeNativeBridge.getActiveAccountName()) }
             var showAccountDialog by remember { mutableStateOf(false) }
+            var showQuitDialog by remember { mutableStateOf(false) }
 
-            // Dynamic Background States
-            var bgStyle by remember { mutableStateOf("mc") }
-            var customBgUri by remember { mutableStateOf<String?>(null) }
-            var customBgType by remember { mutableStateOf<String?>(null) }
+            // Intercept system Back button to display fluent Quit Confirmation Dialog
+            BackHandler(enabled = true) {
+                showQuitDialog = true
+            }
 
             fun refreshThemeConfig() {
                 try {
                     val configJson = JSONObject(BlazeNativeBridge.nativeGetConfigJson())
                     val theme = configJson.optJSONObject("theme")
-                    if (theme != null) {
-                        bgStyle = theme.optString("bg_style", "mc")
-                        customBgUri = theme.optString("custom_bg_uri", null)
-                        customBgType = theme.optString("custom_bg_type", null)
-                        val preset = theme.optInt("preset", 0)
-                        activePaletteKey = when (preset) {
-                            0 -> "cyan"
-                            1 -> "emerald"
-                            2 -> "crimson"
-                            3 -> "violet"
-                            else -> "cyan"
-                        }
+                    val bgStyle = theme?.optString("bg_style", "mc") ?: "mc"
+                    val customBgUri = theme?.optString("custom_bg_uri", null)
+                    val customBgType = theme?.optString("custom_bg_type", null)
+                    val preset = theme?.optInt("preset", 0) ?: 0
+                    val activePaletteKey = when (preset) {
+                        0 -> "cyan"
+                        1 -> "emerald"
+                        2 -> "crimson"
+                        3 -> "violet"
+                        4 -> "amber"
+                        else -> "cyan"
                     }
+                    val opacity = if (theme != null && theme.has("glass_opacity")) {
+                        theme.optDouble("glass_opacity", 0.72).toFloat()
+                    } else if (configJson.has("panel_opacity")) {
+                        configJson.optDouble("panel_opacity", 72.0).toFloat() / 100f
+                    } else {
+                        0.72f
+                    }
+                    val blur = if (theme != null && theme.has("glass_blur")) {
+                        theme.optDouble("glass_blur", 16.0).toFloat()
+                    } else if (configJson.has("panel_blur")) {
+                        configJson.optDouble("panel_blur", 16.0).toFloat()
+                    } else {
+                        16.0f
+                    }
+                    ThemeState.update(
+                        accentKey = activePaletteKey,
+                        panelOpacity = opacity.coerceIn(0.40f, 0.98f),
+                        blurRadiusDp = blur.coerceIn(0f, 32f),
+                        backgroundType = bgStyle,
+                        customBgUri = customBgUri,
+                        customBgType = customBgType
+                    )
                 } catch (_: Throwable) {}
             }
 
@@ -87,10 +111,15 @@ class BlazeLauncherActivity : ComponentActivity() {
                 activeAccountName = BlazeNativeBridge.getActiveAccountName()
             }
 
-            val currentPalette = BlazePalettes.fromKey(activePaletteKey)
+            val themeConfig by ThemeState.state.collectAsState()
+            val currentPalette = BlazePalettes.fromKey(themeConfig.accentKey)
             val blazeColors = BlazeColors(
                 background = Color(0xFF05070B),
-                activePalette = currentPalette
+                activePalette = currentPalette,
+                cardOpacity = themeConfig.panelOpacity,
+                cardBlurDp = themeConfig.blurRadiusDp,
+                glassBg = Color(0xFF0F1523).copy(alpha = themeConfig.panelOpacity),
+                cardHeroBg = Color(0xFF0A1120).copy(alpha = themeConfig.panelOpacity.coerceAtMost(0.9f))
             )
 
             val tabsOrder = listOf("home", "downloads", "manager", "browse", "skin", "settings")
@@ -99,9 +128,10 @@ class BlazeLauncherActivity : ComponentActivity() {
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Layer 1: Hardware-accelerated background (Video / Photo / OLED / Theme Gradient)
                     BlazeBackgroundLayer(
-                        bgStyle = bgStyle,
-                        customUri = customBgUri,
-                        customType = customBgType
+                        bgStyle = themeConfig.backgroundType,
+                        customUri = themeConfig.customBgUri,
+                        customType = themeConfig.customBgType,
+                        blurDp = themeConfig.blurRadiusDp
                     )
 
                     // Layer 2: Main Application Interface
@@ -112,7 +142,8 @@ class BlazeLauncherActivity : ComponentActivity() {
                             onTabSelected = { currentTab = it },
                             accountName = activeAccountName,
                             onAccountClick = { showAccountDialog = true },
-                            keepAliveActive = true
+                            keepAliveActive = true,
+                            onQuitClick = { showQuitDialog = true }
                         )
 
                         // Main Content Stage (Landscape 16:9 with Fluent Slide-Fade)
@@ -174,9 +205,25 @@ class BlazeLauncherActivity : ComponentActivity() {
                             }
                         )
                     }
+
+                    // Layer 4: Fluent Quit Confirmation Modal Dialog
+                    if (showQuitDialog) {
+                        QuitDialog(
+                            onDismissRequest = { showQuitDialog = false },
+                            onConfirmQuit = {
+                                showQuitDialog = false
+                                TeardownLifecycleManager.executeTeardown(this@BlazeLauncherActivity)
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    override fun onDestroy() {
+        BlazeKeepAliveService.stop(this)
+        super.onDestroy()
     }
 
     private fun launchGame() {
@@ -189,15 +236,23 @@ class BlazeLauncherActivity : ComponentActivity() {
 /**
  * Background Layer: Renders custom looping muted video (.mp4/.webm), photo (.png/.jpg),
  * pure OLED black, or ambient themed gradient.
+ * Supports hardware-accelerated blur via RenderEffect (Android 12+) or ambient scrim fallback.
  */
 @Composable
 private fun BlazeBackgroundLayer(
     bgStyle: String,
     customUri: String?,
     customType: String?,
+    blurDp: Float = 0f,
     modifier: Modifier = Modifier
 ) {
-    Box(modifier = modifier.fillMaxSize()) {
+    val blurModifier = if (blurDp > 0f && Build.VERSION.SDK_INT >= 31) {
+        Modifier.blur(blurDp.dp)
+    } else {
+        Modifier
+    }
+
+    Box(modifier = modifier.fillMaxSize().then(blurModifier)) {
         when {
             bgStyle == "custom" && !customUri.isNullOrEmpty() -> {
                 val isVideo = customType == "video" ||
@@ -206,7 +261,18 @@ private fun BlazeBackgroundLayer(
                     customUri.endsWith(".mkv", ignoreCase = true)
 
                 if (isVideo) {
-                    VideoBackground(videoPath = customUri)
+                    val uri = if (customUri.startsWith("content://") || customUri.startsWith("file://")) {
+                        Uri.parse(customUri)
+                    } else {
+                        Uri.fromFile(File(customUri))
+                    }
+                    VideoPlayer(
+                        videoUri = uri,
+                        modifier = Modifier.fillMaxSize(),
+                        autoPlay = true,
+                        loop = true,
+                        muted = true
+                    )
                 } else {
                     PhotoBackground(photoPath = customUri)
                 }
@@ -241,73 +307,6 @@ private fun BlazeBackgroundLayer(
             }
         }
     }
-}
-
-@Composable
-private fun VideoBackground(videoPath: String, modifier: Modifier = Modifier) {
-    var playerRef by remember { mutableStateOf<MediaPlayer?>(null) }
-
-    DisposableEffect(videoPath) {
-        onDispose {
-            playerRef?.release()
-            playerRef = null
-        }
-    }
-
-    AndroidView(
-        modifier = modifier.fillMaxSize(),
-        factory = { ctx ->
-            TextureView(ctx).apply {
-                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                        try {
-                            var videoRotation = 0
-                            try {
-                                val retriever = MediaMetadataRetriever()
-                                retriever.setDataSource(videoPath)
-                                val rotStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
-                                videoRotation = rotStr?.toIntOrNull() ?: 0
-                                retriever.release()
-                            } catch (_: Throwable) {}
-
-                            val mp = MediaPlayer().apply {
-                                setDataSource(videoPath)
-                                setSurface(Surface(surface))
-                                isLooping = true
-                                setVolume(0f, 0f)
-                                prepareAsync()
-                                setOnPreparedListener { start() }
-                                setOnVideoSizeChangedListener { _, rawVw, rawVh ->
-                                    if (rawVw > 0 && rawVh > 0) {
-                                        val vw = if (videoRotation == 90 || videoRotation == 270) rawVh else rawVw
-                                        val vh = if (videoRotation == 90 || videoRotation == 270) rawVw else rawVh
-                                        val matrix = Matrix()
-                                        val sx = width.toFloat() / vw.toFloat()
-                                        val sy = height.toFloat() / vh.toFloat()
-                                        val scale = maxOf(sx, sy)
-                                        matrix.setScale(scale, scale)
-                                        matrix.postTranslate((width - vw * scale) / 2f, (height - vh * scale) / 2f)
-                                        setTransform(matrix)
-                                    }
-                                }
-                            }
-                            playerRef = mp
-                        } catch (e: Exception) {
-                            Log.e("VideoBackground", "Failed to start background video: ${e.message}")
-                        }
-                    }
-
-                    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
-                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                        playerRef?.release()
-                        playerRef = null
-                        return true
-                    }
-                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-                }
-            }
-        }
-    )
 }
 
 @Composable

@@ -12,6 +12,11 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import dev.horizon.android.bridge.BlazeNativeBridge
+import dev.horizon.android.diagnostics.ProcessTracker
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
 
 /**
  * Background persistence service holding PARTIAL_WAKE_LOCK and WIFI_MODE_FULL_HIGH_PERF
@@ -26,6 +31,9 @@ class BlazeKeepAliveService : Service() {
         private const val CHANNEL_ID = "blaze_keepalive_channel"
         private const val NOTIFICATION_ID = 2603
 
+        private val serviceJob = SupervisorJob()
+        private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
+
         fun start(context: Context) {
             val intent = Intent(context, BlazeKeepAliveService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -36,13 +44,26 @@ class BlazeKeepAliveService : Service() {
         }
 
         fun stop(context: Context) {
+            cancelHeartbeat()
             val intent = Intent(context, BlazeKeepAliveService::class.java)
             context.stopService(intent)
+        }
+
+        /**
+         * Cancels all background coroutines and heartbeat / watchdog jobs.
+         */
+        fun cancelHeartbeat() {
+            try {
+                serviceJob.cancelChildren()
+            } catch (t: Throwable) {
+                System.err.println("BlazeKeepAliveService cancelHeartbeat: ${t.message}")
+            }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        ProcessTracker.isServiceRunning = true
         acquireLocks()
         startForegroundNotification()
     }
@@ -91,10 +112,22 @@ class BlazeKeepAliveService : Service() {
     }
 
     override fun onDestroy() {
+        ProcessTracker.isServiceRunning = false
+        cancelHeartbeat()
         try {
             wakeLock?.let { if (it.isHeld) it.release() }
             wifiLock?.let { if (it.isHeld) it.release() }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            System.err.println("BlazeKeepAliveService lock release error: ${e.message}")
+        }
+        wakeLock = null
+        wifiLock = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         super.onDestroy()
     }
 

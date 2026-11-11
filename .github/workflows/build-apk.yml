@@ -155,6 +155,10 @@ jobs:
 
           python3 tools/android_prepare.py
 
+      - name: Run Unit Tests
+        run: |
+          gradle --no-daemon -p packaging/android testDebugUnitTest
+
       - name: Build Android APK
         run: |
           BUILD_FLAG="--public"
@@ -169,6 +173,11 @@ jobs:
             --sdk "$ANDROID_HOME" \
             --java-home "$JAVA_HOME" \
             --gradle "$(which gradle)"
+
+      - name: Verify APK Assets
+        run: |
+          unzip -l .local/android/apk/${{ matrix.abi }}/*.apk | grep -i "skin/alex.png"
+          unzip -l .local/android/apk/${{ matrix.abi }}/*.apk | grep -i "skin/steve.png"
 
       - name: Generate Checksums
         run: |

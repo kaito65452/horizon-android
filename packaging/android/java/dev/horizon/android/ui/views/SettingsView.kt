@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
@@ -22,10 +23,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.BlazeNativeBridge
+import dev.horizon.android.diagnostics.NetLog
+import dev.horizon.android.diagnostics.ProcessTracker
 import dev.horizon.android.ui.animation.verticalSlideFadeTransition
 import dev.horizon.android.ui.components.*
 import dev.horizon.android.ui.theme.BlazePalettes
 import dev.horizon.android.ui.theme.LocalBlazeColors
+import dev.horizon.android.ui.theme.ThemeState
 import org.json.JSONObject
 import java.io.File
 import java.util.zip.ZipEntry
@@ -86,14 +90,36 @@ fun SettingsView(
             complexVoiceChatEnabled = root.optBoolean("svc_enabled", true)
             rnnoiseEnabled = root.optBoolean("svc_rnnoise", true)
 
-            // Experimental Flags
-            zeroLatencyTouch = root.optBoolean("zero_latency_touch", true)
-            fastChunkUpload = root.optBoolean("fast_chunk_upload", true)
-            hollowLeafCulling = root.optBoolean("experimental_leaf_culling", false)
-            superPerfMode = root.optBoolean("super_perf_mode", false)
-            batteryPerfMode = root.optBoolean("battery_perf_mode", false)
-            maxFpsMode = root.optBoolean("max_fps_mode", false)
-            recordPerformance = root.optBoolean("record_performance", false)
+            // Theme & Surface settings
+            val theme = root.optJSONObject("theme")
+            if (theme != null) {
+                backgroundMode = theme.optString("bg_style", "mc")
+                val preset = theme.optInt("preset", 0)
+                selectedPalette = when (preset) {
+                    0 -> "cyan"
+                    1 -> "emerald"
+                    2 -> "crimson"
+                    3 -> "violet"
+                    4 -> "amber"
+                    else -> "cyan"
+                }
+                if (theme.has("glass_opacity")) {
+                    panelOpacity = (theme.optDouble("glass_opacity", 0.72) * 100.0).toFloat().coerceIn(40f, 98f)
+                } else if (root.has("panel_opacity")) {
+                    panelOpacity = root.optDouble("panel_opacity", 72.0).toFloat().coerceIn(40f, 98f)
+                }
+                if (theme.has("glass_blur")) {
+                    panelBlur = theme.optDouble("glass_blur", 16.0).toFloat().coerceIn(0f, 32f)
+                } else if (root.has("panel_blur")) {
+                    panelBlur = root.optDouble("panel_blur", 16.0).toFloat().coerceIn(0f, 32f)
+                }
+            } else {
+                val curr = ThemeState.state.value
+                selectedPalette = curr.accentKey
+                backgroundMode = curr.backgroundType
+                panelOpacity = (curr.panelOpacity * 100f).coerceIn(40f, 98f)
+                panelBlur = curr.blurRadiusDp.coerceIn(0f, 32f)
+            }
         } catch (_: Throwable) {}
     }
 
@@ -131,11 +157,17 @@ fun SettingsView(
                     targetFile.outputStream().use { output -> input.copyTo(output) }
                 }
                 backgroundMode = "custom"
+                val bgType = if (isVideo) "video" else "image"
+                ThemeState.update(
+                    backgroundType = "custom",
+                    customBgUri = targetFile.absolutePath,
+                    customBgType = bgType
+                )
                 mutateAndSaveConfig { root ->
                     val theme = root.optJSONObject("theme") ?: JSONObject()
                     theme.put("bg_style", "custom")
                     theme.put("custom_bg_uri", targetFile.absolutePath)
-                    theme.put("custom_bg_type", if (isVideo) "video" else "image")
+                    theme.put("custom_bg_type", bgType)
                     root.put("theme", theme)
                 }
                 onThemeChanged?.invoke()
@@ -298,16 +330,18 @@ fun SettingsView(
                                 selectedKey = selectedPalette,
                                 onSelect = {
                                     selectedPalette = it
+                                    val preset = when (it) {
+                                        "cyan" -> 0
+                                        "emerald", "green" -> 1
+                                        "crimson", "red" -> 2
+                                        "violet" -> 3
+                                        "amber", "gold" -> 4
+                                        else -> 0
+                                    }
+                                    ThemeState.update(accentKey = it)
                                     onPaletteChanged(it)
                                     mutateAndSaveConfig { root ->
                                         val theme = root.optJSONObject("theme") ?: JSONObject()
-                                        val preset = when (it) {
-                                            "cyan" -> 0
-                                            "emerald" -> 1
-                                            "crimson" -> 2
-                                            "violet" -> 3
-                                            else -> 0
-                                        }
                                         theme.put("preset", preset)
                                         root.put("theme", theme)
                                     }
@@ -330,6 +364,7 @@ fun SettingsView(
                                 selectedIndex = idx,
                                 onSelect = {
                                     backgroundMode = bgKeys[it]
+                                    ThemeState.update(backgroundType = bgKeys[it])
                                     mutateAndSaveConfig { root ->
                                         val theme = root.optJSONObject("theme") ?: JSONObject()
                                         theme.put("bg_style", bgKeys[it])
@@ -366,13 +401,17 @@ fun SettingsView(
                                     value = panelOpacity,
                                     onValueChange = {
                                         panelOpacity = it
+                                        val fraction = it / 100f
+                                        ThemeState.update(panelOpacity = fraction)
                                         mutateAndSaveConfig { root ->
                                             val theme = root.optJSONObject("theme") ?: JSONObject()
-                                            theme.put("glass_opacity", it / 100.0)
+                                            theme.put("glass_opacity", fraction.toDouble())
+                                            theme.put("panel_opacity", it.toDouble())
                                             root.put("theme", theme)
+                                            root.put("panel_opacity", it.toDouble())
                                         }
                                     },
-                                    valueRange = 30f..95f
+                                    valueRange = 40f..98f
                                 )
                             }
                             Column(modifier = Modifier.weight(1f)) {
@@ -387,10 +426,13 @@ fun SettingsView(
                                     value = panelBlur,
                                     onValueChange = {
                                         panelBlur = it
+                                        ThemeState.update(blurRadiusDp = it)
                                         mutateAndSaveConfig { root ->
                                             val theme = root.optJSONObject("theme") ?: JSONObject()
                                             theme.put("glass_blur", it.toDouble())
+                                            theme.put("panel_blur", it.toDouble())
                                             root.put("theme", theme)
+                                            root.put("panel_blur", it.toDouble())
                                         }
                                     },
                                     valueRange = 0f..32f
@@ -911,6 +953,143 @@ fun SettingsView(
                                 }
                             }
                         )
+
+                        Spacer(Modifier.height(10.dp))
+                        HorizonSectionHeader(tag = "LIVE DIAGNOSTICS", title = "System & Network Health")
+
+                        // 1. Process & Service Status
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Game Process
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0x1AFFFFFF))
+                                    .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(10.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    androidx.compose.foundation.text.BasicText(
+                                        text = "GAME ENGINE PROCESS",
+                                        style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    )
+                                    val isRunning = ProcessTracker.isGameRunning
+                                    val statusColor = if (isRunning) Color(0xFF34D399) else Color(0xFF94A3B8)
+                                    val statusText = if (isRunning) "RUNNING" else "STOPPED"
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(statusColor))
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = statusText,
+                                            style = androidx.compose.ui.text.TextStyle(color = statusColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Keep Alive Service
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0x1AFFFFFF))
+                                    .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(10.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    androidx.compose.foundation.text.BasicText(
+                                        text = "KEEP-ALIVE SERVICE",
+                                        style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    )
+                                    val isService = ProcessTracker.isServiceRunning
+                                    val svcColor = if (isService) Color(0xFF38BDF8) else Color(0xFF94A3B8)
+                                    val svcText = if (isService) "ACTIVE (FOREGROUND)" else "STOPPED"
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(svcColor))
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = svcText,
+                                            style = androidx.compose.ui.text.TextStyle(color = svcColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Theme State Diagnostics
+                        val currentThemeConfig by ThemeState.state.collectAsState()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x1AFFFFFF))
+                                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(10.dp))
+                                .padding(8.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "ACTIVE THEME STATE",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Accent: ${currentThemeConfig.accentKey} | Blur: ${currentThemeConfig.blurRadiusDp.toInt()}dp | Opacity: ${(currentThemeConfig.panelOpacity * 100).toInt()}% | Bg: ${currentThemeConfig.backgroundType}",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFFE2E8F0), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                )
+                            }
+                        }
+
+                        // 3. Network Endpoint Diagnostics per source
+                        androidx.compose.foundation.text.BasicText(
+                            text = "NETWORK ENDPOINTS (LIVE)",
+                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                        )
+
+                        NetLog.entries.values.forEach { entry ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0x14FFFFFF))
+                                    .border(1.dp, Color(0x1FFFFFFF), RoundedCornerShape(10.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = entry.source,
+                                            style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        )
+                                        val isOk = entry.status.contains("200") || entry.status.contains("OK")
+                                        val isPending = entry.status.contains("Pending")
+                                        val statusCol = when {
+                                            isOk -> Color(0xFF34D399)
+                                            isPending -> Color(0xFF94A3B8)
+                                            else -> Color(0xFFF87171)
+                                        }
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = entry.status,
+                                            style = androidx.compose.ui.text.TextStyle(color = statusCol, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        val displayUrl = if (entry.lastUrl.length > 55) entry.lastUrl.take(52) + "..." else entry.lastUrl
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = "URL: $displayUrl",
+                                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFF64748B), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = "Items: ${entry.count} • ${entry.formattedTime()}",
+                                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

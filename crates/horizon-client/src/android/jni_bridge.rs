@@ -680,6 +680,19 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeR
     1
 }
 
+/// Signal graceful exit to native engine subsystems (stops downloads, flushes diagnostics, sets game inactive).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeSignalEngineExit(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jboolean {
+    DOWNLOAD_ACTIVE.store(false, Ordering::SeqCst);
+    super::document_store::set_game_active(false);
+    super::diagnostics::request_flush();
+    super::diagnostics::finish();
+    1
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct AccountItemPayload {
     pub provider: String,

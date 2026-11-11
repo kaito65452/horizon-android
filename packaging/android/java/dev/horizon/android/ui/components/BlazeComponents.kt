@@ -39,6 +39,7 @@ fun HorizonGlass(
     borderWidth: Dp = 1.dp,
     borderColor: Color = LocalBlazeColors.current.glassBorder,
     backgroundColor: Color = LocalBlazeColors.current.glassBg,
+    blurDp: Dp = LocalBlazeColors.current.cardBlurDp.dp,
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(

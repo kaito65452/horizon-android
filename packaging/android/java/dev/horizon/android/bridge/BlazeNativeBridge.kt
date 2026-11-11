@@ -93,6 +93,15 @@ object BlazeNativeBridge {
     external fun nativeGetDiagnosticsJson(): String
     external fun nativeGetVersion(): String
     external fun nativeResetSettings(category: String): Boolean
+    external fun nativeSignalEngineExit(): Boolean
+
+    fun signalEngineExit(): Boolean {
+        return try {
+            nativeSignalEngineExit()
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     // Account Management JNI
     external fun nativeGetAccountsJson(): String

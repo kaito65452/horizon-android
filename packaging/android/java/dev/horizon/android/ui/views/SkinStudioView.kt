@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.BlazeNativeBridge
+import dev.horizon.android.service.WardrobeService
 import dev.horizon.android.ui.animation.pressBounce
 import dev.horizon.android.ui.components.*
 import dev.horizon.android.ui.theme.LocalBlazeColors
@@ -74,14 +75,18 @@ fun SkinStudioView(
     var capeBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
     fun loadDefaultSteve() {
-        val bmp = createSteveTexture()
+        val bmp = try {
+            context.assets.open("skin/steve.png").use { BitmapFactory.decodeStream(it) }
+        } catch (_: Throwable) { null } ?: createSteveTexture()
         skinBitmap = bmp
         armGeometry = "classic"
         selectedPreset = "steve"
     }
 
     fun loadDefaultAlex() {
-        val bmp = createAlexTexture()
+        val bmp = try {
+            context.assets.open("skin/alex.png").use { BitmapFactory.decodeStream(it) }
+        } catch (_: Throwable) { null } ?: createAlexTexture()
         skinBitmap = bmp
         armGeometry = "slim"
         selectedPreset = "alex"
@@ -139,10 +144,16 @@ fun SkinStudioView(
                     val target = File(skinsDir, "current.png")
                     target.outputStream().use { output -> input.copyTo(output) }
 
-                    val bmp = BitmapFactory.decodeFile(target.absolutePath)
+                    var bmp = BitmapFactory.decodeFile(target.absolutePath)
                     if (bmp != null) {
+                        if (bmp.width == 64 && bmp.height == 32) {
+                            bmp = WardrobeService.convertLegacySkin(bmp)
+                            target.outputStream().use { output ->
+                                bmp.compress(Bitmap.CompressFormat.PNG, 100, output)
+                            }
+                        }
                         skinBitmap = bmp
-                        armGeometry = if (isSlimArmGeometry(bmp)) "slim" else "classic"
+                        armGeometry = if (WardrobeService.isSlimArm(bmp) || isSlimArmGeometry(bmp)) "slim" else "classic"
                         selectedPreset = "custom"
                         statusMessage = "Imported custom ${bmp.width}x${bmp.height} skin via SAF"
                     } else {

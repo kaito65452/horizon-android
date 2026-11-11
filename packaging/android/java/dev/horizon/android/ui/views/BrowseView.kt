@@ -4,61 +4,71 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.horizon.android.bridge.BlazeNativeBridge
 import dev.horizon.android.bridge.CatalogItem
+import dev.horizon.android.service.ModrinthService
+import dev.horizon.android.ui.animation.pressBounce
 import dev.horizon.android.ui.components.HorizonGlass
 import dev.horizon.android.ui.components.HorizonPill
 import dev.horizon.android.ui.theme.LocalBlazeColors
-import org.json.JSONArray
+import kotlinx.coroutines.launch
 
 @Composable
 fun BrowseView(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
+    val coroutineScope = rememberCoroutineScope()
+    val modrinthService = remember { ModrinthService() }
+
     var selectedType by remember { mutableStateOf("mods") }
-    var selectedSource by remember { mutableStateOf("Horizon") }
+    var selectedSource by remember { mutableStateOf("Modrinth") }
     var searchQuery by remember { mutableStateOf("") }
     var items by remember { mutableStateOf<List<CatalogItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(false) }
 
-    fun refreshItems() {
-        try {
-            val jsonStr = BlazeNativeBridge.nativeFetchCatalogMods(selectedSource, selectedType, searchQuery)
-            val array = JSONArray(jsonStr)
-            val list = mutableListOf<CatalogItem>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(
-                    CatalogItem(
-                        id = obj.optString("id"),
-                        title = obj.optString("title"),
-                        summary = obj.optString("summary"),
-                        source = obj.optString("source"),
-                        downloads = obj.optLong("downloads"),
-                        installed = obj.optBoolean("installed"),
-                        unsupported = obj.optBoolean("unsupported")
+    fun refreshCatalog() {
+        coroutineScope.launch {
+            isLoading = true
+            try {
+                items = if (selectedSource == "Modrinth") {
+                    modrinthService.searchProjects(
+                        query = searchQuery,
+                        type = selectedType,
+                        version = "26.3"
                     )
-                )
+                } else {
+                    modrinthService.getHorizonCatalogFallback(
+                        type = selectedType,
+                        query = searchQuery
+                    )
+                }
+            } catch (_: Throwable) {
+                items = emptyList()
+            } finally {
+                isLoading = false
             }
-            items = list
-        } catch (_: Throwable) {
-            items = emptyList()
         }
     }
 
     LaunchedEffect(selectedType, selectedSource, searchQuery) {
-        refreshItems()
+        refreshCatalog()
     }
 
     Column(
@@ -67,13 +77,40 @@ fun BrowseView(
             .padding(horizontal = 14.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Filter bar: Type chips & Source chips
+        // ROW 1: Controls Bar (Search Input + Filter Chips)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Type chips: Mods, Resource Packs, Shaders
+            // Search Input Field
+            Box(
+                modifier = Modifier
+                    .width(220.dp)
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0x26FFFFFF))
+                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (searchQuery.isEmpty()) {
+                    BasicText(
+                        text = "Search mods, shaders, packs...",
+                        style = TextStyle(color = Color(0xFF64748B), fontSize = 11.sp)
+                    )
+                }
+                BasicTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    textStyle = TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                    cursorBrush = SolidColor(colors.activePalette.primary),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Type Chips: Mods, Resource Packs, Shaders
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf("mods" to "Mods", "packs" to "Resource Packs", "shaders" to "Shaders").forEach { (key, label) ->
                     val isSel = selectedType == key
@@ -82,9 +119,9 @@ fun BrowseView(
                         borderColor = if (isSel) colors.activePalette.primary else Color(0x26FFFFFF),
                         onClick = { selectedType = key }
                     ) {
-                        androidx.compose.foundation.text.BasicText(
+                        BasicText(
                             text = label,
-                            style = androidx.compose.ui.text.TextStyle(
+                            style = TextStyle(
                                 color = if (isSel) Color(0xFF020617) else Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
@@ -94,18 +131,18 @@ fun BrowseView(
                 }
             }
 
-            // Source chips: Horizon, Modrinth
+            // Source Chips: Modrinth, Horizon Built-in
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("Horizon", "Modrinth").forEach { src ->
+                listOf("Modrinth", "Horizon").forEach { src ->
                     val isSel = selectedSource == src
                     HorizonPill(
                         backgroundColor = if (isSel) colors.activePalette.soft else Color(0x14FFFFFF),
                         borderColor = if (isSel) colors.activePalette.primary else Color(0x26FFFFFF),
                         onClick = { selectedSource = src }
                     ) {
-                        androidx.compose.foundation.text.BasicText(
+                        BasicText(
                             text = src,
-                            style = androidx.compose.ui.text.TextStyle(
+                            style = TextStyle(
                                 color = if (isSel) colors.activePalette.primary else Color(0xFF94A3B8),
                                 fontSize = 11.sp,
                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
@@ -116,112 +153,153 @@ fun BrowseView(
             }
         }
 
-        // Project Items List
+        // ROW 2: Scrollable Items List via LazyColumn
         HorizonGlass(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             cornerRadius = 16.dp
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items.forEach { item ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0x1AFFFFFF))
-                            .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(12.dp))
-                            .padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    BasicText(
+                        text = "Loading catalog from $selectedSource...",
+                        style = TextStyle(color = colors.activePalette.primary, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    )
+                }
+            } else if (items.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        BasicText(
+                            text = "No packages found",
+                            style = TextStyle(color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        )
+                        BasicText(
+                            text = "Try adjusting your query or toggle between Modrinth and Horizon built-in catalog",
+                            style = TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(items, key = { it.id }) { item ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x1AFFFFFF))
+                                .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(12.dp))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    BasicText(
+                                        text = item.title,
+                                        style = TextStyle(
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                    if (item.unsupported) {
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color(0x33EF4444))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            BasicText(
+                                                text = "INCOMPATIBLE",
+                                                style = TextStyle(
+                                                    color = Color(0xFFF87171),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(2.dp))
+                                BasicText(
+                                    text = item.summary,
+                                    style = TextStyle(
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 11.sp,
+                                        lineHeight = 15.sp
+                                    ),
+                                    maxLines = 2
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    BasicText(
+                                        text = "${item.downloads / 1000}k downloads",
+                                        style = TextStyle(
+                                            color = Color(0xFF64748B),
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    )
+                                    BasicText(
+                                        text = "•",
+                                        style = TextStyle(color = Color(0xFF475569), fontSize = 10.sp)
+                                    )
+                                    BasicText(
+                                        text = item.source,
+                                        style = TextStyle(
+                                            color = colors.activePalette.primary,
+                                            fontSize = 10.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    )
+                                }
+                            }
+
+                            // Install / Added Button
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 12.dp)
+                                    .pressBounce(onClick = {})
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (item.installed) Color(0x2634D399)
+                                        else colors.activePalette.primary
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (item.installed) Color(0x6634D399) else colors.activePalette.primary,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(horizontal = 14.dp, vertical = 7.dp)
                             ) {
-                                androidx.compose.foundation.text.BasicText(
-                                    text = item.title,
-                                    style = androidx.compose.ui.text.TextStyle(
-                                        color = Color.White,
-                                        fontSize = 13.sp,
+                                BasicText(
+                                    text = if (item.installed) "Installed" else "Install",
+                                    style = TextStyle(
+                                        color = if (item.installed) Color(0xFF34D399) else Color(0xFF020617),
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 )
-                                if (item.unsupported) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(Color(0x33EF4444))
-                                            .border(1.dp, Color(0x66EF4444), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 4.dp, vertical = 1.dp)
-                                    ) {
-                                        androidx.compose.foundation.text.BasicText(
-                                            text = "UNSUPPORTED",
-                                            style = androidx.compose.ui.text.TextStyle(
-                                                color = Color(0xFFFCA5A5),
-                                                fontSize = 8.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                        )
-                                    }
-                                }
                             }
-                            Spacer(Modifier.height(2.dp))
-                            androidx.compose.foundation.text.BasicText(
-                                text = item.summary,
-                                style = androidx.compose.ui.text.TextStyle(
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 10.sp
-                                )
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            androidx.compose.foundation.text.BasicText(
-                                text = "${item.source} • ${item.downloads / 1000}k downloads",
-                                style = androidx.compose.ui.text.TextStyle(
-                                    color = colors.activePalette.primary,
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            )
-                        }
-
-                        // Install button
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    when {
-                                        item.unsupported -> Color(0x1AFFFFFF)
-                                        item.installed -> Color(0x2610B981)
-                                        else -> colors.activePalette.primary
-                                    }
-                                )
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            androidx.compose.foundation.text.BasicText(
-                                text = when {
-                                    item.unsupported -> "Disabled"
-                                    item.installed -> "Installed"
-                                    else -> "Install"
-                                },
-                                style = androidx.compose.ui.text.TextStyle(
-                                    color = when {
-                                        item.unsupported -> Color(0xFF64748B)
-                                        item.installed -> Color(0xFF34D399)
-                                        else -> Color(0xFF020617)
-                                    },
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            )
                         }
                     }
                 }
