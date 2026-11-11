@@ -6,8 +6,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -292,19 +294,20 @@ fun SkinStudioView(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(12.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     HorizonSectionHeader(tag = "STUDIO", title = "Skin & Cape Options")
 
                     // Arm Geometry: Slim (3px) vs Classic (4px)
                     Column {
                         androidx.compose.foundation.text.BasicText(
                             text = "Arm Geometry",
-                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFFCBD5E1), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFFCBD5E1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         )
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(2.dp))
                         HorizonSegmented(
                             options = listOf("Slim (3px)", "Classic (4px)"),
                             selectedIndex = if (armGeometry == "slim") 0 else 1,
@@ -314,10 +317,10 @@ fun SkinStudioView(
                     }
 
                     // 64x64 Dual-Layer Overlay Toggles
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         androidx.compose.foundation.text.BasicText(
                             text = "Outer Overlay Layers (64x64)",
-                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFFCBD5E1), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFFCBD5E1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -370,6 +373,8 @@ fun SkinStudioView(
                         )
                     }
                 }
+
+                Spacer(Modifier.height(8.dp))
 
                 // Apply Skin Button
                 HorizonButton(

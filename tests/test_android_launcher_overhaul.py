@@ -7,12 +7,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class AndroidLauncherOverhaulTests(unittest.TestCase):
     def test_legacy_launcher_pages_deleted(self) -> None:
-        """Verify that crates/horizon-client/src/android/launcher_pages.rs is permanently deleted."""
-        legacy_path = ROOT / "crates/horizon-client/src/android/launcher_pages.rs"
-        self.assertFalse(
-            legacy_path.exists(),
-            "crates/horizon-client/src/android/launcher_pages.rs must be permanently deleted"
-        )
+        """Verify that legacy Rust launcher UI files are permanently deleted."""
+        legacy_paths = [
+            ROOT / "crates/horizon-client/src/android/launcher_pages.rs",
+            ROOT / "crates/horizon-client/src/android/launcher.rs",
+            ROOT / "crates/horizon-client/src/android/blaze_ui",
+            ROOT / "crates/horizon-client/src/android/chooser.rs",
+            ROOT / "crates/horizon-client/src/android/login.rs",
+            ROOT / "crates/horizon-client/src/android/wardrobe.rs",
+        ]
+        for p in legacy_paths:
+            self.assertFalse(p.exists(), f"Legacy Rust launcher file {p.name} must be permanently deleted")
 
     def test_pure_rust_jni_bridge_exists(self) -> None:
         """Verify that jni_bridge.rs exists and exposes required JNI bindings."""
@@ -22,6 +27,7 @@ class AndroidLauncherOverhaulTests(unittest.TestCase):
         
         required_symbols = [
             "Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeInit",
+            "Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeAreAssetsReady",
             "Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeGetConfigJson",
             "Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeSaveConfigJson",
             "Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeLaunchGame",

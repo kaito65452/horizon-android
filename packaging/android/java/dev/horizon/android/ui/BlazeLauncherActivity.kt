@@ -63,10 +63,19 @@ class BlazeLauncherActivity : ComponentActivity() {
                         ) {
                             when (currentTab) {
                                 "home" -> HomeView(
-                                    onLaunchGame = { launchGame() },
+                                    onLaunchGame = {
+                                        if (!BlazeNativeBridge.areAssetsReady()) {
+                                            currentTab = "downloads"
+                                            BlazeNativeBridge.nativeStartMultiThreadDownload(8)
+                                        } else {
+                                            launchGame()
+                                        }
+                                    },
                                     onNavigate = { currentTab = it }
                                 )
-                                "downloads" -> DownloadsView()
+                                "downloads" -> DownloadsView(
+                                    onLaunchGame = { launchGame() }
+                                )
                                 "manager" -> ManagerView()
                                 "browse" -> BrowseView()
                                 "skin" -> SkinStudioView()

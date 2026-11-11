@@ -31,6 +31,7 @@ object BlazeNativeBridge {
 
     // Native JNI functions implemented in crates/horizon-client/src/android/jni_bridge.rs
     private external fun nativeInit(dataDir: String)
+    external fun nativeAreAssetsReady(): Boolean
     external fun nativeGetConfigJson(): String
     external fun nativeSaveConfigJson(json: String): Boolean
     external fun nativeLaunchGame(profileId: Int): Boolean
@@ -47,6 +48,14 @@ object BlazeNativeBridge {
     external fun nativeResetSettings(category: String): Boolean
 
     // Safe helper accessors
+    fun areAssetsReady(): Boolean {
+        return try {
+            nativeAreAssetsReady()
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     fun getVersion(): String {
         return try {
             nativeGetVersion().ifEmpty { "26.3 • Blaze Engine" }

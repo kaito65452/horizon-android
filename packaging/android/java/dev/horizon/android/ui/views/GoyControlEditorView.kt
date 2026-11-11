@@ -6,7 +6,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -14,8 +16,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.BlazeNativeBridge
@@ -27,24 +31,28 @@ import dev.horizon.android.ui.components.HorizonSlider
 import dev.horizon.android.ui.components.HorizonSwitch
 import dev.horizon.android.ui.theme.LocalBlazeColors
 import org.json.JSONArray
-import kotlin.math.round
+import org.json.JSONObject
+import kotlin.math.roundToInt
 
 @Composable
 fun GoyControlEditorView(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
+    var canvasWidthPx by remember { mutableFloatStateOf(600f) }
+    var canvasHeightPx by remember { mutableFloatStateOf(350f) }
+
     var buttons by remember {
         mutableStateOf(
             listOf(
-                ControlButton("btn_joy", "JOYSTICK", 40f, 180f, 100f, 100f, 0.85f, 1f, false),
-                ControlButton("btn_atk", "ATK", 780f, 130f, 56f, 56f, 0.85f, 1f, false),
-                ControlButton("btn_use", "USE", 710f, 170f, 56f, 56f, 0.85f, 1f, false),
-                ControlButton("btn_jump", "JUMP", 780f, 210f, 56f, 56f, 0.85f, 1f, false),
-                ControlButton("btn_sneak", "SNEAK", 710f, 250f, 48f, 48f, 0.85f, 1f, false),
-                ControlButton("btn_inv", "INV", 430f, 320f, 48f, 36f, 0.70f, 1f, false),
-                ControlButton("btn_f5", "F5", 580f, 20f, 44f, 30f, 0.70f, 1f, false),
-                ControlButton("btn_pause", "PAUSE", 440f, 20f, 44f, 30f, 0.70f, 1f, false)
+                ControlButton("btn_joy", "JOYSTICK", 30f, 160f, 80f, 80f, 0.85f, 1f, false),
+                ControlButton("btn_atk", "ATK", 440f, 60f, 48f, 48f, 0.85f, 1f, false),
+                ControlButton("btn_use", "USE", 380f, 95f, 48f, 48f, 0.85f, 1f, false),
+                ControlButton("btn_jump", "JUMP", 440f, 130f, 48f, 48f, 0.85f, 1f, false),
+                ControlButton("btn_sneak", "SNEAK", 380f, 165f, 42f, 42f, 0.85f, 1f, false),
+                ControlButton("btn_inv", "INV", 220f, 210f, 44f, 32f, 0.70f, 1f, false),
+                ControlButton("btn_f5", "F5", 300f, 16f, 38f, 26f, 0.70f, 1f, false),
+                ControlButton("btn_pause", "PAUSE", 230f, 16f, 38f, 26f, 0.70f, 1f, false)
             )
         )
     }
@@ -54,6 +62,33 @@ fun GoyControlEditorView(
     var saveStatus by remember { mutableStateOf("") }
 
     val selectedBtn = buttons.firstOrNull { it.id == selectedBtnId }
+
+    LaunchedEffect(Unit) {
+        try {
+            val jsonStr = BlazeNativeBridge.nativeGetControlLayoutJson()
+            val array = JSONArray(jsonStr)
+            val list = mutableListOf<ControlButton>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    ControlButton(
+                        id = obj.optString("id"),
+                        label = obj.optString("label"),
+                        x = obj.optDouble("x", 40.0).toFloat(),
+                        y = obj.optDouble("y", 40.0).toFloat(),
+                        w = obj.optDouble("w", 50.0).toFloat(),
+                        h = obj.optDouble("h", 50.0).toFloat(),
+                        opacity = obj.optDouble("opacity", 0.85).toFloat(),
+                        scale = obj.optDouble("scale", 1.0).toFloat(),
+                        cameraPassthrough = obj.optBoolean("camera_passthrough", false)
+                    )
+                )
+            }
+            if (list.isNotEmpty()) {
+                buttons = list
+            }
+        } catch (_: Throwable) {}
+    }
 
     Row(
         modifier = modifier
@@ -72,8 +107,12 @@ fun GoyControlEditorView(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(8.dp)
+                    .onSizeChanged {
+                        canvasWidthPx = it.width.toFloat()
+                        canvasHeightPx = it.height.toFloat()
+                    }
             ) {
-                // 20px Grid Canvas
+                // 20px Grid Background
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val step = 20.dp.toPx()
                     val w = size.width
@@ -102,16 +141,24 @@ fun GoyControlEditorView(
                     }
                 }
 
-                // Draggable HUD Buttons
+                // Draggable Control Buttons
                 buttons.forEach { btn ->
                     val isSelected = btn.id == selectedBtnId
+                    val bWidthDp = (btn.w * btn.scale).dp
+                    val bHeightDp = (btn.h * btn.scale).dp
+
                     Box(
                         modifier = Modifier
-                            .offset(x = btn.x.dp / 1.5f, y = btn.y.dp / 1.5f)
-                            .size(width = (btn.w * btn.scale).dp / 1.5f, height = (btn.h * btn.scale).dp / 1.5f)
+                            .offset {
+                                IntOffset(
+                                    x = btn.x.dp.toPx().toInt().coerceIn(0, (canvasWidthPx - 60f).toInt().coerceAtLeast(0)),
+                                    y = btn.y.dp.toPx().toInt().coerceIn(0, (canvasHeightPx - 40f).toInt().coerceAtLeast(0))
+                                )
+                            }
+                            .size(width = bWidthDp, height = bHeightDp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(
-                                if (isSelected) colors.activePalette.soft else Color(0x33000000)
+                                if (isSelected) colors.activePalette.soft else Color(0x40000000)
                             )
                             .border(
                                 width = if (isSelected) 2.dp else 1.dp,
@@ -123,14 +170,17 @@ fun GoyControlEditorView(
                                 detectDragGestures { change, dragAmount ->
                                     change.consume()
                                     selectedBtnId = btn.id
-                                    var newX = btn.x + dragAmount.x
-                                    var newY = btn.y + dragAmount.y
+                                    val density = this.density
+                                    val dragXDp = dragAmount.x / density
+                                    val dragYDp = dragAmount.y / density
+                                    var newX = btn.x + dragXDp
+                                    var newY = btn.y + dragYDp
                                     if (snapGrid) {
-                                        newX = (round(newX / 20f) * 20f)
-                                        newY = (round(newY / 20f) * 20f)
+                                        newX = (newX / 20f).roundToInt() * 20f
+                                        newY = (newY / 20f).roundToInt() * 20f
                                     }
-                                    btn.x = newX.coerceIn(0f, 900f)
-                                    btn.y = newY.coerceIn(0f, 380f)
+                                    btn.x = newX.coerceIn(0f, 600f)
+                                    btn.y = newY.coerceIn(0f, 320f)
                                 }
                             },
                         contentAlignment = Alignment.Center
@@ -139,7 +189,7 @@ fun GoyControlEditorView(
                             text = btn.label,
                             style = androidx.compose.ui.text.TextStyle(
                                 color = if (isSelected) colors.activePalette.primary else Color.White,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -149,7 +199,7 @@ fun GoyControlEditorView(
             }
         }
 
-        // Right: Inspector & Properties Panel (4 cols)
+        // Right: Inspector & Properties Panel (Scrollable & auto-fit)
         HorizonGlass(
             modifier = Modifier
                 .weight(1.1f)
@@ -159,7 +209,8 @@ fun GoyControlEditorView(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(12.dp),
+                    .padding(12.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -240,6 +291,8 @@ fun GoyControlEditorView(
                     }
                 }
 
+                Spacer(Modifier.height(10.dp))
+
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (saveStatus.isNotEmpty()) {
                         androidx.compose.foundation.text.BasicText(
@@ -252,7 +305,22 @@ fun GoyControlEditorView(
                         accent = true,
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            saveStatus = "Saved to horizon-controls.json"
+                            val array = JSONArray()
+                            buttons.forEach { b ->
+                                val obj = JSONObject()
+                                obj.put("id", b.id)
+                                obj.put("label", b.label)
+                                obj.put("x", b.x.toDouble())
+                                obj.put("y", b.y.toDouble())
+                                obj.put("w", b.w.toDouble())
+                                obj.put("h", b.h.toDouble())
+                                obj.put("opacity", b.opacity.toDouble())
+                                obj.put("scale", b.scale.toDouble())
+                                obj.put("camera_passthrough", b.cameraPassthrough)
+                                array.put(obj)
+                            }
+                            val saved = BlazeNativeBridge.nativeSaveControlLayoutJson(array.toString())
+                            saveStatus = if (saved) "Saved to horizon-touch.json" else "Failed to save"
                         }
                     )
                 }

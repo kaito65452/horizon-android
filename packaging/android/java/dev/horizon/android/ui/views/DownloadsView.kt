@@ -3,8 +3,10 @@ package dev.horizon.android.ui.views
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,13 +22,19 @@ import dev.horizon.android.ui.components.HorizonButton
 import dev.horizon.android.ui.components.HorizonGlass
 import dev.horizon.android.ui.components.HorizonSectionHeader
 import dev.horizon.android.ui.theme.LocalBlazeColors
-import org.json.JSONArray
+import kotlinx.coroutines.delay
+import org.json.JSONObject
 
 @Composable
 fun DownloadsView(
+    onLaunchGame: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
+    var isReady by remember { mutableStateOf(BlazeNativeBridge.areAssetsReady()) }
+    var isActive by remember { mutableStateOf(false) }
+    var stageText by remember { mutableStateOf("Ready to play") }
+    var totalProgress by remember { mutableFloatStateOf(if (isReady) 1.0f else 0.0f) }
     var threads by remember {
         mutableStateOf(
             listOf(
@@ -43,26 +51,37 @@ fun DownloadsView(
     }
 
     LaunchedEffect(Unit) {
-        try {
-            val jsonStr = BlazeNativeBridge.nativeGetDownloadProgressJson()
-            val array = JSONArray(jsonStr)
-            val list = mutableListOf<DownloadThread>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                list.add(
-                    DownloadThread(
-                        id = obj.optInt("id", i + 1),
-                        name = obj.optString("name", "Thread #${i + 1}"),
-                        progress = obj.optDouble("progress", 1.0).toFloat(),
-                        speedMibS = obj.optDouble("speed_mib_s", 0.0).toFloat(),
-                        status = obj.optString("status", "Verified")
-                    )
-                )
-            }
-            if (list.isNotEmpty()) {
-                threads = list
-            }
-        } catch (_: Throwable) {}
+        while (true) {
+            try {
+                val jsonStr = BlazeNativeBridge.nativeGetDownloadProgressJson()
+                val root = JSONObject(jsonStr)
+                isReady = root.optBoolean("ready", BlazeNativeBridge.areAssetsReady())
+                isActive = root.optBoolean("active", false)
+                stageText = root.optString("stage", if (isReady) "Verified and ready to launch" else "Idle")
+                totalProgress = root.optDouble("progress", if (isReady) 1.0 else 0.0).toFloat()
+
+                val array = root.optJSONArray("threads")
+                if (array != null) {
+                    val list = mutableListOf<DownloadThread>()
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        list.add(
+                            DownloadThread(
+                                id = obj.optInt("id", i + 1),
+                                name = obj.optString("name", "Thread #${i + 1}"),
+                                progress = obj.optDouble("progress", 1.0).toFloat(),
+                                speedMibS = obj.optDouble("speed_mib_s", 0.0).toFloat(),
+                                status = obj.optString("status", if (isReady) "Verified" else "Pending")
+                            )
+                        )
+                    }
+                    if (list.isNotEmpty()) {
+                        threads = list
+                    }
+                }
+            } catch (_: Throwable) {}
+            delay(if (isActive) 300L else 1000L)
+        }
     }
 
     Row(
@@ -71,7 +90,7 @@ fun DownloadsView(
             .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Left: 8-Thread Grid (8 cols)
+        // Left: 8-Thread Grid (Scrollable & auto-fit)
         HorizonGlass(
             modifier = Modifier
                 .weight(2f)
@@ -81,22 +100,25 @@ fun DownloadsView(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(14.dp)
+                    .padding(12.dp)
             ) {
                 HorizonSectionHeader(tag = "PARALLEL PIPELINE", title = "8-Thread Segmented Downloader")
 
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     threads.forEach { th ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(Color(0x1AFFFFFF))
-                                .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                                .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -115,16 +137,16 @@ fun DownloadsView(
                                         text = th.name,
                                         style = androidx.compose.ui.text.TextStyle(
                                             color = Color.White,
-                                            fontSize = 11.sp,
+                                            fontSize = 10.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     )
                                 }
-                                Spacer(Modifier.height(4.dp))
+                                Spacer(Modifier.height(3.dp))
                                 // Progress bar
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth(0.9f)
+                                        .fillMaxWidth(0.92f)
                                         .height(4.dp)
                                         .clip(RoundedCornerShape(2.dp))
                                         .background(Color(0x26FFFFFF))
@@ -141,13 +163,13 @@ fun DownloadsView(
 
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 androidx.compose.foundation.text.BasicText(
                                     text = if (th.speedMibS > 0f) "${"%.1f".format(th.speedMibS)} MiB/s" else th.status,
                                     style = androidx.compose.ui.text.TextStyle(
                                         color = if (th.status == "Verified") Color(0xFF34D399) else colors.activePalette.primary,
-                                        fontSize = 10.sp,
+                                        fontSize = 9.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         fontFamily = FontFamily.Monospace
                                     )
@@ -165,7 +187,7 @@ fun DownloadsView(
             }
         }
 
-        // Right: Queue & Keep-Alive Panel (4 cols)
+        // Right: Queue & Keep-Alive Panel (Scrollable & auto-fit)
         HorizonGlass(
             modifier = Modifier
                 .weight(1.1f)
@@ -175,7 +197,8 @@ fun DownloadsView(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(14.dp),
+                    .padding(12.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 Column {
@@ -185,23 +208,23 @@ fun DownloadsView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0x2610B981))
-                            .border(1.dp, Color(0x4010B981), RoundedCornerShape(12.dp))
-                            .padding(10.dp)
+                            .background(if (isReady) Color(0x2610B981) else Color(0x2638BDF8))
+                            .border(1.dp, if (isReady) Color(0x4010B981) else Color(0x4038BDF8), RoundedCornerShape(12.dp))
+                            .padding(8.dp)
                     ) {
                         Column {
                             androidx.compose.foundation.text.BasicText(
-                                text = "KEEP-ALIVE ACTIVE",
+                                text = if (isReady) "READY FOR LAUNCH" else if (isActive) "DOWNLOADING ASSETS" else "STANDBY",
                                 style = androidx.compose.ui.text.TextStyle(
-                                    color = Color(0xFF34D399),
-                                    fontSize = 11.sp,
+                                    color = if (isReady) Color(0xFF34D399) else colors.activePalette.primary,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     fontFamily = FontFamily.Monospace
                                 )
                             )
-                            Spacer(Modifier.height(4.dp))
+                            Spacer(Modifier.height(3.dp))
                             androidx.compose.foundation.text.BasicText(
-                                text = "Downloads and Complex Voice Chat keep running in background via foreground service.",
+                                text = stageText,
                                 style = androidx.compose.ui.text.TextStyle(
                                     color = Color(0xFFE2E8F0),
                                     fontSize = 10.sp
@@ -210,7 +233,7 @@ fun DownloadsView(
                         }
                     }
 
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(8.dp))
 
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
@@ -222,7 +245,7 @@ fun DownloadsView(
                                 style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 11.sp)
                             )
                             androidx.compose.foundation.text.BasicText(
-                                text = "8 / 8",
+                                text = if (isActive) "8 / 8" else if (isReady) "8 Verified" else "0 / 8",
                                 style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             )
                         }
@@ -235,21 +258,41 @@ fun DownloadsView(
                                 style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 11.sp)
                             )
                             androidx.compose.foundation.text.BasicText(
-                                text = "100%",
-                                style = androidx.compose.ui.text.TextStyle(color = Color(0xFF34D399), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                text = "${(totalProgress * 100).toInt()}%",
+                                style = androidx.compose.ui.text.TextStyle(
+                                    color = if (isReady) Color(0xFF34D399) else colors.activePalette.primary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             )
                         }
                     }
                 }
 
-                HorizonButton(
-                    text = "RECHECK ASSETS",
-                    modifier = Modifier.fillMaxWidth(),
-                    active = true,
-                    onClick = {
-                        BlazeNativeBridge.nativeStartMultiThreadDownload(8)
+                Spacer(Modifier.height(10.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isReady && onLaunchGame != null) {
+                        HorizonButton(
+                            text = "LAUNCH GAME",
+                            modifier = Modifier.fillMaxWidth(),
+                            accent = true,
+                            onClick = { onLaunchGame() }
+                        )
                     }
-                )
+
+                    HorizonButton(
+                        text = if (isActive) "DOWNLOADING..." else if (isReady) "RECHECK ASSETS" else "START DOWNLOAD (8 THREADS)",
+                        modifier = Modifier.fillMaxWidth(),
+                        active = !isActive,
+                        accent = !isReady,
+                        onClick = {
+                            if (!isActive) {
+                                BlazeNativeBridge.nativeStartMultiThreadDownload(8)
+                            }
+                        }
+                    )
+                }
             }
         }
     }

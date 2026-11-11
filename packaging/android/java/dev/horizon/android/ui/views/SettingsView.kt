@@ -21,6 +21,7 @@ import dev.horizon.android.bridge.BlazeNativeBridge
 import dev.horizon.android.ui.components.*
 import dev.horizon.android.ui.theme.BlazePalettes
 import dev.horizon.android.ui.theme.LocalBlazeColors
+import org.json.JSONObject
 
 @Composable
 fun SettingsView(
@@ -30,20 +31,78 @@ fun SettingsView(
     val colors = LocalBlazeColors.current
     var activeCategory by remember { mutableStateOf("appearance") }
 
-    // Settings States
+    // Persistent Config States
     var selectedPalette by remember { mutableStateOf(colors.activePalette.key) }
     var backgroundMode by remember { mutableStateOf("mc") }
     var panelOpacity by remember { mutableFloatStateOf(72f) }
     var panelBlur by remember { mutableFloatStateOf(16f) }
+    var rendererMode by remember { mutableStateOf("VulkanCompatibility") }
     var memoryLimitMb by remember { mutableFloatStateOf(2048f) }
+    var workerLimit by remember { mutableIntStateOf(0) }
     var keepAliveEnabled by remember { mutableStateOf(true) }
-    var complexVoiceChatEnabled by remember { mutableStateOf(true) }
-    var rnnoiseEnabled by remember { mutableStateOf(true) }
     var touchSensitivity by remember { mutableFloatStateOf(60f) }
     var gyroSensitivity by remember { mutableFloatStateOf(40f) }
-    var joystickDeadzone by remember { mutableFloatStateOf(15f) }
     var hapticFeedback by remember { mutableStateOf(true) }
+    var autoJump by remember { mutableStateOf(true) }
+    var splitTouch by remember { mutableStateOf(true) }
+    var playerName by remember { mutableStateOf("Player") }
+    var serverAddress by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf("") }
+
+    // Experimental Feature States
+    var complexVoiceChatEnabled by remember { mutableStateOf(true) }
+    var rnnoiseEnabled by remember { mutableStateOf(true) }
+    var zeroLatencyTouch by remember { mutableStateOf(true) }
+    var fastChunkUpload by remember { mutableStateOf(true) }
+    var hollowLeafCulling by remember { mutableStateOf(false) }
+    var superPerfMode by remember { mutableStateOf(false) }
+    var batteryPerfMode by remember { mutableStateOf(false) }
+    var maxFpsMode by remember { mutableStateOf(false) }
+    var recordPerformance by remember { mutableStateOf(false) }
+
+    fun loadFromNativeConfig() {
+        try {
+            val jsonStr = BlazeNativeBridge.nativeGetConfigJson()
+            val root = JSONObject(jsonStr)
+            playerName = root.optString("name", "Player")
+            serverAddress = root.optString("server", "")
+            rendererMode = root.optString("renderer", "VulkanCompatibility")
+            workerLimit = root.optInt("worker_limit", 0)
+            memoryLimitMb = root.optInt("cache_budget_mib", 2048).toFloat()
+
+            // Keepalive & Audio
+            keepAliveEnabled = root.optBoolean("keepalive_enabled", true)
+            complexVoiceChatEnabled = root.optBoolean("svc_enabled", true)
+            rnnoiseEnabled = root.optBoolean("svc_rnnoise", true)
+
+            // Experimental Flags
+            zeroLatencyTouch = root.optBoolean("zero_latency_touch", true)
+            fastChunkUpload = root.optBoolean("fast_chunk_upload", true)
+            hollowLeafCulling = root.optBoolean("experimental_leaf_culling", false)
+            superPerfMode = root.optBoolean("super_perf_mode", false)
+            batteryPerfMode = root.optBoolean("battery_perf_mode", false)
+            maxFpsMode = root.optBoolean("max_fps_mode", false)
+            recordPerformance = root.optBoolean("record_performance", false)
+        } catch (_: Throwable) {}
+    }
+
+    fun mutateAndSaveConfig(updater: (JSONObject) -> Unit) {
+        try {
+            val jsonStr = BlazeNativeBridge.nativeGetConfigJson()
+            val root = JSONObject(jsonStr)
+            updater(root)
+            val saved = BlazeNativeBridge.nativeSaveConfigJson(root.toString())
+            if (saved) {
+                statusMessage = "Setting saved"
+            }
+        } catch (e: Throwable) {
+            statusMessage = "Error saving: ${e.message}"
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        loadFromNativeConfig()
+    }
 
     val categories = listOf(
         "appearance" to "Appearance",
@@ -62,7 +121,7 @@ fun SettingsView(
             .padding(horizontal = 14.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Left: Category Sidebar (4 cols)
+        // Left: Category Sidebar (Scrollable & auto-fit)
         HorizonGlass(
             modifier = Modifier
                 .weight(1f)
@@ -72,7 +131,8 @@ fun SettingsView(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(8.dp),
+                    .padding(8.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 androidx.compose.foundation.text.BasicText(
@@ -101,7 +161,7 @@ fun SettingsView(
                                 interactionSource = remember { MutableInteractionSource() },
                                 onClick = { activeCategory = catId }
                             )
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
                         androidx.compose.foundation.text.BasicText(
@@ -117,7 +177,7 @@ fun SettingsView(
             }
         }
 
-        // Right: Content Panel (8 cols)
+        // Right: Content Panel (Scrollable & auto-fit)
         HorizonGlass(
             modifier = Modifier
                 .weight(2f)
@@ -146,6 +206,18 @@ fun SettingsView(
                                 onSelect = {
                                     selectedPalette = it
                                     onPaletteChanged(it)
+                                    mutateAndSaveConfig { root ->
+                                        val theme = root.optJSONObject("theme") ?: JSONObject()
+                                        val preset = when (it) {
+                                            "cyan" -> 0
+                                            "emerald" -> 1
+                                            "crimson" -> 2
+                                            "violet" -> 3
+                                            else -> 0
+                                        }
+                                        theme.put("preset", preset)
+                                        root.put("theme", theme)
+                                    }
                                 }
                             )
                         }
@@ -162,7 +234,14 @@ fun SettingsView(
                             HorizonSegmented(
                                 options = bgOptions,
                                 selectedIndex = idx,
-                                onSelect = { backgroundMode = bgKeys[it] },
+                                onSelect = {
+                                    backgroundMode = bgKeys[it]
+                                    mutateAndSaveConfig { root ->
+                                        val theme = root.optJSONObject("theme") ?: JSONObject()
+                                        theme.put("bg_style", bgKeys[it])
+                                        root.put("theme", theme)
+                                    }
+                                },
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
@@ -188,7 +267,14 @@ fun SettingsView(
                                 }
                                 HorizonSlider(
                                     value = panelOpacity,
-                                    onValueChange = { panelOpacity = it },
+                                    onValueChange = {
+                                        panelOpacity = it
+                                        mutateAndSaveConfig { root ->
+                                            val theme = root.optJSONObject("theme") ?: JSONObject()
+                                            theme.put("glass_opacity", it / 100.0)
+                                            root.put("theme", theme)
+                                        }
+                                    },
                                     valueRange = 30f..95f
                                 )
                             }
@@ -202,7 +288,14 @@ fun SettingsView(
                                 }
                                 HorizonSlider(
                                     value = panelBlur,
-                                    onValueChange = { panelBlur = it },
+                                    onValueChange = {
+                                        panelBlur = it
+                                        mutateAndSaveConfig { root ->
+                                            val theme = root.optJSONObject("theme") ?: JSONObject()
+                                            theme.put("glass_blur", it.toDouble())
+                                            root.put("theme", theme)
+                                        }
+                                    },
                                     valueRange = 0f..32f
                                 )
                             }
@@ -212,34 +305,46 @@ fun SettingsView(
                     "engine" -> {
                         HorizonSectionHeader(tag = "ENGINE", title = "Renderer & Memory")
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(colors.activePalette.soft)
-                                    .border(1.dp, colors.activePalette.primary, RoundedCornerShape(10.dp))
-                                    .padding(8.dp)
+                        // Renderer switch
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            androidx.compose.foundation.text.BasicText(text = "Graphics Backend", style = androidx.compose.ui.text.TextStyle(color = Color(0xFFE2E8F0), fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Column {
-                                    androidx.compose.foundation.text.BasicText(text = "Vulkan", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold))
-                                    androidx.compose.foundation.text.BasicText(text = "Native GPU path", style = androidx.compose.ui.text.TextStyle(color = colors.activePalette.primary, fontSize = 9.sp))
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (rendererMode != "OpenGl") colors.activePalette.soft else Color(0x1AFFFFFF))
+                                        .border(1.dp, if (rendererMode != "OpenGl") colors.activePalette.primary else Color(0x14FFFFFF), RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            rendererMode = "VulkanCompatibility"
+                                            mutateAndSaveConfig { root -> root.put("renderer", "VulkanCompatibility") }
+                                        }
+                                        .padding(8.dp)
+                                ) {
+                                    Column {
+                                        androidx.compose.foundation.text.BasicText(text = "Vulkan", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold))
+                                        androidx.compose.foundation.text.BasicText(text = "Native GPU path (Recommended)", style = androidx.compose.ui.text.TextStyle(color = colors.activePalette.primary, fontSize = 9.sp))
+                                    }
                                 }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0x1AFFFFFF))
-                                    .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(10.dp))
-                                    .padding(8.dp)
-                            ) {
-                                Column {
-                                    androidx.compose.foundation.text.BasicText(text = "OpenGL ES", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold))
-                                    androidx.compose.foundation.text.BasicText(text = "Fallback driver", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp))
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (rendererMode == "OpenGl") colors.activePalette.soft else Color(0x1AFFFFFF))
+                                        .border(1.dp, if (rendererMode == "OpenGl") colors.activePalette.primary else Color(0x14FFFFFF), RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            rendererMode = "OpenGl"
+                                            mutateAndSaveConfig { root -> root.put("renderer", "OpenGl") }
+                                        }
+                                        .padding(8.dp)
+                                ) {
+                                    Column {
+                                        androidx.compose.foundation.text.BasicText(text = "OpenGL ES", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold))
+                                        androidx.compose.foundation.text.BasicText(text = "Compatibility fallback", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 9.sp))
+                                    }
                                 }
                             }
                         }
@@ -249,12 +354,15 @@ fun SettingsView(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                androidx.compose.foundation.text.BasicText(text = "Memory Limit", style = androidx.compose.ui.text.TextStyle(color = Color(0xFFE2E8F0), fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
+                                androidx.compose.foundation.text.BasicText(text = "Cache Budget (Memory)", style = androidx.compose.ui.text.TextStyle(color = Color(0xFFE2E8F0), fontSize = 11.sp, fontWeight = FontWeight.SemiBold))
                                 androidx.compose.foundation.text.BasicText(text = "${memoryLimitMb.toInt()} MB", style = androidx.compose.ui.text.TextStyle(color = colors.activePalette.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace))
                             }
                             HorizonSlider(
                                 value = memoryLimitMb,
-                                onValueChange = { memoryLimitMb = it },
+                                onValueChange = {
+                                    memoryLimitMb = it
+                                    mutateAndSaveConfig { root -> root.put("cache_budget_mib", it.toInt()) }
+                                },
                                 valueRange = 512f..4096f
                             )
                         }
@@ -277,6 +385,7 @@ fun SettingsView(
                                 onCheckedChange = {
                                     keepAliveEnabled = it
                                     BlazeNativeBridge.nativeSetKeepAliveEnabled(it)
+                                    mutateAndSaveConfig { root -> root.put("keepalive_enabled", it) }
                                 }
                             )
                         }
@@ -291,7 +400,36 @@ fun SettingsView(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             androidx.compose.foundation.text.BasicText(text = "Haptic Vibration", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp))
-                            HorizonSwitch(checked = hapticFeedback, onCheckedChange = { hapticFeedback = it })
+                            HorizonSwitch(
+                                checked = hapticFeedback,
+                                onCheckedChange = {
+                                    hapticFeedback = it
+                                    mutateAndSaveConfig { root ->
+                                        val dev = root.optJSONObject("device") ?: JSONObject()
+                                        dev.put("vibrate", it)
+                                        root.put("device", dev)
+                                    }
+                                }
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.foundation.text.BasicText(text = "Auto-Jump", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp))
+                            HorizonSwitch(
+                                checked = autoJump,
+                                onCheckedChange = {
+                                    autoJump = it
+                                    mutateAndSaveConfig { root ->
+                                        val dev = root.optJSONObject("device") ?: JSONObject()
+                                        dev.put("auto_jump", it)
+                                        root.put("device", dev)
+                                    }
+                                }
+                            )
                         }
 
                         Column {
@@ -299,7 +437,18 @@ fun SettingsView(
                                 androidx.compose.foundation.text.BasicText(text = "Touch Sensitivity", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp))
                                 androidx.compose.foundation.text.BasicText(text = "${touchSensitivity.toInt()}%", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace))
                             }
-                            HorizonSlider(value = touchSensitivity, onValueChange = { touchSensitivity = it }, valueRange = 10f..100f)
+                            HorizonSlider(
+                                value = touchSensitivity,
+                                onValueChange = {
+                                    touchSensitivity = it
+                                    mutateAndSaveConfig { root ->
+                                        val dev = root.optJSONObject("device") ?: JSONObject()
+                                        dev.put("touch_sensitivity", it / 100.0)
+                                        root.put("device", dev)
+                                    }
+                                },
+                                valueRange = 10f..100f
+                            )
                         }
 
                         Column {
@@ -307,14 +456,25 @@ fun SettingsView(
                                 androidx.compose.foundation.text.BasicText(text = "Gyro Sensitivity", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp))
                                 androidx.compose.foundation.text.BasicText(text = "${gyroSensitivity.toInt()}%", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace))
                             }
-                            HorizonSlider(value = gyroSensitivity, onValueChange = { gyroSensitivity = it }, valueRange = 10f..100f)
+                            HorizonSlider(
+                                value = gyroSensitivity,
+                                onValueChange = {
+                                    gyroSensitivity = it
+                                    mutateAndSaveConfig { root ->
+                                        val dev = root.optJSONObject("device") ?: JSONObject()
+                                        dev.put("gyro_sensitivity", it / 100.0)
+                                        root.put("device", dev)
+                                    }
+                                },
+                                valueRange = 10f..100f
+                            )
                         }
                     }
 
                     "account" -> {
                         HorizonSectionHeader(tag = "PROFILE", title = "Account Management")
-                        androidx.compose.foundation.text.BasicText(text = "Player Profile: Player", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold))
-                        androidx.compose.foundation.text.BasicText(text = "Offline account mode enabled. Sign in with Microsoft is optional.", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp))
+                        androidx.compose.foundation.text.BasicText(text = "Player Profile: $playerName", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold))
+                        androidx.compose.foundation.text.BasicText(text = "Offline account mode active. Skin and settings are saved locally.", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp))
                         Spacer(Modifier.height(4.dp))
                         HorizonButton(text = "Link Microsoft Account", onClick = { statusMessage = "Opening Microsoft OAuth flow" })
                     }
@@ -328,9 +488,9 @@ fun SettingsView(
                     }
 
                     "experimental" -> {
-                        HorizonSectionHeader(tag = "EXPERIMENTAL", title = "Experimental Features")
+                        HorizonSectionHeader(tag = "LABS & FLAGS", title = "Experimental Features")
 
-                        // Complex Voice Chat (ported by Asano Saryu)
+                        // 1. Complex Voice Chat (ported by Asano Saryu)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -351,11 +511,12 @@ fun SettingsView(
                                 onCheckedChange = {
                                     complexVoiceChatEnabled = it
                                     BlazeNativeBridge.nativeSetComplexVoiceChatConfig(it, rnnoiseEnabled)
+                                    mutateAndSaveConfig { root -> root.put("svc_enabled", it) }
                                 }
                             )
                         }
 
-                        // RNNoise Input Filter
+                        // 2. RNNoise Filter
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -376,6 +537,182 @@ fun SettingsView(
                                 onCheckedChange = {
                                     rnnoiseEnabled = it
                                     BlazeNativeBridge.nativeSetComplexVoiceChatConfig(complexVoiceChatEnabled, it)
+                                    mutateAndSaveConfig { root -> root.put("svc_rnnoise", it) }
+                                }
+                            )
+                        }
+
+                        // 3. Zero Latency Touch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Zero Latency Touch Pipeline",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Bypasses Android buffer queues for instantaneous touch response",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = zeroLatencyTouch,
+                                onCheckedChange = {
+                                    zeroLatencyTouch = it
+                                    mutateAndSaveConfig { root -> root.put("zero_latency_touch", it) }
+                                }
+                            )
+                        }
+
+                        // 4. Fast Async Chunk Upload
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Fast Async Chunk Upload",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Asynchronous multi-thread chunk mesh upload to GPU",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = fastChunkUpload,
+                                onCheckedChange = {
+                                    fastChunkUpload = it
+                                    mutateAndSaveConfig { root -> root.put("fast_chunk_upload", it) }
+                                }
+                            )
+                        }
+
+                        // 5. Smart Hollow Leaf Culling
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Smart Hollow Leaf Culling",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Cull hidden internal leaf faces for significant FPS boost",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = hollowLeafCulling,
+                                onCheckedChange = {
+                                    hollowLeafCulling = it
+                                    mutateAndSaveConfig { root -> root.put("experimental_leaf_culling", it) }
+                                }
+                            )
+                        }
+
+                        // 6. Super Performance Profile
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Super Performance Profile",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Aggressive low fidelity optimizations for maximum framerates",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = superPerfMode,
+                                onCheckedChange = {
+                                    superPerfMode = it
+                                    mutateAndSaveConfig { root -> root.put("super_perf_mode", it) }
+                                }
+                            )
+                        }
+
+                        // 7. Battery Saver Profile
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Battery Saver Profile",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Throttles draw loop to conserve device battery",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = batteryPerfMode,
+                                onCheckedChange = {
+                                    batteryPerfMode = it
+                                    mutateAndSaveConfig { root -> root.put("battery_perf_mode", it) }
+                                }
+                            )
+                        }
+
+                        // 8. Uncapped Max FPS Mode
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Uncapped Max FPS Mode",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Removes frame pacing caps on high refresh rate displays",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = maxFpsMode,
+                                onCheckedChange = {
+                                    maxFpsMode = it
+                                    mutateAndSaveConfig { root -> root.put("max_fps_mode", it) }
+                                }
+                            )
+                        }
+
+                        // 9. Record Performance Data
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Record GPU Performance Data",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Collect frame timing metrics in memory for diagnostics export",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp)
+                                )
+                            }
+                            HorizonSwitch(
+                                checked = recordPerformance,
+                                onCheckedChange = {
+                                    recordPerformance = it
+                                    mutateAndSaveConfig { root -> root.put("record_performance", it) }
                                 }
                             )
                         }

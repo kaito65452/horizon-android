@@ -6,8 +6,6 @@
 mod game;
 #[path = "android/game_launch.rs"]
 mod game_launch;
-#[path = "android/launcher.rs"]
-mod launcher;
 // Share the desktop launcher's actual search, compatibility checks, downloads,
 // dependency resolution and Java content porting; GPUI itself is desktop-only.
 // These files are formatted in the launcher's separate Rust 2021 workspace.
@@ -262,10 +260,41 @@ fn android_main(app: AndroidApp) {
             log::error!("Cannot unpack engine data: {error}");
         }
     }
-    let mut launcher = launcher::Launcher::new(home.clone());
+    let config = catalog::Config::load(&home);
+    config.apply_experimental_to_game(&home);
+    let game_home = config.game_home(&home);
+    let request = crate::game_launch::LaunchRequest {
+        resources: home
+            .join(".local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION),
+        game_home,
+        session_file: None,
+        offline_name: crate::catalog::truncate_player_name(&config.name),
+        server: config.server.clone(),
+        control_socket: (!PUBLIC_BUILD).then(|| home.join("control.json")),
+        extra_arguments: Vec::new(),
+        open_gl: config.renderer == crate::catalog::RendererMode::OpenGl,
+        gpu_batching: config.renderer == crate::catalog::RendererMode::Vulkan,
+    };
+    crate::document_store::set_game_active(true);
+    let mut game = match crate::game_launch::start(request) {
+        Ok(game) => game,
+        Err(error) => {
+            log::error!("Cannot start Horizon game: {error}");
+            diagnostics::record_error(&error.to_string());
+            horizon_client::crash::report_error(&home, "client", &*error);
+            let _ = std::fs::write(home.join("android-error.txt"), error.to_string());
+            crate::document_store::set_game_active(false);
+            crate::performance::stop();
+            diagnostics::finish();
+            platform::finish();
+            APP.with(|slot| *slot.borrow_mut() = None);
+            std::process::exit(1);
+        }
+    };
     let result = android_event_loop()
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
-        .and_then(|events| events.run_app(&mut launcher).map_err(Into::into));
+        .and_then(|events| events.run_app(&mut *game).map_err(Into::into));
     if let Err(error) = result {
         log::error!("Horizon: {error}");
         diagnostics::record_error(&error.to_string());
@@ -275,7 +304,7 @@ fn android_main(app: AndroidApp) {
     // Winit permits one EventLoop per process. NativeActivity otherwise keeps
     // this process cached after Quit, making the next launch fail. run_app's
     // exiting callback has completed the world save before we get here.
-    drop(launcher);
+    drop(game);
     diagnostics::finish();
     platform::finish();
     APP.with(|slot| *slot.borrow_mut() = None);
