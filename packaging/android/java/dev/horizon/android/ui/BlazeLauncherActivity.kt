@@ -181,8 +181,8 @@ class BlazeLauncherActivity : ComponentActivity() {
                                     "browse" -> BrowseView()
                                     "skin" -> SkinStudioView()
                                     "settings" -> SettingsView(
-                                        onPaletteChanged = {
-                                            activePaletteKey = it
+                                        onPaletteChanged = { paletteKey ->
+                                            ThemeState.update(accentKey = paletteKey)
                                             refreshThemeConfig()
                                         },
                                         onThemeChanged = {
