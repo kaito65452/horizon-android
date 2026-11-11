@@ -2,6 +2,7 @@ package dev.horizon.android.ui.views
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.BlazeNativeBridge
+import dev.horizon.android.ui.animation.verticalSlideFadeTransition
 import dev.horizon.android.ui.components.*
 import dev.horizon.android.ui.theme.BlazePalettes
 import dev.horizon.android.ui.theme.LocalBlazeColors
@@ -32,6 +34,7 @@ import java.util.zip.ZipOutputStream
 @Composable
 fun SettingsView(
     onPaletteChanged: (String) -> Unit,
+    onOpenAccountManager: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
@@ -111,7 +114,7 @@ fun SettingsView(
         loadFromNativeConfig()
     }
 
-    // REAL SAF: Custom Wallpaper Picker
+    // REAL SAF: Custom Wallpaper Picker (Supports both Videos and Images)
     val wallpaperPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -119,7 +122,10 @@ fun SettingsView(
             try {
                 val wallDir = File(context.filesDir, "wallpapers")
                 wallDir.mkdirs()
-                val targetFile = File(wallDir, "custom_bg.png")
+                val mimeType = context.contentResolver.getType(uri) ?: ""
+                val uriStr = uri.toString().lowercase()
+                val isVideo = mimeType.startsWith("video") || uriStr.endsWith(".mp4") || uriStr.endsWith(".webm") || uriStr.endsWith(".mkv")
+                val targetFile = File(wallDir, if (isVideo) "custom_bg.mp4" else "custom_bg.png")
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     targetFile.outputStream().use { output -> input.copyTo(output) }
                 }
@@ -128,9 +134,10 @@ fun SettingsView(
                     val theme = root.optJSONObject("theme") ?: JSONObject()
                     theme.put("bg_style", "custom")
                     theme.put("custom_bg_uri", targetFile.absolutePath)
+                    theme.put("custom_bg_type", if (isVideo) "video" else "image")
                     root.put("theme", theme)
                 }
-                statusMessage = "Custom wallpaper imported successfully via SAF."
+                statusMessage = if (isVideo) "Custom video wallpaper imported successfully." else "Custom photo wallpaper imported successfully."
             } catch (e: Exception) {
                 statusMessage = "Import failed: ${e.message}"
             }
@@ -269,8 +276,14 @@ fun SettingsView(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                when (activeCategory) {
-                    "appearance" -> {
+                AnimatedContent(
+                    targetState = activeCategory,
+                    transitionSpec = { verticalSlideFadeTransition() },
+                    label = "settingsCategoryContent"
+                ) { currentCat ->
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        when (currentCat) {
+                            "appearance" -> {
                         HorizonSectionHeader(tag = "THEME & SURFACE", title = "Color & Background")
 
                         // Accent Color Swatches
@@ -552,11 +565,73 @@ fun SettingsView(
                     }
 
                     "account" -> {
-                        HorizonSectionHeader(tag = "PROFILE", title = "Account Management")
-                        androidx.compose.foundation.text.BasicText(text = "Player Profile: $playerName", style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold))
-                        androidx.compose.foundation.text.BasicText(text = "Offline account mode active. Skin and settings are saved locally.", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp))
-                        Spacer(Modifier.height(4.dp))
-                        HorizonButton(text = "Link Microsoft Account", onClick = { statusMessage = "Opening Microsoft OAuth flow" })
+                        HorizonSectionHeader(tag = "PROFILE & IDENTITIES", title = "Account Management")
+                        val activeType = BlazeNativeBridge.getActiveAccountType().uppercase()
+                        val activeName = BlazeNativeBridge.getActiveAccountName()
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x2638BDF8))
+                                .border(1.dp, Color(0x4038BDF8), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(colors.activePalette.primary)
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        androidx.compose.foundation.text.BasicText(
+                                            text = activeType,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                color = Color(0xFF020617),
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        )
+                                    }
+                                    androidx.compose.foundation.text.BasicText(
+                                        text = activeName,
+                                        style = androidx.compose.ui.text.TextStyle(
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    )
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Active identity for Minecraft 26.3 • Skins, capes & offline parity synced",
+                                    style = androidx.compose.ui.text.TextStyle(
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 10.sp
+                                    )
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        HorizonButton(
+                            text = "MANAGE & SWITCH ACCOUNTS (MICROSOFT / ELY.BY / OFFLINE)",
+                            accent = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                if (onOpenAccountManager != null) {
+                                    onOpenAccountManager()
+                                } else {
+                                    statusMessage = "Select account from top bar pill"
+                                }
+                            }
+                        )
                     }
 
                     "storage" -> {
@@ -834,8 +909,9 @@ fun SettingsView(
                         )
                     }
                 }
+            }
 
-                if (statusMessage.isNotEmpty()) {
+            if (statusMessage.isNotEmpty()) {
                     Spacer(Modifier.height(6.dp))
                     androidx.compose.foundation.text.BasicText(
                         text = statusMessage,

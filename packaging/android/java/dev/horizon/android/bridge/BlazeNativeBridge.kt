@@ -19,6 +19,7 @@ object BlazeNativeBridge {
     private var initialized = false
 
     fun initIfNeeded(context: Context) {
+        ensureEngineData(context)
         if (!initialized) {
             try {
                 nativeInit(context.filesDir.absolutePath)
@@ -27,6 +28,52 @@ object BlazeNativeBridge {
                 System.err.println("BlazeNativeBridge init error: ${e.message}")
             }
         }
+    }
+
+    /**
+     * Unpack engine-data.zip from assets into internal filesDir if not already present.
+     * Required by official_install.rs for multi-threaded asset stream extraction.
+     */
+    fun ensureEngineData(context: Context) {
+        try {
+            val dest = java.io.File(context.filesDir, "engine-data.zip")
+            if (!dest.exists() || dest.length() == 0L) {
+                val partial = java.io.File(context.filesDir, "engine-data.partial")
+                context.assets.open("engine-data.zip").use { input ->
+                    java.io.FileOutputStream(partial).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                partial.renameTo(dest)
+            }
+        } catch (e: Throwable) {
+            System.err.println("BlazeNativeBridge: engine-data.zip unpack notice: ${e.message}")
+        }
+    }
+
+    /**
+     * Compute deterministic offline UUID matching target model parity (Steve = 0, Alex = 1).
+     * Parity matches vanilla Java Edition offline player rendering logic.
+     */
+    fun getLocalUUIDWithSkinModel(userName: String, isSlim: Boolean): String {
+        val targetParity = if (isSlim) 1 else 0
+        val lenHex = userName.length.toString(16).padStart(16, '0')
+        val hash = (userName.hashCode().toLong() and 0xFFFFFFFFL).toString(16).padStart(16, '0')
+        val baseUuid = "${lenHex.take(12)}3${lenHex.substring(13, 16)}9${hash.take(15)}"
+        val prefix = baseUuid.take(27)
+        val a = baseUuid[7].digitToInt(16)
+        val b = baseUuid[15].digitToInt(16)
+        val c = baseUuid[23].digitToInt(16)
+        var suffix = baseUuid.substring(27).toLong(16)
+        val maxSuffix = 0xFFFFFL
+        for (i in 0..maxSuffix) {
+            val currentD = (suffix and 0xFL).toInt()
+            if ((a xor b xor c xor currentD) % 2 == targetParity) {
+                return prefix + suffix.toString(16).padStart(5, '0').uppercase()
+            }
+            suffix = if (suffix == maxSuffix) 0L else suffix + 1L
+        }
+        return prefix + suffix.toString(16).padStart(5, '0').uppercase()
     }
 
     // Native JNI functions implemented in crates/horizon-client/src/android/jni_bridge.rs
@@ -47,7 +94,70 @@ object BlazeNativeBridge {
     external fun nativeGetVersion(): String
     external fun nativeResetSettings(category: String): Boolean
 
+    // Account Management JNI
+    external fun nativeGetAccountsJson(): String
+    external fun nativeSelectAccount(provider: String, idOrName: String): Boolean
+    external fun nativeAddOfflineAccount(name: String): Boolean
+    external fun nativeAddElyByAccount(username: String, password: String, otp: String): String
+    external fun nativeStartMicrosoftDeviceLogin(): String
+    external fun nativePollMicrosoftDeviceLogin(): String
+    external fun nativeDeleteAccount(provider: String, idOrName: String): Boolean
+
     // Safe helper accessors
+    fun getAccounts(): List<BlazeAccount> {
+        return try {
+            val json = JSONObject(nativeGetAccountsJson())
+            val arr = json.optJSONArray("accounts") ?: return emptyList()
+            val list = mutableListOf<BlazeAccount>()
+            for (i in 0 until arr.length()) {
+                val item = arr.getJSONObject(i)
+                list.add(
+                    BlazeAccount(
+                        provider = item.optString("provider", "offline"),
+                        uuid = item.optString("uuid", ""),
+                        name = item.optString("name", "Player"),
+                        key = item.optString("key", ""),
+                        isActive = item.optBoolean("is_active", false)
+                    )
+                )
+            }
+            list
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    fun getOfflineAccounts(): List<String> {
+        return try {
+            val json = JSONObject(nativeGetAccountsJson())
+            val arr = json.optJSONArray("offline") ?: return emptyList()
+            val list = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                list.add(arr.getString(i))
+            }
+            list
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    fun getActiveAccountName(): String {
+        return try {
+            val json = JSONObject(nativeGetAccountsJson())
+            json.optString("active_name", "Player")
+        } catch (_: Throwable) {
+            "Player"
+        }
+    }
+
+    fun getActiveAccountType(): String {
+        return try {
+            val json = JSONObject(nativeGetAccountsJson())
+            json.optString("active_type", "offline")
+        } catch (_: Throwable) {
+            "offline"
+        }
+    }
     fun areAssetsReady(): Boolean {
         return try {
             nativeAreAssetsReady()
@@ -91,6 +201,14 @@ object BlazeNativeBridge {
         }
     }
 }
+
+data class BlazeAccount(
+    val provider: String,
+    val uuid: String,
+    val name: String,
+    val key: String,
+    val isActive: Boolean
+)
 
 data class DownloadThread(
     val id: Int,

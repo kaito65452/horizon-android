@@ -1,5 +1,10 @@
 package dev.horizon.android.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +27,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.horizon.android.ui.animation.EaseOutFluent
+import dev.horizon.android.ui.animation.pressBounce
 import dev.horizon.android.ui.theme.BlazePalettes
 import dev.horizon.android.ui.theme.LocalBlazeColors
 
@@ -53,14 +60,10 @@ fun HorizonPill(
 ) {
     val mod = if (onClick != null) {
         modifier
+            .pressBounce(targetScale = 0.96f, onClick = onClick)
             .clip(CircleShape)
             .background(backgroundColor)
             .border(1.dp, borderColor, CircleShape)
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-                onClick = onClick
-            )
     } else {
         modifier
             .clip(CircleShape)
@@ -85,39 +88,39 @@ fun HorizonButton(
     onClick: () -> Unit
 ) {
     val colors = LocalBlazeColors.current
-    val bg = when {
+    val targetBg = when {
         accent -> colors.activePalette.primary
         active -> colors.activePalette.soft
         else -> colors.pillBg
     }
-    val borderCol = when {
+    val targetBorderCol = when {
         accent -> colors.activePalette.primary
         active -> colors.activePalette.primary
         else -> colors.pillBorder
     }
-    val textCol = when {
+    val targetTextCol = when {
         accent -> Color(0xFF020617)
         active -> colors.activePalette.primary
         else -> colors.textPrimary
     }
 
+    val animatedBg by animateColorAsState(targetValue = targetBg, animationSpec = tween(180, easing = EaseOutFluent(3)), label = "btnBg")
+    val animatedBorder by animateColorAsState(targetValue = targetBorderCol, animationSpec = tween(180, easing = EaseOutFluent(3)), label = "btnBorder")
+    val animatedText by animateColorAsState(targetValue = targetTextCol, animationSpec = tween(180, easing = EaseOutFluent(3)), label = "btnText")
+
     Box(
         modifier = modifier
+            .pressBounce(targetScale = 0.96f, onClick = onClick)
             .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .border(1.dp, borderCol, RoundedCornerShape(12.dp))
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-                onClick = onClick
-            )
+            .background(animatedBg)
+            .border(1.dp, animatedBorder, RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center
     ) {
         androidx.compose.foundation.text.BasicText(
             text = text,
             style = androidx.compose.ui.text.TextStyle(
-                color = textCol,
+                color = animatedText,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -132,25 +135,31 @@ fun HorizonSwitch(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
-    val trackBg = if (checked) colors.activePalette.primary else Color(0x33FFFFFF)
+    val animatedTrackBg by animateColorAsState(
+        targetValue = if (checked) colors.activePalette.primary else Color(0x33FFFFFF),
+        animationSpec = tween(200, easing = EaseOutFluent(3)),
+        label = "switchTrackBg"
+    )
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) 20.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow),
+        label = "switchThumbOffset"
+    )
     val thumbCol = if (checked) Color(0xFF0F172A) else Color.White
 
     Box(
         modifier = modifier
+            .pressBounce(targetScale = 0.94f, onClick = { onCheckedChange(!checked) })
             .size(width = 44.dp, height = 24.dp)
             .clip(CircleShape)
-            .background(trackBg)
+            .background(animatedTrackBg)
             .border(1.dp, Color(0x33FFFFFF), CircleShape)
-            .clickable(
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-                onClick = { onCheckedChange(!checked) }
-            )
             .padding(2.dp),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart
+        contentAlignment = Alignment.CenterStart
     ) {
         Box(
             modifier = Modifier
+                .offset(x = thumbOffset)
                 .size(20.dp)
                 .clip(CircleShape)
                 .background(thumbCol)
@@ -235,25 +244,24 @@ fun HorizonSegmented(
     ) {
         options.forEachIndexed { i, opt ->
             val isSelected = i == selectedIndex
-            val bg = if (isSelected) colors.activePalette.primary else Color.Transparent
-            val textCol = if (isSelected) Color(0xFF0F172A) else Color(0xFFE2E8F0)
+            val targetBg = if (isSelected) colors.activePalette.primary else Color.Transparent
+            val targetTextCol = if (isSelected) Color(0xFF0F172A) else Color(0xFFE2E8F0)
+            val animatedBg by animateColorAsState(targetValue = targetBg, animationSpec = tween(180, easing = EaseOutFluent(3)), label = "segBg")
+            val animatedText by animateColorAsState(targetValue = targetTextCol, animationSpec = tween(180, easing = EaseOutFluent(3)), label = "segText")
 
             Box(
                 modifier = Modifier
+                    .weight(1f)
+                    .pressBounce(targetScale = 0.95f, onClick = { onSelect(i) })
                     .clip(RoundedCornerShape(10.dp))
-                    .background(bg)
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        onClick = { onSelect(i) }
-                    )
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .background(animatedBg)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 androidx.compose.foundation.text.BasicText(
                     text = opt,
                     style = androidx.compose.ui.text.TextStyle(
-                        color = textCol,
+                        color = animatedText,
                         fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )

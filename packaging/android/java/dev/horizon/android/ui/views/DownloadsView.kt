@@ -1,5 +1,7 @@
 package dev.horizon.android.ui.views
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -12,12 +14,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.BlazeNativeBridge
 import dev.horizon.android.bridge.DownloadThread
+import dev.horizon.android.ui.animation.EaseOutFluent
 import dev.horizon.android.ui.components.HorizonButton
 import dev.horizon.android.ui.components.HorizonGlass
 import dev.horizon.android.ui.components.HorizonSectionHeader
@@ -31,10 +35,14 @@ fun DownloadsView(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
+    val context = LocalContext.current
     var isReady by remember { mutableStateOf(BlazeNativeBridge.areAssetsReady()) }
     var isActive by remember { mutableStateOf(false) }
     var stageText by remember { mutableStateOf("Ready to play") }
     var totalProgress by remember { mutableFloatStateOf(if (isReady) 1.0f else 0.0f) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var doneBytes by remember { mutableLongStateOf(0L) }
+    var totalBytes by remember { mutableLongStateOf(0L) }
     var threads by remember {
         mutableStateOf(
             listOf(
@@ -59,6 +67,10 @@ fun DownloadsView(
                 isActive = root.optBoolean("active", false)
                 stageText = root.optString("stage", if (isReady) "Verified and ready to launch" else "Idle")
                 totalProgress = root.optDouble("progress", if (isReady) 1.0 else 0.0).toFloat()
+                val err = root.optString("error", "")
+                errorMessage = if (err.isNotEmpty()) err else null
+                doneBytes = root.optLong("done_bytes", 0L)
+                totalBytes = root.optLong("total_bytes", 0L)
 
                 val array = root.optJSONArray("threads")
                 if (array != null) {
@@ -151,9 +163,14 @@ fun DownloadsView(
                                         .clip(RoundedCornerShape(2.dp))
                                         .background(Color(0x26FFFFFF))
                                 ) {
+                                    val animProg by animateFloatAsState(
+                                        targetValue = th.progress.coerceIn(0.001f, 1f),
+                                        animationSpec = tween(240, easing = EaseOutFluent(3)),
+                                        label = "threadProg"
+                                    )
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth(th.progress.coerceIn(0.001f, 1f))
+                                            .fillMaxWidth(animProg)
                                             .height(4.dp)
                                             .clip(RoundedCornerShape(2.dp))
                                             .background(colors.activePalette.primary)
@@ -204,6 +221,38 @@ fun DownloadsView(
                 Column {
                     HorizonSectionHeader(tag = "STATUS", title = "Persistence & Queue")
 
+                    if (errorMessage != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x33EF4444))
+                                .border(1.dp, Color(0x66EF4444), RoundedCornerShape(12.dp))
+                                .padding(8.dp)
+                        ) {
+                            Column {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "PIPELINE NOTICE",
+                                    style = androidx.compose.ui.text.TextStyle(
+                                        color = Color(0xFFF87171),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                androidx.compose.foundation.text.BasicText(
+                                    text = errorMessage ?: "Unknown error",
+                                    style = androidx.compose.ui.text.TextStyle(
+                                        color = Color.White,
+                                        fontSize = 9.sp
+                                    )
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -249,6 +298,26 @@ fun DownloadsView(
                                 style = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             )
                         }
+                        if (totalBytes > 0L) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "Downloaded",
+                                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                )
+                                androidx.compose.foundation.text.BasicText(
+                                    text = "${"%.1f".format(doneBytes / (1024f * 1024f))} / ${"%.1f".format(totalBytes / (1024f * 1024f))} MiB",
+                                    style = androidx.compose.ui.text.TextStyle(
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                )
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
@@ -282,12 +351,13 @@ fun DownloadsView(
                     }
 
                     HorizonButton(
-                        text = if (isActive) "DOWNLOADING..." else if (isReady) "RECHECK ASSETS" else "START DOWNLOAD (8 THREADS)",
+                        text = if (isActive) "DOWNLOADING..." else if (errorMessage != null) "RETRY DOWNLOAD (8 THREADS)" else if (isReady) "RECHECK ASSETS" else "START DOWNLOAD (8 THREADS)",
                         modifier = Modifier.fillMaxWidth(),
                         active = !isActive,
                         accent = !isReady,
                         onClick = {
                             if (!isActive) {
+                                BlazeNativeBridge.ensureEngineData(context)
                                 BlazeNativeBridge.nativeStartMultiThreadDownload(8)
                             }
                         }

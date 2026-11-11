@@ -1,5 +1,8 @@
 //! JNI bridge between Kotlin Jetpack Compose Frontend and Pure Rust Backend.
-use super::{backend, catalog};
+use super::{
+    account::{self, Account, Accounts, DeviceCode, Endpoints, Poll, Provider},
+    backend, catalog,
+};
 use jni::{
     JNIEnv,
     objects::{JClass, JString},
@@ -13,6 +16,8 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+
+static CURRENT_DEVICE_LOGIN: Mutex<Option<(Endpoints, String, DeviceCode)>> = Mutex::new(None);
 
 static HOME_OVERRIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 static DOWNLOAD_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -630,5 +635,365 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeR
     let home = resolve_home();
     let def_config = catalog::Config::default();
     let _ = def_config.save(&home);
+    1
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AccountItemPayload {
+    pub provider: String,
+    pub uuid: String,
+    pub name: String,
+    pub key: String,
+    pub is_active: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AccountsPayload {
+    pub accounts: Vec<AccountItemPayload>,
+    pub selected: Option<String>,
+    pub offline: Vec<String>,
+    pub offline_selected: Option<String>,
+    pub active_name: String,
+    pub active_type: String,
+}
+
+/// Get all saved accounts and active profile.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeGetAccountsJson(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let accounts = Accounts::load();
+    let home = resolve_home();
+    let config = catalog::Config::load(&home);
+
+    let active_name = if let Some(selected_acc) = accounts.selected() {
+        selected_acc.name.clone()
+    } else if let Some(ref offline_name) = accounts.offline_selected {
+        offline_name.clone()
+    } else if !config.name.is_empty() {
+        config.name.clone()
+    } else {
+        "Player".to_string()
+    };
+
+    let active_type = if let Some(selected_acc) = accounts.selected() {
+        match selected_acc.provider {
+            Provider::Microsoft => "microsoft".to_string(),
+            Provider::Ely => "ely".to_string(),
+        }
+    } else {
+        "offline".to_string()
+    };
+
+    let selected_key = accounts.selected.clone();
+
+    let account_items: Vec<AccountItemPayload> = accounts
+        .accounts
+        .iter()
+        .map(|a| {
+            let key = a.key();
+            let is_active = Some(&key) == selected_key.as_ref();
+            AccountItemPayload {
+                provider: match a.provider {
+                    Provider::Microsoft => "microsoft".to_string(),
+                    Provider::Ely => "ely".to_string(),
+                },
+                uuid: a.uuid.clone(),
+                name: a.name.clone(),
+                key,
+                is_active,
+            }
+        })
+        .collect();
+
+    let payload = AccountsPayload {
+        accounts: account_items,
+        selected: accounts.selected,
+        offline: accounts.offline,
+        offline_selected: accounts.offline_selected,
+        active_name,
+        active_type,
+    };
+
+    let json_str = serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string());
+    str_to_jstring(&mut env, &json_str)
+}
+
+/// Select active account.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeSelectAccount(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    provider_str: JString<'_>,
+    id_or_name: JString<'_>,
+) -> jboolean {
+    let Some(provider) = jstring_to_string(&mut env, &provider_str) else {
+        return 0;
+    };
+    let Some(target) = jstring_to_string(&mut env, &id_or_name) else {
+        return 0;
+    };
+
+    let mut accounts = Accounts::load();
+    let home = resolve_home();
+    let mut config = catalog::Config::load(&home);
+
+    if provider == "offline" {
+        accounts.selected = None;
+        accounts.offline_selected = Some(target.clone());
+        config.name = target;
+    } else if let Some(acc) = accounts
+        .accounts
+        .iter()
+        .find(|a| a.key() == target || a.uuid == target)
+    {
+        accounts.selected = Some(acc.key());
+        config.name = acc.name.clone();
+    } else {
+        return 0;
+    }
+
+    let _ = accounts.save();
+    let _ = config.save(&home);
+    1
+}
+
+/// Add an offline account.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeAddOfflineAccount(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    name_str: JString<'_>,
+) -> jboolean {
+    let Some(name) = jstring_to_string(&mut env, &name_str) else {
+        return 0;
+    };
+    let name = name.trim();
+    if !account::valid_offline_name(name) {
+        return 0;
+    }
+
+    let mut accounts = Accounts::load();
+    if !accounts
+        .offline
+        .iter()
+        .any(|n| n.eq_ignore_ascii_case(name))
+    {
+        accounts.offline.push(name.to_string());
+    }
+    accounts.offline_selected = Some(name.to_string());
+    accounts.selected = None;
+
+    let home = resolve_home();
+    let mut config = catalog::Config::load(&home);
+    config.name = name.to_string();
+
+    let _ = accounts.save();
+    let _ = config.save(&home);
+    1
+}
+
+/// Sign in with Ely.by credentials.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeAddElyByAccount(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    username_str: JString<'_>,
+    password_str: JString<'_>,
+    otp_str: JString<'_>,
+) -> jstring {
+    let username = jstring_to_string(&mut env, &username_str).unwrap_or_default();
+    let password = jstring_to_string(&mut env, &password_str).unwrap_or_default();
+    let otp = jstring_to_string(&mut env, &otp_str).unwrap_or_default();
+
+    match account::ely::authenticate(&username, &password, &otp) {
+        Ok((acc, sec)) => {
+            let mut accounts = Accounts::load();
+            let key = acc.key();
+            let _ = account::store().set(&key, &serde_json::to_string(&sec).unwrap_or_default());
+            accounts.selected = Some(key.clone());
+            accounts.accounts.retain(|a| a.uuid != acc.uuid);
+            let player_name = acc.name.clone();
+            let player_uuid = acc.uuid.clone();
+            accounts.accounts.push(acc);
+            let _ = accounts.save();
+
+            let home = resolve_home();
+            let mut config = catalog::Config::load(&home);
+            config.name = player_name.clone();
+            let _ = config.save(&home);
+
+            let res = serde_json::json!({
+                "success": true,
+                "name": player_name,
+                "uuid": player_uuid
+            });
+            str_to_jstring(&mut env, &res.to_string())
+        }
+        Err(e) => {
+            let res = serde_json::json!({
+                "success": false,
+                "error": e
+            });
+            str_to_jstring(&mut env, &res.to_string())
+        }
+    }
+}
+
+/// Start Microsoft OAuth device code flow.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeStartMicrosoftDeviceLogin(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let ep = Endpoints::live();
+    let client_id = account::client_id().unwrap_or_else(|| "00000000402b5328".to_string());
+
+    match account::device_code(&ep, &client_id) {
+        Ok(code) => {
+            let user_code = code.user_code.clone();
+            let verification_uri = code.verification_uri.clone();
+            let interval = code.interval;
+            let expires_at = code.expires_at;
+
+            if let Ok(mut slot) = CURRENT_DEVICE_LOGIN.lock() {
+                *slot = Some((ep, client_id, code));
+            }
+
+            let res = serde_json::json!({
+                "success": true,
+                "user_code": user_code,
+                "verification_uri": verification_uri,
+                "interval": interval,
+                "expires_at": expires_at
+            });
+            str_to_jstring(&mut env, &res.to_string())
+        }
+        Err(e) => {
+            let res = serde_json::json!({
+                "success": false,
+                "error": e
+            });
+            str_to_jstring(&mut env, &res.to_string())
+        }
+    }
+}
+
+/// Poll Microsoft OAuth device code authorization.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativePollMicrosoftDeviceLogin(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let guard = match CURRENT_DEVICE_LOGIN.lock() {
+        Ok(g) => g,
+        Err(_) => {
+            let res = serde_json::json!({"status": "error", "error": "Internal lock error"});
+            return str_to_jstring(&mut env, &res.to_string());
+        }
+    };
+
+    let Some((ep, client_id, code)) = guard.as_ref() else {
+        let res = serde_json::json!({"status": "error", "error": "No login in progress"});
+        return str_to_jstring(&mut env, &res.to_string());
+    };
+
+    match account::poll(ep, client_id, code) {
+        Ok(Poll::Pending) | Ok(Poll::SlowDown) | Ok(Poll::Retry(_)) => {
+            let res = serde_json::json!({"status": "pending"});
+            str_to_jstring(&mut env, &res.to_string())
+        }
+        Ok(Poll::Done(tokens)) => {
+            let ep = ep.clone();
+            drop(guard);
+            match account::finish_sign_in(&ep, tokens) {
+                Ok((acc, sec)) => {
+                    let mut accounts = Accounts::load();
+                    let key = acc.key();
+                    let _ = account::store()
+                        .set(&key, &serde_json::to_string(&sec).unwrap_or_default());
+                    accounts.selected = Some(key.clone());
+                    accounts.accounts.retain(|a| a.uuid != acc.uuid);
+                    let player_name = acc.name.clone();
+                    let player_uuid = acc.uuid.clone();
+                    accounts.accounts.push(acc);
+                    let _ = accounts.save();
+
+                    let home = resolve_home();
+                    let mut config = catalog::Config::load(&home);
+                    config.name = player_name.clone();
+                    let _ = config.save(&home);
+
+                    if let Ok(mut slot) = CURRENT_DEVICE_LOGIN.lock() {
+                        *slot = None;
+                    }
+
+                    let res = serde_json::json!({
+                        "status": "success",
+                        "name": player_name,
+                        "uuid": player_uuid
+                    });
+                    str_to_jstring(&mut env, &res.to_string())
+                }
+                Err(e) => {
+                    let res = serde_json::json!({"status": "error", "error": e});
+                    str_to_jstring(&mut env, &res.to_string())
+                }
+            }
+        }
+        Err(e) => {
+            let res = serde_json::json!({"status": "error", "error": e});
+            str_to_jstring(&mut env, &res.to_string())
+        }
+    }
+}
+
+/// Delete an account or offline name.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeDeleteAccount(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    provider_str: JString<'_>,
+    id_or_name: JString<'_>,
+) -> jboolean {
+    let Some(provider) = jstring_to_string(&mut env, &provider_str) else {
+        return 0;
+    };
+    let Some(target) = jstring_to_string(&mut env, &id_or_name) else {
+        return 0;
+    };
+
+    let mut accounts = Accounts::load();
+    let home = resolve_home();
+    let mut config = catalog::Config::load(&home);
+
+    if provider == "offline" {
+        accounts.offline.retain(|n| n != &target);
+        if accounts.offline_selected.as_deref() == Some(&target) {
+            accounts.offline_selected = accounts.offline.first().cloned();
+            config.name = accounts
+                .offline_selected
+                .clone()
+                .unwrap_or_else(|| "Player".to_string());
+        }
+    } else {
+        accounts
+            .accounts
+            .retain(|a| a.key() != target && a.uuid != target);
+        if accounts.selected.as_deref() == Some(&target) {
+            accounts.selected = accounts.accounts.first().map(|a| a.key());
+            if let Some(first) = accounts.selected() {
+                config.name = first.name.clone();
+            } else if let Some(ref off) = accounts.offline_selected {
+                config.name = off.clone();
+            } else {
+                config.name = "Player".to_string();
+            }
+        }
+    }
+
+    let _ = accounts.save();
+    let _ = config.save(&home);
     1
 }

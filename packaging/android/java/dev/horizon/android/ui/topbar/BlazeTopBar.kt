@@ -25,6 +25,7 @@ fun BlazeTopBar(
     currentTab: String,
     onTabSelected: (String) -> Unit,
     accountName: String = "Player",
+    onAccountClick: (() -> Unit)? = null,
     keepAliveActive: Boolean = true,
     downloadCount: Int = 0,
     modifier: Modifier = Modifier
@@ -178,7 +179,7 @@ fun BlazeTopBar(
             }
 
             // Account Pill
-            HorizonPill(onClick = { onTabSelected("skin") }) {
+            HorizonPill(onClick = { onAccountClick?.invoke() ?: onTabSelected("skin") }) {
                 Box(
                     modifier = Modifier
                         .size(16.dp)

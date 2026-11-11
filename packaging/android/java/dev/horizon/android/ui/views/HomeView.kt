@@ -24,6 +24,7 @@ import dev.horizon.android.ui.theme.LocalBlazeColors
 fun HomeView(
     onLaunchGame: () -> Unit,
     onNavigate: (String) -> Unit,
+    onAccountClick: (() -> Unit)? = null,
     profileName: String = "Rust",
     engineVersion: String = "26.3 • Blaze Engine",
     modifier: Modifier = Modifier
@@ -201,7 +202,7 @@ fun HomeView(
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
-                        onClick = { onNavigate("skin") }
+                        onClick = { onAccountClick?.invoke() ?: onNavigate("skin") }
                     ),
                 cornerRadius = 14.dp
             ) {

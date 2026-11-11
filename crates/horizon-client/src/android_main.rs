@@ -12,7 +12,7 @@ mod game_launch;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/account.rs"]
-mod account;
+pub(crate) mod account;
 #[rustfmt::skip]
 #[allow(dead_code)]
 #[path = "../../../launcher/src/browser.rs"]
