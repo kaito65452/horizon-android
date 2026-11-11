@@ -910,14 +910,15 @@ fun SettingsView(
                     }
                 }
             }
+                }
+            }
 
             if (statusMessage.isNotEmpty()) {
-                    Spacer(Modifier.height(6.dp))
-                    androidx.compose.foundation.text.BasicText(
-                        text = statusMessage,
-                        style = androidx.compose.ui.text.TextStyle(color = Color(0xFF34D399), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                    )
-                }
+                Spacer(Modifier.height(6.dp))
+                androidx.compose.foundation.text.BasicText(
+                    text = statusMessage,
+                    style = androidx.compose.ui.text.TextStyle(color = Color(0xFF34D399), fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                )
             }
         }
     }
