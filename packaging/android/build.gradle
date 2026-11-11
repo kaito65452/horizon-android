@@ -13,7 +13,7 @@ android {
         targetSdk 35
         versionCode providers.gradleProperty('devVersionCode').getOrElse('30').toInteger()
         versionName '0.7.8' + (providers.gradleProperty('devVersionCode').isPresent() ? '-dev.' + providers.gradleProperty('devBuild').get() : '')
-        ndk { abiFilters providers.gradleProperty('abi').get() }
+        ndk { abiFilters providers.gradleProperty('abi').getOrElse('arm64-v8a') }
     }
     signingConfigs {
         development {
