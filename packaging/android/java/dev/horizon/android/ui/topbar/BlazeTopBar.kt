@@ -103,8 +103,7 @@ fun BlazeTopBar(
                 "downloads" to "Downloads",
                 "manager" to "Manager",
                 "browse" to "Browse",
-                "skin" to "Skin",
-                "controls" to "Controls"
+                "skin" to "Skin"
             )
 
             tabs.forEach { (key, label) ->

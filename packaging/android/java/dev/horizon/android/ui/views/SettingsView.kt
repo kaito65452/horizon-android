@@ -34,6 +34,7 @@ import java.util.zip.ZipOutputStream
 @Composable
 fun SettingsView(
     onPaletteChanged: (String) -> Unit,
+    onThemeChanged: (() -> Unit)? = null,
     onOpenAccountManager: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -137,6 +138,7 @@ fun SettingsView(
                     theme.put("custom_bg_type", if (isVideo) "video" else "image")
                     root.put("theme", theme)
                 }
+                onThemeChanged?.invoke()
                 statusMessage = if (isVideo) "Custom video wallpaper imported successfully." else "Custom photo wallpaper imported successfully."
             } catch (e: Exception) {
                 statusMessage = "Import failed: ${e.message}"
@@ -309,6 +311,7 @@ fun SettingsView(
                                         theme.put("preset", preset)
                                         root.put("theme", theme)
                                     }
+                                    onThemeChanged?.invoke()
                                 }
                             )
                         }
@@ -332,6 +335,7 @@ fun SettingsView(
                                         theme.put("bg_style", bgKeys[it])
                                         root.put("theme", theme)
                                     }
+                                    onThemeChanged?.invoke()
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             )

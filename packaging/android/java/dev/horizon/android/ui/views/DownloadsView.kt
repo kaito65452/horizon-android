@@ -67,8 +67,8 @@ fun DownloadsView(
                 isActive = root.optBoolean("active", false)
                 stageText = root.optString("stage", if (isReady) "Verified and ready to launch" else "Idle")
                 totalProgress = root.optDouble("progress", if (isReady) 1.0 else 0.0).toFloat()
-                val err = root.optString("error", "")
-                errorMessage = if (err.isNotEmpty()) err else null
+                val err = root.optString("error", "").trim()
+                errorMessage = if (err.isNotEmpty() && err != "null" && err != "None") err else null
                 doneBytes = root.optLong("done_bytes", 0L)
                 totalBytes = root.optLong("total_bytes", 0L)
 

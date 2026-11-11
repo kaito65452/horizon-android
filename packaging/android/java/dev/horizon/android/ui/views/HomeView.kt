@@ -265,7 +265,7 @@ fun HomeView(
                     .clickable(
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
-                        onClick = { onNavigate("controls") }
+                        onClick = { onNavigate("settings") }
                     ),
                 cornerRadius = 14.dp
             ) {

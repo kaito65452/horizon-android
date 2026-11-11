@@ -1,9 +1,12 @@
 package dev.horizon.android.ui
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.SurfaceTexture
+import android.media.ExifInterface
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.os.Bundle
 import android.util.Log
@@ -90,7 +93,7 @@ class BlazeLauncherActivity : ComponentActivity() {
                 activePalette = currentPalette
             )
 
-            val tabsOrder = listOf("home", "downloads", "manager", "browse", "skin", "controls", "settings")
+            val tabsOrder = listOf("home", "downloads", "manager", "browse", "skin", "settings")
 
             BlazeTheme(colors = blazeColors) {
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -146,10 +149,12 @@ class BlazeLauncherActivity : ComponentActivity() {
                                     "manager" -> ManagerView()
                                     "browse" -> BrowseView()
                                     "skin" -> SkinStudioView()
-                                    "controls" -> GoyControlEditorView()
                                     "settings" -> SettingsView(
                                         onPaletteChanged = {
                                             activePaletteKey = it
+                                            refreshThemeConfig()
+                                        },
+                                        onThemeChanged = {
                                             refreshThemeConfig()
                                         },
                                         onOpenAccountManager = { showAccountDialog = true }
@@ -256,6 +261,15 @@ private fun VideoBackground(videoPath: String, modifier: Modifier = Modifier) {
                 surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
                         try {
+                            var videoRotation = 0
+                            try {
+                                val retriever = MediaMetadataRetriever()
+                                retriever.setDataSource(videoPath)
+                                val rotStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                                videoRotation = rotStr?.toIntOrNull() ?: 0
+                                retriever.release()
+                            } catch (_: Throwable) {}
+
                             val mp = MediaPlayer().apply {
                                 setDataSource(videoPath)
                                 setSurface(Surface(surface))
@@ -263,8 +277,10 @@ private fun VideoBackground(videoPath: String, modifier: Modifier = Modifier) {
                                 setVolume(0f, 0f)
                                 prepareAsync()
                                 setOnPreparedListener { start() }
-                                setOnVideoSizeChangedListener { _, vw, vh ->
-                                    if (vw > 0 && vh > 0) {
+                                setOnVideoSizeChangedListener { _, rawVw, rawVh ->
+                                    if (rawVw > 0 && rawVh > 0) {
+                                        val vw = if (videoRotation == 90 || videoRotation == 270) rawVh else rawVw
+                                        val vh = if (videoRotation == 90 || videoRotation == 270) rawVw else rawVh
                                         val matrix = Matrix()
                                         val sx = width.toFloat() / vw.toFloat()
                                         val sy = height.toFloat() / vh.toFloat()
@@ -298,7 +314,30 @@ private fun VideoBackground(videoPath: String, modifier: Modifier = Modifier) {
 private fun PhotoBackground(photoPath: String, modifier: Modifier = Modifier) {
     val bitmap = remember(photoPath) {
         try {
-            BitmapFactory.decodeFile(photoPath)
+            val baseBmp = BitmapFactory.decodeFile(photoPath) ?: return@remember null
+            val exif = try {
+                ExifInterface(photoPath)
+            } catch (_: Throwable) {
+                null
+            }
+            val orientation = exif?.getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            ) ?: ExifInterface.ORIENTATION_NORMAL
+
+            val matrix = Matrix()
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            }
+            if (!matrix.isIdentity) {
+                Bitmap.createBitmap(baseBmp, 0, 0, baseBmp.width, baseBmp.height, matrix, true)
+            } else {
+                baseBmp
+            }
         } catch (_: Throwable) {
             null
         }
