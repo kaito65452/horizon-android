@@ -1,6 +1,6 @@
 //! JNI bridge between Kotlin Jetpack Compose Frontend and Pure Rust Backend.
 use super::{
-    account::{self, Account, Accounts, DeviceCode, Endpoints, Poll, Provider},
+    account::{self, Accounts, DeviceCode, Endpoints, Poll, Provider},
     backend, catalog,
 };
 use jni::{
@@ -819,7 +819,7 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeG
 ) -> jstring {
     let accounts = Accounts::load();
     if let Some(key) = &accounts.selected {
-        if let Some(raw) = account::store().get(key) {
+        if let Ok(Some(raw)) = account::store().get(key) {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
                 if let Some(token) = val.get("minecraft_token").and_then(|t| t.as_str()) {
                     return str_to_jstring(&mut env, token);
