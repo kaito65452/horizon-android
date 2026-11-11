@@ -1,5 +1,5 @@
 use super::*;
-use horizon_client::ui_theme::{Face, Icon, Ui, color};
+use horizon_client::ui_theme::{Face, Icon, Ui};
 
 impl Launcher {
     fn draw_installed(

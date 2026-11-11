@@ -603,7 +603,7 @@ impl Wardrobe {
             x,
             top,
             theme.text_primary,
-            "Skins & Capes Studio",
+            "3D Skin Viewer",
         );
         let subtitle = ui.fit_text(
             Face::Regular,

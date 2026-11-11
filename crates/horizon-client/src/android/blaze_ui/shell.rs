@@ -1,7 +1,8 @@
 use super::*;
 use horizon_client::ui_theme::{Face, Icon, Ui, color};
 
-fn draw_blaze_progress_view(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_blaze_progress_view(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,
     content_x: f32,
@@ -191,7 +192,7 @@ fn draw_blaze_progress_view(
     );
 }
 
-fn format_downloads(n: u64) -> String {
+pub(crate) fn format_downloads(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M", n as f64 / 1_000_000.0)
     } else if n >= 1_000 {
@@ -201,7 +202,7 @@ fn format_downloads(n: u64) -> String {
     }
 }
 
-fn capitalize(s: &str) -> String {
+pub(crate) fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
@@ -209,7 +210,7 @@ fn capitalize(s: &str) -> String {
     }
 }
 
-fn wrap_text_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
+pub(crate) fn wrap_text_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
     let mut lines = Vec::new();
     for raw_line in text.lines() {
         let trimmed = raw_line.trim();
@@ -1097,10 +1098,10 @@ impl Launcher {
 }
 
 impl Launcher {
-    pub(super) fn navigate(&mut self, key: &KeyEvent) -> bool {
+    pub(crate) fn navigate(&mut self, key: &KeyEvent) -> bool {
         self.navigate_key(&key.logical_key)
     }
-    pub(super) fn navigate_key(&mut self, key: &winit::keyboard::Key) -> bool {
+    pub(crate) fn navigate_key(&mut self, key: &winit::keyboard::Key) -> bool {
         use horizon_client::gamepad::{self, Button};
         use winit::keyboard::{Key, NamedKey};
         if self.pending_focus.is_some() {
@@ -1156,7 +1157,7 @@ impl Launcher {
         true
     }
 
-    pub(super) fn draw_pages(&mut self) -> Result<()> {
+    pub(crate) fn draw_pages(&mut self) -> Result<()> {
         let Some(mut r) = self.renderer.take() else {
             return Ok(());
         };
@@ -1184,7 +1185,12 @@ impl Launcher {
         let w = ui.w;
         let h = ui.h;
 
-        let ime_top_dp = crate::platform::ime_top_dp().filter(|&top| top > 0.0 && top < h);
+        let ime_top_dp = if self.catalog.editing.is_some() {
+            crate::native_ime::viewport_bottom()
+                .map(|bottom_px| (bottom_px as f32 / ui.density).clamp(110.0, ui.h))
+        } else {
+            None
+        };
         let page = self.catalog.page;
 
         // Top Header Rail
@@ -1418,26 +1424,16 @@ impl Launcher {
             self.login.draw(
                 &mut ui,
                 &mut self.targets,
-                content_x,
-                content_w,
-                h,
-                ime_top_dp,
+                &self.catalog.config.name,
+                self.catalog.editing,
+                self.anim.modal_anim,
             );
         }
 
         if let Some(chooser) = &mut self.chooser {
-            self.list_targets.clear();
-            let mut close = false;
-            chooser.draw(
-                &mut ui,
-                &mut self.targets,
-                &mut self.list_targets,
-                &mut close,
-            );
-            self.list_view = Some(chooser.view);
-            if close {
-                self.chooser = None;
-            }
+            chooser.draw(&mut ui, &mut self.targets, self.anim.modal_anim);
+            self.list_targets = chooser.navigation(ui.w);
+            self.list_view = Some(chooser.viewport(ui.h));
         }
 
         if self.catalog.fm_modal.is_some() {
@@ -1449,7 +1445,7 @@ impl Launcher {
         }
 
         // Starling Voice Chat Banner Overlay
-        if !self.catalog.starling_dismissed && page == Page::Play && self.worker.is_none() {
+        if !self.catalog.starling_notice_dismissed && page == Page::Play && self.worker.is_none() {
             let banner_h = 32.0;
             let banner_y = h - banner_h - 12.0;
             let banner_w = (content_w - 24.0).min(560.0);
@@ -1498,15 +1494,136 @@ impl Launcher {
             );
         }
 
-        let encoder = r
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("blaze_ui_render"),
-            });
-        r.render_hud_batch(&b, encoder);
+        if self.exit_confirmation {
+            self.targets.clear();
+            self.list_targets.clear();
+            self.list_view = None;
+            let modal_t = self.anim.modal_anim.clamp(0.2, 1.0);
+            ui.rounded(
+                0.0,
+                0.0,
+                w,
+                h,
+                0.0,
+                horizon_client::hud::rgba(0, 0, 0, (180.0 * modal_t) as u8),
+            );
+            let scale_in = 0.94 + 0.06 * modal_t;
+            let width = (w - 32.0).min(360.0) * scale_in;
+            let x = (w - width) * 0.5;
+            let y = (h - 160.0) * 0.5 + (1.0 - modal_t) * 8.0;
+            ui.rounded(x, y, width, 160.0, GLASS_RADIUS, blaze_surface());
+            ui.border(x, y, width, 160.0, GLASS_RADIUS, blaze_border());
+            ui.text(
+                Face::SemiBold,
+                20.0,
+                x + 22.0,
+                y + 24.0,
+                blaze_text(),
+                "Exit Horizon Android?",
+            );
+            let bw = (width - 52.0) * 0.5;
+            button(
+                &mut ui,
+                &mut self.targets,
+                [x + 20.0, y + 94.0, bw, 42.0],
+                "Cancel",
+                Action::Dismiss,
+                false,
+            );
+            button(
+                &mut ui,
+                &mut self.targets,
+                [x + 32.0 + bw, y + 94.0, bw, 42.0],
+                "Exit",
+                Action::ConfirmExit,
+                true,
+            );
+        }
+
+        if let Some(action) = self.pending_focus.take() {
+            self.focus = self.targets.iter().position(|(_, a)| *a == action);
+        }
+        if let Some(index) = self.focus
+            && let Some(([x, y, w, h], _)) = self.targets.get(index)
+        {
+            ui.border(*x - 2.0, *y - 2.0, *w + 4.0, *h + 4.0, 12.0, blaze_accent());
+            self.cursor = (
+                f64::from((x + w / 2.0) * ui.density),
+                f64::from((y + h / 2.0) * ui.density),
+            );
+        }
+        if self.mouse_down || self.drag.as_ref().is_some_and(|drag| !drag.moved) {
+            let point = [
+                self.cursor.0 as f32 / ui.density,
+                self.cursor.1 as f32 / ui.density,
+            ];
+            if let Some(([x, y, w, h], _)) = self.targets.iter().rev().find(|(rect, _)| {
+                point[0] >= rect[0]
+                    && point[0] <= rect[0] + rect[2]
+                    && point[1] >= rect[1]
+                    && point[1] <= rect[1] + rect[3]
+            }) {
+                ui.rounded(
+                    *x,
+                    *y,
+                    *w,
+                    *h,
+                    (*h * 0.42).clamp(10.0, 22.0),
+                    horizon_client::hud::rgba(255, 255, 255, 36),
+                );
+            }
+        }
+        if !self.mouse_down
+            && self.drag.is_none()
+            && let Some((action, time)) = self.feedback
+            && time.elapsed() < std::time::Duration::from_millis(160)
+            && let Some(([x, y, w, h], _)) = self.targets.iter().find(|(_, a)| *a == action)
+        {
+            ui.rounded(
+                *x,
+                *y,
+                *w,
+                *h,
+                (*h * 0.42).clamp(10.0, 22.0),
+                horizon_client::hud::rgba(255, 255, 255, 36),
+            );
+        }
+        crate::documents::draw_ui(&mut ui);
+        if !self.anim.intro_done {
+            let session_prog = if self.session_worker.is_some() {
+                0.30
+            } else {
+                0.55
+            };
+            let loading_progress = (0.45f32 + session_prog).clamp(0.0, 1.0);
+            if loading_progress >= 0.999 && self.anim.intro_elapsed >= 1.55 {
+                self.anim.intro_done = true;
+            } else {
+                let intro_status = if self.session_worker.is_some() {
+                    "Syncing account session & skins..."
+                } else if self.catalog.search_worker_active() {
+                    "Loading content catalog..."
+                } else {
+                    ""
+                };
+                ui.draw_horizon_intro(self.anim.intro_elapsed, loading_progress, intro_status);
+                if loading_progress >= 0.999 {
+                    self.targets.clear();
+                    self.list_targets.clear();
+                    self.targets.push(([0.0, 0.0, w, h], Action::SkipIntro));
+                }
+            }
+        }
+        ui.finish();
+
+        if !r.render(&game::loading_frame(&b))? && !b.patches.is_empty() {
+            // A suspended/lost surface skips the frame, including its glyph
+            // uploads. Rebuild them next time instead of caching invisible text.
+            horizon_client::ui_theme::reset_atlas();
+        }
         Ok(())
     }
-    pub(super) fn activate(&mut self, events: &ActiveEventLoop) -> Result<()> {
+    pub(crate) fn activate(&mut self, events: &ActiveEventLoop) -> Result<()> {
         if self.session_worker.is_some() && self.chooser.is_none() && !self.exit_confirmation {
             return Ok(());
         }
@@ -3188,7 +3305,7 @@ impl Launcher {
         }
     }
 
-    pub(super) fn ui_density(&self) -> f32 {
+    pub(crate) fn ui_density(&self) -> f32 {
         let (Some(r), Some(gui)) = (&self.renderer, &self.gui) else {
             return 1.0;
         };
@@ -3196,7 +3313,7 @@ impl Launcher {
         Ui::mobile(&gui.atlas, &mut batch, (0.0, 0.0)).density
     }
 
-    pub(super) fn touch_event(&mut self, events: &ActiveEventLoop, t: Touch) -> Result<()> {
+    pub(crate) fn touch_event(&mut self, events: &ActiveEventLoop, t: Touch) -> Result<()> {
         if self.catalog.page == Page::Skins
             && !self.login.visible
             && self.wardrobe.gesture(&t, self.ui_density())
@@ -3330,7 +3447,7 @@ impl Launcher {
         }
         Ok(())
     }
-    pub(super) fn type_key(&mut self, key: KeyEvent) {
+    pub(crate) fn type_key(&mut self, key: KeyEvent) {
         if key.physical_key == PhysicalKey::Code(KeyCode::Escape)
             || key.logical_key
                 == winit::keyboard::Key::Named(winit::keyboard::NamedKey::BrowserBack)
@@ -3360,62 +3477,4 @@ impl Launcher {
             self.edit_text(out);
         }
     }
-}
-
-fn format_downloads(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}K", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-fn capitalize(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
-}
-
-fn wrap_text_lines(ui: &Ui, face: Face, size: f32, text: &str, max_w: f32) -> Vec<String> {
-    let mut lines = Vec::new();
-    for raw_line in text.lines() {
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() {
-            if lines.last().is_some_and(|l: &String| !l.is_empty()) {
-                lines.push(String::new());
-            }
-            continue;
-        }
-        let mut current = String::new();
-        for word in trimmed.split_whitespace() {
-            let candidate = if current.is_empty() {
-                word.to_owned()
-            } else {
-                format!("{current} {word}")
-            };
-            if ui.measure(face, size, &candidate) <= max_w || current.is_empty() {
-                current = candidate;
-            } else {
-                lines.push(current);
-                current = word.to_owned();
-            }
-            if lines.len() >= 16 {
-                break;
-            }
-        }
-        if !current.is_empty() && lines.len() < 16 {
-            lines.push(current);
-        }
-        if lines.len() >= 16 {
-            break;
-        }
-    }
-    if lines.is_empty() {
-        lines.push("No additional description available.".into());
-    }
-    lines
 }

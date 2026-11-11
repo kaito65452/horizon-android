@@ -353,7 +353,7 @@ pub fn draw_settings_view(
             );
             cy += row_h;
 
-            let scale = launcher.catalog.config.render_scale.label();
+            let scale_str = format!("{}%", launcher.catalog.config.render_scale.percent());
             draw_dropdown_row(
                 ui,
                 &mut launcher.targets,
@@ -364,12 +364,12 @@ pub fn draw_settings_view(
                 row_h,
                 "Render scale",
                 Some("Internal resolution"),
-                scale,
+                &scale_str,
                 Action::RenderScale,
             );
             cy += row_h;
 
-            let hz = launcher.catalog.config.display_hz_label();
+            let hz = launcher.catalog.config.device.display_label();
             draw_dropdown_row(
                 ui,
                 &mut launcher.targets,
@@ -380,12 +380,12 @@ pub fn draw_settings_view(
                 row_h,
                 "Display refresh rate",
                 Some("Screen Hz"),
-                hz,
+                &hz,
                 Action::DisplayHz,
             );
             cy += row_h;
 
-            let asp = launcher.catalog.config.aspect_label();
+            let asp = launcher.catalog.config.screen.aspect.label();
             draw_dropdown_row(
                 ui,
                 &mut launcher.targets,
@@ -417,7 +417,11 @@ pub fn draw_settings_view(
             );
             cy += row_h;
 
-            let cache = launcher.catalog.config.cache_budget_label();
+            let cache = if launcher.catalog.config.cache_budget_mib == 0 {
+                "Default (80 MiB)".to_owned()
+            } else {
+                format!("{} MiB", launcher.catalog.config.cache_budget_mib)
+            };
             draw_dropdown_row(
                 ui,
                 &mut launcher.targets,
@@ -428,7 +432,7 @@ pub fn draw_settings_view(
                 row_h,
                 "Cache budget",
                 Some("Disk/RAM budget"),
-                cache,
+                &cache,
                 Action::CacheBudget,
             );
             cy += row_h;
@@ -557,6 +561,9 @@ pub fn draw_settings_view(
             );
             cy += row_h;
 
+            let game_home = launcher.catalog.config.game_home(&launcher.home);
+            let touch_cfg = horizon_client::touch::Settings::load_from(&game_home.join("horizon-touch.json"));
+
             draw_switch_row(
                 ui,
                 &mut launcher.targets,
@@ -567,7 +574,7 @@ pub fn draw_settings_view(
                 row_h,
                 "Gyro aiming",
                 Some("Motion sensor control"),
-                launcher.catalog.config.touch.gyro_enabled,
+                touch_cfg.gyroscope,
                 Action::ToggleGyro,
             );
             cy += row_h;
@@ -582,7 +589,7 @@ pub fn draw_settings_view(
                 row_h,
                 "Virtual mouse",
                 Some("Touch pointer emulation"),
-                launcher.catalog.config.touch.virtual_mouse_enabled,
+                touch_cfg.virtual_mouse_enabled,
                 Action::ToggleVirtualMouseEnabled,
             );
             cy += row_h;
@@ -597,7 +604,7 @@ pub fn draw_settings_view(
                 row_h,
                 "Haptic vibration",
                 Some("Touch feedback"),
-                launcher.catalog.config.touch.vibrate,
+                touch_cfg.vibrate,
                 Action::ToggleTouchVibrate,
             );
             cy += row_h;
@@ -890,7 +897,7 @@ pub fn draw_settings_view(
             launcher.catalog.scroll = launcher.catalog.scroll.clamp(0.0, max_scroll);
             launcher.list_view = Some([list_top, list_bottom, max_scroll]);
         }
-        SettingsCategory::Overview => {}
+        SettingsCategory::Overview | SettingsCategory::Launcher => {}
     }
 
     ui.set_clip(None);

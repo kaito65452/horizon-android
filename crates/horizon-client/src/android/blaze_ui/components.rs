@@ -98,6 +98,112 @@ pub fn glass_card(ui: &mut Ui, r: LayoutRect, radius: f32) -> bool {
     false
 }
 
+pub fn corner_inset(d: f32, len: f32, r: f32) -> f32 {
+    let edge = d.min(len - d);
+    if r <= 0.0 || edge >= r {
+        0.0
+    } else {
+        r - (r * r - (r - edge) * (r - edge)).max(0.0).sqrt()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn rounded_hgrad(
+    ui: &mut Ui,
+    r: LayoutRect,
+    radius: f32,
+    from_frac: f32,
+    c0: u32,
+    cm: u32,
+    c1: u32,
+) {
+    let x_start = r.x + r.w * from_frac.clamp(0.0, 0.95);
+    let span = (r.x + r.w - x_start).max(1.0);
+    let step = 2.0f32;
+    let mut sx = x_start;
+    while sx < r.x + r.w - 0.01 {
+        let sw = step.min(r.x + r.w - sx);
+        let t = ((sx + sw * 0.5 - x_start) / span).clamp(0.0, 1.0);
+        let col = if t < 0.5 {
+            lerp_color(c0, cm, t * 2.0)
+        } else {
+            lerp_color(cm, c1, (t - 0.5) * 2.0)
+        };
+        let inset = corner_inset(sx + sw * 0.5 - r.x, r.w, radius) + 0.5;
+        ui.fill(sx, r.y + inset, sw + 0.4, (r.h - inset * 2.0).max(0.0), col);
+        sx += sw;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn rounded_vgrad(
+    ui: &mut Ui,
+    r: LayoutRect,
+    radius: f32,
+    from_frac: f32,
+    c0: u32,
+    cm: u32,
+    c1: u32,
+) {
+    let y_start = r.y + r.h * from_frac.clamp(0.0, 0.95);
+    let span = (r.y + r.h - y_start).max(1.0);
+    let step = 1.5f32;
+    let mut sy = y_start;
+    while sy < r.y + r.h - 0.01 {
+        let sh = step.min(r.y + r.h - sy);
+        let t = ((sy + sh * 0.5 - y_start) / span).clamp(0.0, 1.0);
+        let col = if t < 0.5 {
+            lerp_color(c0, cm, t * 2.0)
+        } else {
+            lerp_color(cm, c1, (t - 0.5) * 2.0)
+        };
+        let d_bottom = r.y + r.h - (sy + sh * 0.5);
+        let inset = if d_bottom < radius {
+            radius
+                - (radius * radius - (radius - d_bottom) * (radius - d_bottom))
+                    .max(0.0)
+                    .sqrt()
+        } else {
+            0.0
+        } + 0.5;
+        ui.fill(r.x + inset, sy, (r.w - inset * 2.0).max(0.0), sh + 0.4, col);
+        sy += sh;
+    }
+}
+
+pub fn page_icon(page: Page) -> Icon {
+    match page {
+        Page::Play => Icon::Play,
+        Page::Mods => Icon::Mods,
+        Page::Packs => Icon::Packs,
+        Page::Shaders => Icon::Shaders,
+        Page::Installed => Icon::Installed,
+        Page::Settings => Icon::Settings,
+        Page::Skins => Icon::Installed,
+    }
+}
+
+pub fn icon_action_button(
+    ui: &mut Ui,
+    targets: &mut Vec<([f32; 4], Action)>,
+    rect: [f32; 4],
+    bg: u32,
+    icon: Icon,
+    action: Action,
+) {
+    let [x, y, w, h] = rect;
+    ui.rounded(x, y, w, h, GLASS_RADIUS, bg);
+    let icon_size = 18.0;
+    ui.icon(
+        icon,
+        x + (w - icon_size) * 0.5,
+        y + (h - icon_size) * 0.5,
+        icon_size,
+        blaze_text(),
+    );
+    targets.push((rect, action));
+}
+
 pub fn button(
     ui: &mut Ui,
     targets: &mut Vec<([f32; 4], Action)>,

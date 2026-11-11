@@ -3,44 +3,38 @@ use crate::catalog::SettingsCategory;
 use horizon_client::{
     gfx::Renderer,
     osk::Output,
-    ui_theme::{Face, Icon, LayoutRect, Ui, color},
 };
 use std::sync::atomic::Ordering;
 use winit::{
-    event::{ActiveEventLoop, KeyEvent, Touch, TouchPhase},
+    event::{KeyEvent, Touch, TouchPhase},
+    event_loop::ActiveEventLoop,
     keyboard::{KeyCode, PhysicalKey},
 };
 
-pub mod browse;
 pub mod components;
-pub mod home;
-pub mod manager;
-pub mod settings;
 pub mod settings_components;
 pub mod shell;
+pub mod home;
+pub mod browse;
+pub mod manager;
 pub mod skin;
+pub mod settings;
 
-pub use browse::*;
 pub use components::*;
-pub use home::*;
-pub use manager::*;
-pub use settings::*;
 pub use settings_components::*;
-pub use shell::*;
+pub(crate) use shell::*;
+pub use home::*;
+pub use browse::*;
+pub use manager::*;
 pub use skin::*;
+pub use settings::*;
 
-thread_local! {
-    pub static ACTIVE_SLIDER_DRAG: std::cell::Cell<Option<(Action, f32, f32)>> = const { std::cell::Cell::new(None) };
-    pub static SLIDER_TRACK_TARGETS: std::cell::RefCell<Vec<([f32; 4], Action, f32, f32)>> = const { std::cell::RefCell::new(Vec::new()) };
-    pub static WALLPAPER_CACHE: std::cell::RefCell<Option<(&'static str, u32, u32, Vec<u8>)>> = const { std::cell::RefCell::new(None) };
-}
-
-const WALLPAPER_CYAN: &[u8] = include_bytes!("wallpapers/cyan.png");
-const WALLPAPER_EMERALD: &[u8] = include_bytes!("wallpapers/emerald.png");
-const WALLPAPER_CRIMSON: &[u8] = include_bytes!("wallpapers/crimson.png");
-const WALLPAPER_VIOLET: &[u8] = include_bytes!("wallpapers/violet.png");
-const WALLPAPER_AMBER: &[u8] = include_bytes!("wallpapers/amber.png");
-const WALLPAPER_WINTER: &[u8] = include_bytes!("wallpapers/winter.png");
+const WALLPAPER_CYAN: &[u8] = include_bytes!("../wallpapers/cyan.png");
+const WALLPAPER_EMERALD: &[u8] = include_bytes!("../wallpapers/emerald.png");
+const WALLPAPER_CRIMSON: &[u8] = include_bytes!("../wallpapers/crimson.png");
+const WALLPAPER_VIOLET: &[u8] = include_bytes!("../wallpapers/violet.png");
+const WALLPAPER_AMBER: &[u8] = include_bytes!("../wallpapers/amber.png");
+const WALLPAPER_WINTER: &[u8] = include_bytes!("../wallpapers/winter.png");
 
 thread_local! {
     static ACTIVE_SLIDER_DRAG: std::cell::Cell<Option<(Action, f32, f32)>> = const { std::cell::Cell::new(None) };
@@ -137,6 +131,9 @@ fn load_active_wallpaper(
         Some((key, w, h, rgba))
     })
 }
+
+/// Smooth 60fps UI animation state across navigation, pages, accordions, theme previews, progress bars, and modals.
+/// Automatically respects `motion::reduced_motion()` on low-end Android hardware.
 
 pub(crate) struct AnimState {
     pub last_tick: std::time::Instant,
@@ -294,7 +291,8 @@ impl AnimState {
     }
 }
 
-pub(super) enum Action {
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Action {
     Page(Page),
     SettingsCat(SettingsCategory),
     Play,

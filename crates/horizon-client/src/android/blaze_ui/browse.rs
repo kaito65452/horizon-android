@@ -1,5 +1,5 @@
 use super::*;
-use horizon_client::ui_theme::{Face, Icon, Ui, color};
+use horizon_client::ui_theme::{Face, Icon, Ui};
 
 pub fn draw_browse_view(
     launcher: &mut Launcher,
@@ -25,7 +25,7 @@ pub fn draw_browse_view(
         let by = header_y - 2.0;
         let active = page == cat_page;
         button(
-            &mut ui,
+            ui,
             &mut launcher.targets,
             [bx, by, sub_tab_w, 30.0],
             label,
@@ -45,7 +45,7 @@ pub fn draw_browse_view(
                 launcher.catalog.config.shader_source
             }) == origin;
             button(
-                &mut ui,
+                ui,
                 &mut launcher.targets,
                 rect,
                 origin.source().label(),
@@ -83,7 +83,7 @@ pub fn draw_browse_view(
         .push((search_rect, Action::Field("search")));
 
     button(
-        &mut ui,
+        ui,
         &mut launcher.targets,
         [content_x + field_w + 8.0, search_y, search_btn_w, 36.0],
         if page == Page::Mods && launcher.catalog.query.trim().starts_with("https://") {
@@ -102,7 +102,7 @@ pub fn draw_browse_view(
     };
     let sub_y = 140.0 + slide_y;
     button(
-        &mut ui,
+        ui,
         &mut launcher.targets,
         [content_x, sub_y, 114.0, 29.0],
         "Open folder",
@@ -110,13 +110,14 @@ pub fn draw_browse_view(
         false,
     );
     button(
-        &mut ui,
+        ui,
         &mut launcher.targets,
         [content_x + 122.0, sub_y, 114.0, 29.0],
         "Import file",
         Action::Import(kind),
         false,
     );
+    let compact = content_w < 520.0;
     if !compact {
         let status_line = launcher
             .error
@@ -149,7 +150,7 @@ pub fn draw_browse_view(
     } else {
         Vec::new()
     };
-    let catalog_rows: Vec<_> = self
+    let catalog_rows: Vec<_> = launcher
         .catalog
         .results
         .iter()
@@ -166,7 +167,7 @@ pub fn draw_browse_view(
     let row_count = bundled.len() + catalog_rows.len();
     let top = 176.0 + slide_y;
     let bottom = h - 46.0;
-    launcher.catalog.scroll = self
+    launcher.catalog.scroll = launcher
         .catalog
         .scroll
         .clamp(0.0, (row_count as f32 * row_h - (bottom - top)).max(0.0));
@@ -228,7 +229,7 @@ pub fn draw_browse_view(
         // Badge chip ("Built-in • Tap for info")
         let text_max = (content_w - 190.0).max(80.0);
         let fitted_title = ui.fit_text(Face::SemiBold, 15.0, title, text_max);
-        let rich_desc = self
+        let rich_desc = launcher
             .catalog
             .enriched_summaries
             .get(*id)
@@ -262,7 +263,7 @@ pub fn draw_browse_view(
             launcher.targets.push((c, Action::OpenBundledProject(id)));
         }
         button(
-            &mut ui,
+            ui,
             &mut launcher.targets,
             btn_rect,
             if enabled { "Installed" } else { "Install" },
@@ -403,7 +404,7 @@ pub fn draw_browse_view(
             }
         } else {
             button(
-                &mut ui,
+                ui,
                 &mut launcher.targets,
                 btn_rect,
                 launcher.catalog.install_button(p),
@@ -416,7 +417,7 @@ pub fn draw_browse_view(
     ui.set_clip(None);
     let pager_y = h - 42.0;
     button(
-        &mut ui,
+        ui,
         &mut launcher.targets,
         [content_x, pager_y, 102.0, 32.0],
         "Previous",
@@ -424,7 +425,7 @@ pub fn draw_browse_view(
         false,
     );
     button(
-        &mut ui,
+        ui,
         &mut launcher.targets,
         [content_x + 110.0, pager_y, 102.0, 32.0],
         "Next",

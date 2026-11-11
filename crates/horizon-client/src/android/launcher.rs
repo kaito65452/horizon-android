@@ -15,7 +15,6 @@ use horizon_client::{
     Result,
     gfx::Renderer,
     hud::{HudAtlas, HudBatch},
-    ui_theme::{Face, Ui},
 };
 use std::{
     path::PathBuf,
@@ -24,7 +23,7 @@ use std::{
 };
 use winit::{
     application::ApplicationHandler,
-    event::{DeviceEvent, DeviceId, ElementState, MouseButton, TouchPhase, WindowEvent},
+    event::{DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow},
     window::{Window, WindowId},
 };

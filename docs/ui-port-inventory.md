@@ -36,7 +36,7 @@ Comprehensive audit of pages, navigation state, sidebar items, top-right quick a
 | Name | Config Key | Type | Default | Page / Category |
 |---|---|---|---|---|
 | **Appearance** | | | | |
-| Accent Palette | `theme.preset` | `u8` (0-4) | `0` (Masterix Cyan `#38bdf8`) | Settings / Appearance |
+| Accent Palette | `theme.preset` | `u8` (0-4) | `0` (Cyan `#38bdf8`) | Settings / Appearance |
 | Background Style | `theme.bg_style` | `String` | `"mc"` (Minecraft Aquatic) | Settings / Appearance |
 | Custom Background Image | `theme.custom_bg_uri` | `Option<String>` | `None` | Settings / Appearance |
 | Glass Panel Opacity | `theme.glass_opacity` | `f32` (0.40–0.98) | `0.85` | Settings / Appearance |
