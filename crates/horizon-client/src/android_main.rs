@@ -277,7 +277,7 @@ fn android_main(app: AndroidApp) {
         gpu_batching: config.renderer == crate::catalog::RendererMode::Vulkan,
     };
     crate::document_store::set_game_active(true);
-    let mut game = match crate::game_launch::start(request) {
+    let game = match crate::game_launch::start(request) {
         Ok(game) => game,
         Err(error) => {
             log::error!("Cannot start Horizon game: {error}");
@@ -292,9 +292,54 @@ fn android_main(app: AndroidApp) {
             std::process::exit(1);
         }
     };
+    struct AppRunner(Box<dyn winit::application::ApplicationHandler>);
+    impl winit::application::ApplicationHandler for AppRunner {
+        fn new_events(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            cause: winit::event::StartCause,
+        ) {
+            self.0.new_events(event_loop, cause);
+        }
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.0.resumed(event_loop);
+        }
+        fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, event: ()) {
+            self.0.user_event(event_loop, event);
+        }
+        fn window_event(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            window_id: winit::window::WindowId,
+            event: winit::event::WindowEvent,
+        ) {
+            self.0.window_event(event_loop, window_id, event);
+        }
+        fn device_event(
+            &mut self,
+            event_loop: &winit::event_loop::ActiveEventLoop,
+            device_id: winit::event::DeviceId,
+            event: winit::event::DeviceEvent,
+        ) {
+            self.0.device_event(event_loop, device_id, event);
+        }
+        fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.0.about_to_wait(event_loop);
+        }
+        fn suspended(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.0.suspended(event_loop);
+        }
+        fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.0.exiting(event_loop);
+        }
+        fn memory_warning(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            self.0.memory_warning(event_loop);
+        }
+    }
+    let mut runner = AppRunner(game);
     let result = android_event_loop()
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })
-        .and_then(|events| events.run_app(&mut *game).map_err(Into::into));
+        .and_then(|events| events.run_app(&mut runner).map_err(Into::into));
     if let Err(error) = result {
         log::error!("Horizon: {error}");
         diagnostics::record_error(&error.to_string());
@@ -304,7 +349,7 @@ fn android_main(app: AndroidApp) {
     // Winit permits one EventLoop per process. NativeActivity otherwise keeps
     // this process cached after Quit, making the next launch fail. run_app's
     // exiting callback has completed the world save before we get here.
-    drop(game);
+    drop(runner);
     diagnostics::finish();
     platform::finish();
     APP.with(|slot| *slot.borrow_mut() = None);

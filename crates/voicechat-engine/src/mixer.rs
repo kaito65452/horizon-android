@@ -354,6 +354,8 @@ mod tests {
 
     #[test]
     fn a_voice_plays_after_the_jitter_buffer_and_stops_cleanly() {
+        let _guard = crate::mic_filter::TEST_MUTEX.lock().unwrap();
+        crate::mic_filter::reset_speaker_reference_for_tests();
         let mut enc = Encoder::new(2048).unwrap();
         let mut mixer = Mixer::default();
         mixer.positions.insert(7, [0.0, 0.0, 3.0]);
@@ -385,10 +387,13 @@ mod tests {
             mixer.render(&mut out);
         }
         assert!(mixer.talking().is_empty());
+        crate::mic_filter::reset_speaker_reference_for_tests();
     }
 
     #[test]
     fn the_microphone_test_plays_in_the_middle() {
+        let _guard = crate::mic_filter::TEST_MUTEX.lock().unwrap();
+        crate::mic_filter::reset_speaker_reference_for_tests();
         let mut mixer = Mixer::default();
         mixer.push_local(&vec![0.5; FRAME]);
         let mut out = vec![0.0; FRAME * 2];
@@ -396,6 +401,7 @@ mod tests {
         assert!(out[0] > 0.3 && (out[0] - out[1]).abs() < 1e-6);
         mixer.push_local(&vec![0.5; FRAME * 20]);
         assert_eq!(mixer.local.len(), FRAME * 5, "capped");
+        crate::mic_filter::reset_speaker_reference_for_tests();
     }
 
     #[test]

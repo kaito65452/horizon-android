@@ -1,5 +1,7 @@
 package dev.horizon.android.ui.views
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -22,6 +25,9 @@ import dev.horizon.android.ui.components.*
 import dev.horizon.android.ui.theme.BlazePalettes
 import dev.horizon.android.ui.theme.LocalBlazeColors
 import org.json.JSONObject
+import java.io.File
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 @Composable
 fun SettingsView(
@@ -29,6 +35,7 @@ fun SettingsView(
     modifier: Modifier = Modifier
 ) {
     val colors = LocalBlazeColors.current
+    val context = LocalContext.current
     var activeCategory by remember { mutableStateOf("appearance") }
 
     // Persistent Config States
@@ -102,6 +109,77 @@ fun SettingsView(
 
     LaunchedEffect(Unit) {
         loadFromNativeConfig()
+    }
+
+    // REAL SAF: Custom Wallpaper Picker
+    val wallpaperPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val wallDir = File(context.filesDir, "wallpapers")
+                wallDir.mkdirs()
+                val targetFile = File(wallDir, "custom_bg.png")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    targetFile.outputStream().use { output -> input.copyTo(output) }
+                }
+                backgroundMode = "custom"
+                mutateAndSaveConfig { root ->
+                    val theme = root.optJSONObject("theme") ?: JSONObject()
+                    theme.put("bg_style", "custom")
+                    theme.put("custom_bg_uri", targetFile.absolutePath)
+                    root.put("theme", theme)
+                }
+                statusMessage = "Custom wallpaper imported successfully via SAF."
+            } catch (e: Exception) {
+                statusMessage = "Import failed: ${e.message}"
+            }
+        }
+    }
+
+    // REAL SAF: Export Settings JSON
+    val exportSettingsPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    val json = BlazeNativeBridge.nativeGetConfigJson()
+                    output.write(json.toByteArray(Charsets.UTF_8))
+                }
+                statusMessage = "Settings JSON exported successfully via SAF."
+            } catch (e: Exception) {
+                statusMessage = "Export failed: ${e.message}"
+            }
+        }
+    }
+
+    // REAL SAF: Export Worlds to ZIP
+    val exportWorldsPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                val savesDir = File(context.filesDir, "saves")
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    ZipOutputStream(outputStream).use { zipOut ->
+                        if (savesDir.exists() && savesDir.isDirectory) {
+                            savesDir.walkTopDown().forEach { file ->
+                                val relPath = file.relativeTo(savesDir).path
+                                if (file.isFile) {
+                                    zipOut.putNextEntry(ZipEntry(relPath))
+                                    file.inputStream().use { it.copyTo(zipOut) }
+                                    zipOut.closeEntry()
+                                }
+                            }
+                        }
+                    }
+                }
+                statusMessage = "Worlds exported to ZIP successfully via SAF."
+            } catch (e: Exception) {
+                statusMessage = "Export failed: ${e.message}"
+            }
+        }
     }
 
     val categories = listOf(
@@ -249,7 +327,9 @@ fun SettingsView(
                         HorizonButton(
                             text = "Import Image / Video Background (SAF)",
                             modifier = Modifier.fillMaxWidth(),
-                            onClick = { statusMessage = "Select background media file via SAF" }
+                            onClick = {
+                                wallpaperPicker.launch(arrayOf("image/*", "video/mp4", "image/png", "image/jpeg"))
+                            }
                         )
 
                         // Panel Opacity & Blur Sliders
@@ -482,8 +562,20 @@ fun SettingsView(
                     "storage" -> {
                         HorizonSectionHeader(tag = "STORAGE", title = "Files and Backups")
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            HorizonButton(text = "Export Worlds (SAF)", modifier = Modifier.weight(1f), onClick = { BlazeNativeBridge.nativeExportWorlds() })
-                            HorizonButton(text = "Export JSON Settings", modifier = Modifier.weight(1f), onClick = { statusMessage = "Settings exported" })
+                            HorizonButton(
+                                text = "Export Worlds (SAF)",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    exportWorldsPicker.launch("horizon_worlds_backup.zip")
+                                }
+                            )
+                            HorizonButton(
+                                text = "Export JSON Settings (SAF)",
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    exportSettingsPicker.launch("blaze_settings.json")
+                                }
+                            )
                         }
                     }
 
@@ -724,7 +816,22 @@ fun SettingsView(
                         androidx.compose.foundation.text.BasicText(text = "Frontend: Lightweight Kotlin / Jetpack Compose Foundation (Landscape Stage)", style = androidx.compose.ui.text.TextStyle(color = Color(0xFF94A3B8), fontSize = 10.sp))
                         androidx.compose.foundation.text.BasicText(text = "Voice Chat: Complex Voice Chat (ported by Asano Saryu)", style = androidx.compose.ui.text.TextStyle(color = colors.activePalette.primary, fontSize = 10.sp, fontFamily = FontFamily.Monospace))
                         Spacer(Modifier.height(4.dp))
-                        HorizonButton(text = "GitHub Repository", onClick = { statusMessage = "Opens GitHub repo" })
+                        HorizonButton(
+                            text = "GitHub Repository",
+                            onClick = {
+                                try {
+                                    val intent = android.content.Intent(
+                                        android.content.Intent.ACTION_VIEW,
+                                        android.net.Uri.parse("https://github.com/kaito65452/horizon-android")
+                                    ).apply {
+                                        flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    statusMessage = "Could not open browser: ${e.message}"
+                                }
+                            }
+                        )
                     }
                 }
 

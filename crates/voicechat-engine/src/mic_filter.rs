@@ -629,11 +629,34 @@ impl MicFilter {
 }
 
 #[cfg(test)]
+pub(crate) static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+#[cfg(test)]
+pub(crate) fn reset_speaker_reference_for_tests() {
+    REMOTE_RMS_BITS.store(0, Relaxed);
+    GAME_RMS_BITS.store(0, Relaxed);
+    HW_VOLUME_SCALE_BITS.store(0x3f333333, Relaxed);
+    if let Ok(mut state) = speaker_ref().lock() {
+        state.mono_ring.clear();
+        state.voice_env_history = [0.0; ENVELOPE_TAPS];
+        state.game_env_history = [0.0; ENVELOPE_TAPS];
+        state.voice_pos = 0;
+        state.game_pos = 0;
+        state.voice_hold_samples = 0;
+        state.game_hold_samples = 0;
+        state.voice_peak_rms = 0.0;
+        state.game_peak_rms = 0.0;
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn normal_arms_length_speech_triggers_mic_without_shouting() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset_speaker_reference_for_tests();
         let mut filter = MicFilter::new();
         // Simulate quiet arm's-length speech on Android VOICE_RECOGNITION (amplitude 0.015,
         // raw RMS ~0.0106 = -39.5 dBFS) at default settings (user_gain = 1.0, threshold = -45 dB).
@@ -656,6 +679,8 @@ mod tests {
 
     #[test]
     fn ducking_attenuates_bleed_when_remote_is_talking() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset_speaker_reference_for_tests();
         let mut filter = MicFilter::new();
         // Speaker bleed (RMS ~0.05, typical for phone loudspeaker at 10/15..14/15 volume)
         // while remote speaker is loud (RMS 0.08).
@@ -685,6 +710,8 @@ mod tests {
 
     #[test]
     fn delayed_echo_after_speaker_stops_is_still_suppressed() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset_speaker_reference_for_tests();
         let mut filter = MicFilter::new();
         let loud_ref: Vec<f32> = (0..FRAME)
             .map(|i| ((i as f32 * 0.1).sin()) * 0.12)
@@ -711,6 +738,8 @@ mod tests {
 
     #[test]
     fn game_music_bleed_does_not_trigger_mic_transmission() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset_speaker_reference_for_tests();
         let mut filter = MicFilter::new();
         // Simulate game audio playing through `horizon_client_render::audio` at stereo 44.1 kHz.
         let music_stereo: Vec<f32> = (0..882 * 2)
@@ -733,9 +762,7 @@ mod tests {
         );
 
         // Reset game audio reference to silence for subsequent tests.
-        for _ in 0..ENVELOPE_TAPS {
-            push_game_audio_reference(&[0.0; 1764], 2, 44_100);
-        }
+        reset_speaker_reference_for_tests();
     }
 
     #[test]
@@ -762,6 +789,8 @@ mod tests {
 
     #[test]
     fn rnnoise_processes_normal_speech_without_clipping() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset_speaker_reference_for_tests();
         let mut filter = MicFilter::new();
         let speech_like: Vec<f32> = (0..FRAME)
             .map(|i| ((i as f32 * 0.05).sin()) * 0.25)
