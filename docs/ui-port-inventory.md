@@ -72,8 +72,8 @@ Comprehensive audit of pages, navigation state, sidebar items, top-right quick a
 | Cache Budget (MiB) | `cache_budget_mib` | `u32` | `512` | Settings / Engine & Memory |
 | **Downloads & Keep-Alive** | | | | |
 | Background Keep-Alive Service | `keepalive_enabled` | `bool` | `true` | Settings / Downloads & Keep-Alive |
-| Starling Voice Chat (SVC) | `svc_enabled` | `bool` | `true` | Settings / Downloads & Keep-Alive |
-| Voice Chat RNNoise Suppression | `svc_rnnoise` | `bool` | `true` | Settings / Downloads & Keep-Alive |
+| Complex Voice Chat (ported by Asano Saryu) | `svc_enabled` | `bool` | `true` | Settings / Downloads & Keep-Alive |
+| Complex Voice Chat RNNoise Suppression | `svc_rnnoise` | `bool` | `true` | Settings / Downloads & Keep-Alive |
 | Multi-Thread Chunk Upload | `fast_chunk_upload` | `bool` | `true` | Settings / Downloads & Keep-Alive |
 | **Controls** | | | | |
 | Control Style | `touch.control_style` | `ControlStyle` | `GoyControl` | Settings / Controls |
@@ -107,8 +107,8 @@ Comprehensive audit of pages, navigation state, sidebar items, top-right quick a
 | Open Game Directory (SAF) | N/A (Action) | `Action::GameFiles` | N/A | Settings / Storage |
 | Cache Budget (MiB) | `cache_budget_mib` | `u32` | `512` | Settings / Storage |
 | **Experimental** | | | | |
-| Starling Voice Chat (SVC) Engine | `svc_enabled` | `bool` | `true` | Settings / Experimental |
-| SVC RNNoise Noise Filter | `svc_rnnoise` | `bool` | `true` | Settings / Experimental |
+| Complex Voice Chat (ported by Asano Saryu) | `svc_enabled` | `bool` | `true` | Settings / Experimental |
+| Complex Voice Chat RNNoise Noise Filter | `svc_rnnoise` | `bool` | `true` | Settings / Experimental |
 | Zero Latency Touch Pipeline | `zero_latency_touch` | `bool` | `true` | Settings / Experimental |
 | Fast Async Chunk Upload | `fast_chunk_upload` | `bool` | `true` | Settings / Experimental |
 | Smart Hollow Leaf Culling | `experimental_leaf_culling`| `bool` | `false` | Settings / Experimental |

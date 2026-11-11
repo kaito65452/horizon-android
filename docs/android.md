@@ -41,16 +41,23 @@ Ely.by** adds an Ely.by account; **Saved accounts** switches between saved accou
 and Offline. See [appearance and account capabilities](android-appearance.md)
 for cloud restrictions and the frontend-independent game contract.
 
-## Launcher
+## Architecture & Blaze Launcher (26.3)
 
-- **Play:** install resources and launch a world or server.
-- **Mods:** import native Horizon packages using a direct HTTPS `.hmod` URL
-  on 64-bit builds. New packages are disabled until enabled in Installed.
-- **Packs:** find and install resource packs with checksum verification.
-- **Installed:** enable, disable or remove installed additions.
-- **Settings:** rendering mode, input mode, profile, server and orientation.
-  Profiles keep separate saves and settings. Offline player names are edited
-  alongside Microsoft sign-in in **Accounts**.
+Horizon Android utilizes a strict separation between a lightweight Kotlin frontend and a pure Rust backend:
+- **Frontend Launcher UI:** Lightweight **Kotlin / Jetpack Compose Foundation** located in `packaging/android/java/dev/horizon/android/ui/` matching the visual specification in `docs/BlazeLauncher.html` (16:9 landscape 960x433 proportional stage, custom glassmorphism primitives without Material 3 bloat).
+- **Backend (Engine & Services):** Pure Rust (`crates/horizon-client`, `crates/horizon-client-input`, `crates/horizon-assets`) providing the 26.3 Vulkan game engine, 8-thread segmented downloader, in-game HUD/input, and **Complex Voice Chat (ported by Asano Saryu)**.
+- **JNI Bridge:** `BlazeNativeBridge.kt` connects to `crates/horizon-client/src/android/jni_bridge.rs` for non-blocking configuration, telemetry, catalog queries, and game launching.
+- **Legacy UI:** The old immediate-mode `launcher_pages.rs` is completely deprecated and deleted.
+
+### Launcher Tabs & Capabilities
+
+- **Home:** Underwater Axolotl widescreen hero banner, 26.3 Blaze Engine profile selector, EDIT button, glowing PLAY button, and shortcut cards for Browse Resources & Manager.
+- **Downloads:** Real-time 8-thread segmented download telemetry grid (`THREAD #01` to `#08`) backed by `BlazeKeepAliveService`.
+- **Browse:** Search and install mods, resource packs, and shaders across Horizon and Modrinth.
+- **Manager:** Installed content manager with Library, File Manager, and SAF world export.
+- **Skin Studio:** Interactive 3D skin viewer with 64x64 dual-layer outer overlay toggle, Classic (4px) vs Slim (3px) arms, Walk/Idle/Crouch animations, Cape/Elytra preview, and SAF PNG import.
+- **Controls (Goy Control):** Drag-and-drop HUD control editor with 20px grid snapping, scale/opacity tuning, and camera touch passthrough.
+- **Settings:** Two-column settings panel covering Appearance (5 palettes, 4 backgrounds), Engine & Memory, Downloads & Keep-alive, Controls, Account, Storage, Experimental (**Complex Voice Chat (ported by Asano Saryu)**), and About.
 
 Java mod search and modpack import are not available on Android. Fabric, Forge,
 NeoForge and Mixin code require native ports; installing their JARs does not make
@@ -113,7 +120,7 @@ custom button deletes that binding; removing a built-in hides it. Done saves;
 Cancel/Android Back restores the previous layout. Multi-key macros are not implemented.
 
 The top row includes F3, chat, pause, Options and F5 perspective. The auxiliary
-`...` drawer retains F1–F12 and other Java keys. Multiple fingers or **Hold F3**
+`...` drawer retains F1â€“F12 and other Java keys. Multiple fingers or **Hold F3**
 allow combinations. Menus support taps, list swipes and slider/inventory dragging.
 Android Back closes the keyboard first, then the current screen.
 
@@ -169,7 +176,7 @@ launcher entry; TV support is experimental and analog gamepad axes are not conne
 
 F2 keeps the original PNG in the profile and publishes a copy to
 **Pictures/HorizonAndroid** through Android MediaStore. Android 10+ needs no
-storage permission. Android 8.1�9 asks for storage permission when first saving;
+storage permission. Android 8.1–9 asks for storage permission when first saving;
 if access is denied, the profile copy remains available. Gallery publication runs
 outside the render thread and reports success or failure in game chat.
 

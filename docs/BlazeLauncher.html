@@ -1,19 +1,11 @@
-<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Blaze Launcher: Landscape UI Reference</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Three.js for 3D Skin Preview -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-    <style>
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Blaze Launcher UI</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
+<style>
         :root {
             --accent-primary: #38bdf8;
             --accent-secondary: #0284c7;
@@ -110,51 +102,133 @@
                 linear-gradient(to bottom, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
         }
 
-        /* Strict Landscape Frame Container */
-        #landscape-device-wrapper {
-            width: 100vw;
-            height: 100vh;
-            max-width: 1920px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 8px;
-        }
+        
+/* ---- Fit-to-width stage: the launcher is a 960x540 landscape screen, scaled to the viewer ---- */
+:root{color-scheme:dark}
+body{background-color:#05070b;color:#f1f5f9;margin:0;padding-block:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  overflow-x:hidden;display:block}
+#landscape-device-wrapper{position:relative;margin:0 auto;width:960px;height:540px}
+#landscape-screen{position:absolute;left:0;top:0;width:960px;height:540px;transform-origin:0 0;
+  border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background-color:#080b11;
+  box-shadow:0 25px 70px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.1)}
+.rotate-hint{display:none;text-align:center;font-size:12px;color:#94a3b8;padding:10px 0 0}
+@media (max-width:700px) and (orientation:portrait){.rotate-hint{display:block}}
+input,textarea,select{user-select:text;-webkit-user-select:text}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--accent-primary);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
-        #landscape-screen {
-            width: 100%;
-            height: 100%;
-            max-height: 56.25vw; /* 16:9 ratio cap */
-            min-width: 780px;
-            position: relative;
-            border-radius: 22px;
-            overflow: hidden;
-            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.1);
-            display: flex;
-            flex-direction: column;
-            background-color: #080b11;
-        }
+/* ---- shared small controls ---- */
+.chip-btn{padding:4px 12px;border-radius:999px;font-size:11px;font-weight:600;color:#94a3b8;transition:.15s;white-space:nowrap}
+.chip-btn:hover{color:#fff}
+.chip-btn.on{background:rgba(255,255,255,.15);color:#fff}
+.sw{position:relative;width:34px;height:20px;flex:none;display:inline-block}
+.sw input{opacity:0;position:absolute;inset:0;width:100%;height:100%;margin:0;cursor:pointer}
+.sw span{position:absolute;inset:0;border-radius:999px;background:rgba(255,255,255,.14);transition:.18s}
+.sw span::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:.18s}
+.sw input:checked+span{background:var(--accent-primary)}
+.sw input:checked+span::after{transform:translateX(14px)}
+.sw input:focus-visible+span{outline:2px solid var(--accent-primary);outline-offset:2px}
+.sel{background:rgba(14,19,28,.9);border:1px solid rgba(255,255,255,.12);color:#e2e8f0;border-radius:10px;font-size:11px;padding:4px 8px}
+.rng{width:130px;accent-color:var(--accent-primary)}
+.row-item{display:flex;align-items:center;gap:12px;padding:8px 12px;border-radius:16px;
+  background:rgba(14,19,28,var(--card-opacity));border:1px solid rgba(255,255,255,.09)}
+.tag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.04em;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.1);color:#cbd5e1}
+.tag.warn{background:rgba(245,158,11,.18);color:#fcd34d}
+.btn-acc{background:var(--accent-primary);color:#020617;font-weight:700;font-size:11px;padding:6px 14px;border-radius:12px;white-space:nowrap}
+.btn-acc[disabled]{background:rgba(255,255,255,.08);color:#64748b;cursor:not-allowed}
 
-        /* Allow horizontal scroll on narrow mobile portrait browsers while keeping strict landscape UI inside */
-        @media (max-width: 800px) {
-            body {
-                overflow-x: auto;
-                justify-content: flex-start;
-            }
-            #landscape-device-wrapper {
-                width: 860px;
-                height: 484px;
-                flex-shrink: 0;
-            }
-            #landscape-screen {
-                max-height: 484px;
-            }
-        }
-    </style>
-</head>
-<body>
-
-    <div id="landscape-device-wrapper">
+/* ================= MASTERIX-REFERENCE LAYOUT (px at 960x433 stage) ================= */
+#landscape-device-wrapper{height:433px}
+#landscape-screen{height:433px}
+.mx-head{position:absolute;left:12px;right:12px;top:12px;height:40px;z-index:20;display:flex;align-items:center;justify-content:space-between}
+.mx-brand{display:flex;align-items:center;gap:9px;width:150px}
+.mx-logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#38bdf8,#1d4ed8);padding:2px;flex:none}
+.mx-logo span{display:block;width:100%;height:100%;border-radius:6px;background:#0a0e17 radial-gradient(circle at 50% 50%,var(--accent-primary) 0 22%,transparent 24%)}
+.mx-brand-t{display:flex;flex-direction:column;line-height:1.15}
+.mx-brand-t b{font-size:12px;color:#fff;font-weight:800;letter-spacing:.02em}
+.mx-brand-t small{font-size:7px;letter-spacing:.16em;color:#94a3b8;font-family:'JetBrains Mono',monospace}
+.mx-nav{display:flex;align-items:center;gap:2px;height:37px;padding:0 4px;border-radius:12px;background:rgba(14,19,28,.72);border:1px solid rgba(255,255,255,.09)}
+.mx-nav-btn{position:relative;width:44px;height:29px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#94a3b8;border:1px solid transparent;transition:.15s}
+.mx-nav-btn svg{width:16px;height:16px}
+.mx-nav-btn:hover{color:#fff}
+.mx-nav-btn.on{color:#fff;background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.32)}
+.mx-nav-btn.on svg{color:var(--accent-primary)}
+.mx-badge{position:absolute;top:1px;right:5px;min-width:13px;height:13px;border-radius:7px;background:var(--accent-primary);color:#020617;font-size:8px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 3px}
+.mx-right{display:flex;align-items:center;gap:8px;justify-content:flex-end;min-width:150px}
+.mx-round,.mx-sq,.mx-acct{background:rgba(14,19,28,.72);border:1px solid rgba(255,255,255,.1);color:#cbd5e1;transition:.15s}
+.mx-round:hover,.mx-sq:hover,.mx-acct:hover{background:rgba(255,255,255,.12);color:#fff}
+.mx-round{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+.mx-round svg,.mx-sq svg{width:15px;height:15px}
+.mx-sq{width:35px;height:35px;border-radius:10px;display:flex;align-items:center;justify-content:center}
+.mx-sq.on{color:var(--accent-primary);border-color:rgba(255,255,255,.32)}
+.mx-ka em{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 0 2px #0b1118}
+.mx-acct{height:34px;border-radius:17px;padding:0 10px 0 5px;display:flex;align-items:center;gap:8px;font-size:11px;font-weight:600;color:#e2e8f0;width:130px}
+.mx-acct svg{width:12px;height:12px;margin-left:auto;color:#94a3b8}
+.mx-av{width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#38bdf8,#4f46e5);flex:none}
+.mx-work{position:absolute;left:12px;right:12px;top:60px;bottom:10px;display:flex;flex-direction:column;overflow:hidden;z-index:10}
+.mx-work>.tab-panel:not(.mx-home){overflow-y:auto!important}
+.mx-home{flex:1;display:flex;flex-direction:column;gap:9px;padding-top:11px;min-height:0}
+.mx-home.hidden{display:none!important}
+.mx-hero{position:relative;height:169px;flex:none;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.1);box-shadow:0 10px 28px rgba(0,0,0,.45)}
+.mx-hero-svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.mx-hero-shade{position:absolute;inset:0;background:linear-gradient(0deg,rgba(2,8,16,.72) 0%,rgba(2,8,16,0) 45%),linear-gradient(90deg,rgba(2,8,16,.55) 0%,rgba(2,8,16,0) 38%)}
+.mx-hero-title{position:absolute;left:18px;bottom:14px;display:flex;flex-direction:column;gap:5px}
+.mx-hero-title b{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:800;font-size:27px;line-height:1;letter-spacing:.06em;color:#fff;text-shadow:0 2px 0 rgba(0,0,0,.55)}
+.mx-hero-title small{font-size:7.5px;letter-spacing:.3em;color:#cbd5e1;font-weight:600}
+.mx-chip{position:absolute;display:flex;align-items:center;gap:6px;height:29px;border-radius:9px;background:rgba(6,12,20,.66);border:1px solid rgba(255,255,255,.16);color:#f1f5f9;font-size:10px;font-weight:700;padding:0 10px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.mx-chip svg{width:12px;height:12px;flex:none}
+.mx-engine{right:4px;top:11px;width:203px;justify-content:flex-start}
+.mx-engine span{flex:1;text-align:left}
+.mx-feats{right:4px;bottom:11px;height:24px;gap:9px;font-size:8px;letter-spacing:.06em}
+.mx-feats span{display:flex;align-items:center;gap:4px}
+.mx-feats svg{width:10px;height:10px}
+.mx-feats i{width:1px;height:12px;background:rgba(255,255,255,.22)}
+.mx-row2{display:flex;gap:10px;height:72px;flex:none}
+.mx-prof,.mx-edit,.mx-card{background:rgba(14,19,28,.78);border:1px solid rgba(255,255,255,.1);border-radius:14px;color:#fff}
+.mx-prof{width:408px;display:flex;align-items:center;gap:11px;padding:0 14px 0 12px;text-align:left;flex:none}
+.mx-prof-ic{width:34px;height:34px;border-radius:8px;flex:none;background:linear-gradient(135deg,#16a34a,#14532d);box-shadow:inset 0 0 0 2px rgba(255,255,255,.15)}
+.mx-prof-t{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.mx-prof-t small{font-size:8px;letter-spacing:.1em;color:#94a3b8;font-weight:600}
+.mx-prof-t b{font-size:15px;line-height:1;font-weight:800}
+.mx-prof-t em{font-style:normal;font-size:9px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mx-circ{width:25px;height:25px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);color:#e2e8f0}
+.mx-circ svg{width:12px;height:12px}
+.mx-edit{width:107px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:11px;font-weight:700;flex:none}
+.mx-edit svg{width:13px;height:13px;color:#cbd5e1}
+.mx-edit:hover,.mx-prof:hover,.mx-card:hover{background:rgba(30,40,56,.85)}
+.mx-play{flex:1;min-width:0;border-radius:14px;display:flex;align-items:center;gap:14px;padding:0 14px 0 62px;color:#0b1a2b;text-align:left;position:relative;overflow:hidden;
+ --pb:color-mix(in srgb,var(--accent-primary) 30%,#ffffff);
+ background:linear-gradient(90deg,#ffffff 0%,var(--pb) 55%,color-mix(in srgb,var(--accent-primary) 55%,#ffffff) 100%);box-shadow:0 0 0 1px rgba(255,255,255,.5),0 8px 22px color-mix(in srgb,var(--accent-primary) 35%,transparent)}
+.mx-play::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.55;
+ background:linear-gradient(90deg,rgba(255,255,255,0) 0 12px,rgba(255,255,255,.9) 12px 24px,rgba(255,255,255,0) 24px 36px,rgba(255,255,255,.8) 36px 48px,rgba(255,255,255,0) 48px 60px),linear-gradient(0deg,rgba(255,255,255,.5) 0 12px,rgba(120,170,230,.18) 12px 24px);background-size:60px 100%,100% 24px;-webkit-mask-image:linear-gradient(90deg,#000,transparent 60%);mask-image:linear-gradient(90deg,#000,transparent 60%)}
+.mx-play:hover{filter:brightness(1.04)}
+.mx-play>*{position:relative}
+.mx-play-tri{position:absolute;left:62px;display:block;width:20px;height:20px;color:#050b14;margin-left:-62px;transform:translateX(62px) translateX(-2px)}
+.mx-play-tri svg{width:20px;height:20px;display:block}
+.mx-play-t{display:flex;flex-direction:column;gap:2px;margin-left:34px;flex:1}
+.mx-play-t b{font-size:21px;line-height:1;font-weight:800;letter-spacing:.04em;color:#0b1a2b}
+.mx-play-t small{font-size:9.5px;color:#1e3a5f;font-weight:600}
+.mx-play-chev{width:18px;height:18px;color:#0b1a2b}
+.mx-play-chev svg{width:18px;height:18px}
+.mx-row3{display:flex;gap:9px;height:92px;flex:none}
+.mx-card{flex:1;min-width:0;position:relative;overflow:hidden;display:flex;align-items:center;gap:12px;padding:0 14px;text-align:left}
+.mx-card-art{position:absolute;right:0;top:0;width:60%;height:100%;display:block}
+.mx-card-shade{position:absolute;inset:0;background:linear-gradient(90deg,rgba(14,19,28,.97) 0%,rgba(14,19,28,.9) 38%,rgba(14,19,28,.35) 75%,rgba(14,19,28,.2) 100%)}
+.mx-card>.mx-card-ic,.mx-card>.mx-card-t,.mx-card>.mx-circ{position:relative}
+.mx-card-ic{width:40px;height:40px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#e2e8f0}
+.mx-card-ic svg{width:18px;height:18px}
+.mx-card-t{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
+.mx-card-t b{font-size:12px;font-weight:800;letter-spacing:.02em}
+.mx-card-t small{font-size:9px;color:#cbd5e1;line-height:1.3}
+.mx-card>.mx-circ{margin-left:auto}
+#horizon-toast{top:60px!important}
+.mx-head button,.mx-home button{font-family:inherit;cursor:pointer;-webkit-appearance:none;appearance:none}
+.mx-nav-btn{background:transparent}
+.mx-nav-btn.on{background:rgba(255,255,255,.14)}
+.mx-prof,.mx-edit,.mx-card{font-family:inherit}
+</style>
+<div id="landscape-device-wrapper">
         <!-- STRICT 16:9 HORIZONTAL LANDSCAPE SCREEN -->
         <div id="landscape-screen">
 
@@ -187,7 +261,7 @@
                 <canvas id="global-bg-shader" class="absolute inset-0 w-full h-full hidden opacity-65"></canvas>
 
                 <!-- Wallpaper 3: Custom Uploaded / Preset High-Res Wallpaper -->
-                <div id="global-bg-custom" class="absolute inset-0 bg-cover bg-center hidden opacity-55" style="background-image: url('https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1400&q=80');"></div>
+                <div id="global-bg-custom" class="absolute inset-0 bg-cover bg-center hidden opacity-55" style="background-image: radial-gradient(120% 90% at 30% 20%, #1d4e5f 0%, #0b1620 55%, #05070b 100%);"></div>
 
                 <!-- Wallpaper 4: OLED black Carbon -->
                 <div id="global-bg-oled" class="absolute inset-0 bg-[#05070a] hidden"></div>
@@ -197,82 +271,31 @@
                 <div class="absolute -bottom-28 -right-24 w-96 h-96 rounded-full blur-[130px] opacity-20 pointer-events-none" style="background: var(--accent-secondary);"></div>
             </div>
 
-            <!-- ================= TOP HORIZONTAL BAR (EXACT MASTERIX / HORIZON LAYOUT) ================= -->
-            <header class="relative z-20 px-4 pt-2.5 pb-1.5 flex items-center justify-between gap-2 shrink-0">
-                
-                <!-- Left: Brand Identity -->
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-sky-400 to-blue-700 p-0.5 shadow-md">
-                        <div class="w-full h-full bg-[#0a0e17] rounded-[6px] flex items-center justify-center">
-                            <i data-lucide="compass" class="w-4 h-4 accent-text"></i>
-                        </div>
-                    </div>
-                    <div class="leading-tight">
-                        <div class="flex items-center gap-1.5">
-                            <span class="font-extrabold text-xs tracking-wide text-white">Blaze</span>
-                            <span class="text-[9px] font-mono px-1.5 py-0.2 rounded accent-badge font-semibold">26.3</span>
-                        </div>
-                        <div class="text-[8px] font-mono uppercase tracking-widest text-slate-400">LAUNCHER</div>
-                    </div>
+            <!-- ================= HEADER (reference: icon-only nav pill, account pill, 3 round buttons) ================= -->
+            <header class="mx-head">
+                <div class="mx-brand">
+                    <div class="mx-logo"><span></span></div>
+                    <div class="mx-brand-t"><b>Blaze</b><small>LAUNCHER</small></div>
                 </div>
-
-                <!-- Center: Masterix Icon Pill Bar -->
-                <nav class="horizon-pill rounded-full px-2 py-1 flex items-center gap-1 shadow-lg">
-                    <button onclick="switchTab('home')" id="nav-home" title="Dashboard" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-semibold bg-white/15 text-white transition">
-                        <i data-lucide="home" class="w-3.5 h-3.5 accent-text"></i>
-                        <span class="text-[11px]">Home</span>
-                    </button>
-                    <button onclick="switchTab('downloads')" id="nav-downloads" title="Downloads" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition relative">
-                        <i data-lucide="download" class="w-3.5 h-3.5"></i>
-                        <span class="text-[11px]">Downloads</span>
-                        <span class="w-1.5 h-1.5 rounded-full accent-bg animate-ping"></span>
-                    </button>
-                    <button onclick="switchTab('controls')" id="nav-controls" title="Goy Control" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition">
-                        <i data-lucide="gamepad-2" class="w-3.5 h-3.5"></i>
-                        <span class="text-[11px]">Goy Control</span>
-                    </button>
-                    <button onclick="switchTab('skin')" id="nav-skin" title="3D Skin Viewer" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition">
-                        <i data-lucide="user" class="w-3.5 h-3.5"></i>
-                        <span class="text-[11px]">3D Skin</span>
-                    </button>
-                    <button onclick="switchTab('settings')" id="nav-settings" title="Settings" class="nav-pill-btn px-3 py-1 rounded-full flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-white transition">
-                        <i data-lucide="sliders-horizontal" class="w-3.5 h-3.5"></i>
-                        <span class="text-[11px]">Settings</span>
-                    </button>
-                </nav>
-
-                <!-- Right: Notification, Profile Dropdown, Keep-Alive & Quick Icons -->
-                <div class="flex items-center gap-1.5">
-                    <!-- Keep-Alive Status Indicator -->
-                    <button onclick="simulateBackgroundKeepAlive()" title="Keep-alive: downloads and server session stay active in the background" class="horizon-pill px-2.5 py-1 rounded-full flex items-center gap-1.5 border border-emerald-500/30 hover:border-emerald-400 transition">
-                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                        <span class="text-[10px] font-mono font-semibold text-emerald-300">KEEP-ALIVE</span>
-                    </button>
-
-                    <!-- User Pill (Like Pro_Ayush in Reference) -->
-                    <div onclick="switchTab('skin')" class="horizon-pill pl-1.5 pr-2.5 py-1 rounded-full flex items-center gap-2 cursor-pointer hover:bg-white/10 transition">
-                        <div class="w-5 h-5 rounded-full bg-gradient-to-tr from-sky-400 to-indigo-600 flex items-center justify-center text-[10px] font-bold text-white">
-                            P
-                        </div>
-                        <span class="text-[11px] font-semibold text-slate-200">Player</span>
-                        <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
-                    </div>
-
+                <nav class="mx-nav" aria-label="Main navigation"><button class="mx-nav-btn nav-pill-btn on" id="nav-home" onclick="switchTab('home')" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button><button class="mx-nav-btn nav-pill-btn" id="nav-downloads" onclick="switchTab('downloads')" title="Downloads" aria-label="Downloads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><b id="dl-count" class="mx-badge">3</b></button><button class="mx-nav-btn nav-pill-btn" id="nav-manager" onclick="switchTab('manager')" title="Manager" aria-label="Manager"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></button><button class="mx-nav-btn nav-pill-btn" id="nav-browse" onclick="switchTab('browse')" title="Browse" aria-label="Browse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg></button><button class="mx-nav-btn nav-pill-btn" id="nav-skin" onclick="switchTab('skin')" title="Skin" aria-label="Skin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></button><button class="mx-nav-btn nav-pill-btn" id="nav-controls" onclick="switchTab('controls')" title="Controls" aria-label="Controls"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="7" width="20" height="11" rx="4"/><path d="M7 10v5M4.5 12.5h5M16 11h.01M18.5 14h.01"/></svg></button></nav>
+                <div class="mx-right">
+                    <button class="mx-round" onclick="notify('No new notifications')" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9a6 6 0 0 1 12 0c0 6 2 7 2 8H4c0-1 2-2 2-8M10 21h4"/></svg></button>
+                    <button class="mx-acct" onclick="switchTab('skin')" aria-label="Account"><i class="mx-av"></i><span>Player</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                    <button class="mx-round mx-ka" onclick="simulateBackgroundKeepAlive()" title="Keep-alive: downloads and server session stay active in the background" aria-label="Keep-alive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg><em></em></button>
+                    <button class="mx-round" onclick="switchTab('settings')" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/></svg></button>
+                    <button class="mx-sq nav-pill-btn" id="nav-settings" onclick="switchTab('settings')" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg></button>
                 </div>
             </header>
 
+
             <!-- ================= MAIN LANDSCAPE WORKSPACE ================= -->
-            <div class="relative z-10 flex-1 px-4 pb-3 pt-1 flex flex-col overflow-hidden">
+            <div class="mx-work">
 
                 <!-- ==================== VIEW 1: DASHBOARD (EXACT REFERENCE CLONE) ==================== -->
-                <main id="view-home" class="tab-panel flex-1 grid grid-rows-12 gap-2.5 h-full overflow-hidden">
-                    
-                    <!-- ROW 1 (6/12 height): HERO BANNER WITH MINECRAFT.NET UNDERWATER AXOLOTL SCENE -->
-                    <div class="row-span-6 relative rounded-2xl overflow-hidden border border-white/10 shadow-xl group">
-                        
-                        <!-- Hero Default Artwork (Minecraft Aquatic Update Style with Axolotls & Diver) -->
-                        <div id="hero-banner-art" class="absolute inset-0">
-                            <svg class="w-full h-full object-cover" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
+                <main id="view-home" class="tab-panel mx-home">
+                    <!-- HERO: x12 y71 w936 h169 -->
+                    <div class="mx-hero" id="hero-banner-art">
+                        <svg class="mx-hero-svg" viewBox="0 0 1200 360" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice">
                                 <defs>
                                     <linearGradient id="heroSea" x1="0" y1="0" x2="1200" y2="360" gradientUnits="userSpaceOnUse">
                                         <stop offset="0%" stop-color="#06192d"/>
@@ -344,130 +367,104 @@
                                     <rect x="890" y="250" width="32" height="80" rx="4" fill="#10b981"/>
                                 </g>
                             </svg>
-                        </div>
-
-                        <!-- Gradient Vignette Overlay -->
-                        <div class="absolute inset-0 bg-gradient-to-t from-[#070a10] via-[#070a10]/25 to-transparent"></div>
-                        <div class="absolute inset-0 bg-gradient-to-r from-[#070a10]/75 via-transparent to-[#070a10]/45"></div>
-
-                        <!-- Top Right Pill: 26.3 • Blaze Engine -->
-                        <div class="absolute top-3 right-3.5 flex items-center gap-2 z-10">
-                            <button onclick="switchTab('settings')" class="horizon-pill px-3 py-1 rounded-full flex items-center gap-1.5 text-[11px] font-semibold text-white hover:border-white/30 transition shadow-md">
-                                <i data-lucide="compass" class="w-3.5 h-3.5 accent-text"></i>
-                                <span>26.3 • Blaze Engine</span>
-                                <i data-lucide="chevron-down" class="w-3 h-3 text-slate-400"></i>
-                            </button>
-                        </div>
-
-                        <!-- Bottom Left: MINECRAFT PLAY WITHOUT LIMITS -->
-                        <div class="absolute bottom-3.5 left-5 z-10">
-                            <h2 class="text-2xl sm:text-3xl font-black tracking-tight text-white drop-shadow-md leading-none">
-                                MINECRAFT
-                            </h2>
-                            <p class="text-[9px] sm:text-[10px] tracking-[0.26em] text-slate-300 font-semibold uppercase mt-1">
-                                PLAY WITHOUT LIMITS
-                            </p>
-                        </div>
-
-                        <!-- Bottom Right: FAST • STABLE • CUSTOMIZABLE Pills -->
-                        <div class="absolute bottom-3 right-3.5 z-10 flex items-center gap-1.5">
-                            <span class="horizon-pill px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase text-slate-200 flex items-center gap-1">
-                                <i data-lucide="zap" class="w-3 h-3 accent-text"></i> FAST
-                            </span>
-                            <span class="horizon-pill px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase text-slate-200 flex items-center gap-1">
-                                <i data-lucide="shield-check" class="w-3 h-3 text-emerald-400"></i> STABLE
-                            </span>
-                            <span onclick="switchTab('settings')" class="cursor-pointer horizon-pill px-2.5 py-1 rounded-full text-[9px] font-bold tracking-wider uppercase text-slate-200 flex items-center gap-1 hover:border-white/30">
-                                <i data-lucide="palette" class="w-3 h-3 text-amber-400"></i> CUSTOMIZABLE
-                            </span>
-                        </div>
+                        <span class="mx-hero-shade"></span>
+                        <div class="mx-hero-title"><b>BLAZE</b><small>PLAY WITHOUT LIMITS</small></div>
+                        <button class="mx-chip mx-engine" onclick="notify('Engine: 26.3')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9zM4 7.5 12 12l8-4.5M12 12v9"/></svg><span>26.3 • Blaze Engine</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+                        <div class="mx-chip mx-feats"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>FAST</span><i></i><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg>STABLE</span><i></i><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>CUSTOMIZABLE</span></div>
                     </div>
-
-                    <!-- ROW 2 (3/12 height): SELECTED PROFILE (RUST) + EDIT + PLAY BUTTON -->
-                    <div class="row-span-3 grid grid-cols-12 gap-2.5 items-stretch">
-                        
-                        <!-- Left: Selected Profile Card (5 cols) -->
-                        <div class="col-span-5 horizon-glass rounded-2xl px-3.5 py-2 flex items-center justify-between hover:border-white/20 transition">
-                            <div class="flex items-center gap-3 min-w-0">
-                                <!-- Creeper Icon Box -->
-                                <div class="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
-                                    <svg class="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M4 4h16v16H4V4zm2 4v4h4V8H6zm8 0v4h4V8h-4zm-4 4v2H8v4h2v-2h4v2h2v-4h-2v-2h-4z"/>
-                                    </svg>
-                                </div>
-                                <div class="truncate">
-                                    <div class="text-[9px] font-mono uppercase tracking-wider text-slate-400">SELECTED PROFILE</div>
-                                    <div class="text-sm font-bold text-white leading-tight">Rust</div>
-                                    <div class="text-[10px] text-slate-400 truncate">26.3 • Blaze Engine • Last played 1 hour ago</div>
-                                </div>
-                            </div>
-                            <button onclick="switchTab('settings')" class="w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-slate-300 shrink-0">
-                                <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
-                            </button>
-                        </div>
-
-                        <!-- Center: EDIT Button (2 cols) -->
-                        <button onclick="switchTab('skin')" class="col-span-2 horizon-glass rounded-2xl px-3 py-2 flex items-center justify-center gap-1.5 text-xs font-bold text-slate-200 hover:text-white hover:border-white/25 transition">
-                            <i data-lucide="pencil" class="w-3.5 h-3.5 accent-text"></i>
-                            <span>EDIT</span>
+                    <!-- ROW 2: profile 408 | edit 107 | play 394, h72 -->
+                    <div class="mx-row2">
+                        <button class="mx-prof" onclick="notify('Switch profile')" aria-label="Selected profile">
+                            <span class="mx-prof-ic"></span>
+                            <span class="mx-prof-t"><small>SELECTED PROFILE</small><b>Rust</b><em>26.3 • Blaze Engine • Last played 1 hour ago</em></span>
+                            <span class="mx-circ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
                         </button>
-
-                        <!-- Right: Prominent PLAY Button (5 cols) -->
-                        <button onclick="launchGame()" class="col-span-5 play-btn-masterix rounded-2xl px-4 py-2 flex items-center justify-between relative overflow-hidden">
-                            <div class="absolute inset-0 pixel-overlay pointer-events-none"></div>
-                            <div class="w-8 h-8 rounded-xl bg-slate-950/10 flex items-center justify-center relative z-10">
-                                <i data-lucide="play" class="w-4 h-4 text-slate-950 fill-slate-950 ml-0.5"></i>
-                            </div>
-                            <div class="text-center relative z-10">
-                                <div class="text-lg font-black tracking-wider text-slate-950 leading-none">PLAY</div>
-                                <div class="text-[10px] font-bold text-slate-800 mt-0.5">26.3 • Blaze Engine</div>
-                            </div>
-                            <div class="w-7 h-7 rounded-full bg-slate-950/10 flex items-center justify-center relative z-10">
-                                <i data-lucide="chevron-down" class="w-4 h-4 text-slate-950"></i>
-                            </div>
+                        <button class="mx-edit" onclick="notify('Edit profile')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg><span>EDIT</span></button>
+                        <button class="mx-play" onclick="launchGame()" aria-label="Play">
+                            <span class="mx-play-tri"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5v17l14-8.5z" fill="currentColor"/></svg></span>
+                            <span class="mx-play-t"><b>PLAY</b><small>26.3 • Blaze Engine</small></span>
+                            <span class="mx-play-chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
                         </button>
                     </div>
-
-                    <!-- ROW 3 (3/12 height): TWO BOTTOM RESOURCE & MANAGER CARDS -->
-                    <div class="row-span-3 grid grid-cols-12 gap-2.5 items-stretch">
-                        
-                        <!-- Bottom Left: BROWSER RESOURCES (6 cols) -->
-                        <div onclick="switchTab('downloads')" class="col-span-6 horizon-glass rounded-2xl px-4 py-2 relative overflow-hidden group cursor-pointer hover:border-white/25 transition flex items-center justify-between">
-                            <!-- Illustrated Right Background Accent -->
-                            <div class="absolute right-0 top-0 bottom-0 w-2/5 bg-gradient-to-l from-sky-500/20 via-indigo-500/10 to-transparent pointer-events-none"></div>
-                            <div class="flex items-center gap-3 relative z-10">
-                                <div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-200 group-hover:scale-105 transition">
-                                    <i data-lucide="download" class="w-4 h-4 accent-text"></i>
-                                </div>
-                                <div>
-                                    <div class="text-xs font-extrabold text-white tracking-wide uppercase">BROWSER RESOURCES</div>
-                                    <div class="text-[10px] text-slate-400">Mods • Resource Packs • Shader Packs</div>
-                                </div>
-                            </div>
-                            <div class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white group-hover:translate-x-0.5 transition relative z-10">
-                                <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
-                            </div>
-                        </div>
-
-                        <!-- Bottom Right: MANAGER (6 cols) -->
-                        <div onclick="switchTab('controls')" class="col-span-6 horizon-glass rounded-2xl px-4 py-2 relative overflow-hidden group cursor-pointer hover:border-white/25 transition flex items-center justify-between">
-                            <div class="absolute right-0 top-0 bottom-0 w-2/5 bg-gradient-to-l from-amber-500/20 via-emerald-500/10 to-transparent pointer-events-none"></div>
-                            <div class="flex items-center gap-3 relative z-10">
-                                <div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-200 group-hover:scale-105 transition">
-                                    <i data-lucide="layers" class="w-4 h-4 text-amber-400"></i>
-                                </div>
-                                <div>
-                                    <div class="text-xs font-extrabold text-white tracking-wide uppercase">MANAGER</div>
-                                    <div class="text-[10px] text-slate-400">Installed mods, packs, and worlds</div>
-                                </div>
-                            </div>
-                            <div class="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white group-hover:translate-x-0.5 transition relative z-10">
-                                <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
-                            </div>
-                        </div>
-
+                    <!-- ROW 3: two cards, h92 -->
+                    <div class="mx-row3">
+                        <button class="mx-card" onclick="switchTab('browse')" aria-label="BROWSE RESOURCES">
+                        <svg class="mx-card-art" viewBox="0 0 160 92" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+<rect width="160" height="92" fill="#2b1d12"/><rect x="0" y="0" width="160" height="26" fill="#3a2716"/>
+<g opacity=".9"><rect x="14" y="30" width="26" height="30" fill="#7a4a24"/><rect x="50" y="24" width="30" height="40" fill="#5b3a1d"/>
+<rect x="96" y="28" width="26" height="30" fill="#7a4a24"/><rect x="130" y="22" width="30" height="40" fill="#5b3a1d"/></g>
+<g><rect x="58" y="34" width="28" height="28" fill="#e0b48a"/><rect x="58" y="34" width="28" height="9" fill="#3b2412"/><rect x="62" y="62" width="22" height="30" fill="#38bdf8"/>
+<rect x="104" y="30" width="28" height="28" fill="#e0b48a"/><rect x="104" y="30" width="28" height="9" fill="#2a1a0e"/><rect x="104" y="58" width="28" height="34" fill="#dc2626"/></g></svg><span class="mx-card-shade"></span>
+                        <span class="mx-card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span>
+                        <span class="mx-card-t"><b>BROWSE RESOURCES</b><small>Mods • Resource Packs • Shader Packs</small></span>
+                        <span class="mx-circ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span>
+                    </button>
+                        <button class="mx-card" onclick="switchTab('manager')" aria-label="MANAGER">
+                        <svg class="mx-card-art" viewBox="0 0 160 92" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+<rect width="160" height="92" fill="#2b1d12"/><rect x="0" y="0" width="160" height="26" fill="#3a2716"/>
+<g opacity=".9"><rect x="14" y="30" width="26" height="30" fill="#7a4a24"/><rect x="50" y="24" width="30" height="40" fill="#5b3a1d"/>
+<rect x="96" y="28" width="26" height="30" fill="#7a4a24"/><rect x="130" y="22" width="30" height="40" fill="#5b3a1d"/></g>
+<g><rect x="58" y="34" width="28" height="28" fill="#e0b48a"/><rect x="58" y="34" width="28" height="9" fill="#3b2412"/><rect x="62" y="62" width="22" height="30" fill="#38bdf8"/>
+<rect x="104" y="30" width="28" height="28" fill="#e0b48a"/><rect x="104" y="30" width="28" height="9" fill="#2a1a0e"/><rect x="104" y="58" width="28" height="34" fill="#dc2626"/></g></svg><span class="mx-card-shade"></span>
+                        <span class="mx-card-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></span>
+                        <span class="mx-card-t"><b>MANAGER</b><small>Manage Installed Mods, Packs and Worlds</small></span>
+                        <span class="mx-circ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></span>
+                    </button>
                     </div>
                 </main>
+
+                                <!-- ==================== BROWSE ==================== -->
+                <section id="view-browse" class="tab-panel hidden flex-1 flex flex-col gap-2.5 h-full overflow-hidden">
+                    <div class="flex items-center gap-2">
+                        <div class="horizon-pill rounded-full p-1 flex items-center gap-1" role="group" aria-label="Content type">
+                            <button class="chip-btn on" data-bt="mods" onclick="setBrowse('type','mods')">Mods</button>
+                            <button class="chip-btn" data-bt="packs" onclick="setBrowse('type','packs')">Resource Packs</button>
+                            <button class="chip-btn" data-bt="shaders" onclick="setBrowse('type','shaders')">Shaders</button>
+                        </div>
+                        <div class="flex-1"></div>
+                        <span class="text-[9px] font-mono uppercase text-slate-500 mr-1">Sample data</span>
+                        <div class="horizon-pill rounded-full p-1 flex items-center gap-1" role="group" aria-label="Source">
+                            <button class="chip-btn on" data-bs="horizon" onclick="setBrowse('src','horizon')">Horizon</button>
+                            <button class="chip-btn" data-bs="modrinth" onclick="setBrowse('src','modrinth')">Modrinth</button>
+                        </div>
+                    </div>
+                    <div class="horizon-glass rounded-xl px-3 py-2 flex items-center gap-2">
+                        <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400"></i>
+                        <input id="br-q" oninput="renderBrowse()" aria-label="Search" placeholder="Search, or paste a .hnmod HTTPS link" class="bg-transparent outline-none text-xs flex-1 text-slate-100 placeholder-slate-500">
+                        <span class="tag">26.3</span>
+                    </div>
+                    <div id="br-list" class="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0"></div>
+                </section>
+
+                <!-- ==================== MANAGER ==================== -->
+                <section id="view-manager" class="tab-panel hidden flex-1 flex flex-col gap-2.5 h-full overflow-hidden">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-sm font-bold text-white mr-2">Installed</h2>
+                        <div class="horizon-pill rounded-full p-1 flex items-center gap-1" role="group" aria-label="Manager view">
+                            <button class="chip-btn on" data-mv="lib" onclick="setMgr('view','lib')">Library</button>
+                            <button class="chip-btn" data-mv="files" onclick="setMgr('view','files')">File Manager</button>
+                        </div>
+                        <div class="flex-1"></div>
+                        <button class="horizon-pill chip-btn" onclick="cycleSort()" id="mg-sort">Sort: Name</button>
+                        <button class="btn-acc" onclick="notify('Choose a file to import (system picker)')">+ Import</button>
+                    </div>
+                    <div id="mg-lib" class="flex-1 flex flex-col gap-2.5 min-h-0">
+                        <div class="horizon-glass rounded-xl px-3 py-2 flex items-center gap-2">
+                            <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400"></i>
+                            <input id="mg-q" oninput="renderManager()" aria-label="Search installed" placeholder="Search installed mods, packs and shaders" class="bg-transparent outline-none text-xs flex-1 text-slate-100 placeholder-slate-500">
+                        </div>
+                        <div class="grid grid-cols-4 gap-2" id="mg-tabs"></div>
+                        <div id="mg-list" class="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0"></div>
+                    </div>
+                    <div id="mg-files" class="hidden flex-1 grid grid-cols-2 gap-2 content-start min-h-0 overflow-y-auto"></div>
+                    <div class="flex items-center gap-2">
+                        <button class="horizon-pill chip-btn" onclick="notify('Choose a .hnmod or .jar file')">Import mod</button>
+                        <button class="horizon-pill chip-btn" onclick="notify('Choose a .zip resource pack or shader')">Import pack</button>
+                        <button class="horizon-pill chip-btn" onclick="notify('Choose a folder to export worlds to')">Export worlds (SAF)</button>
+                        <div class="flex-1"></div>
+                        <button class="horizon-pill chip-btn" onclick="notify('Opening the game folder in system Files')">Open folder</button>
+                    </div>
+                </section>
 
                 <!-- ==================== VIEW 2: MULTI-THREADING DOWNLOAD & 560MB ASSET STREAMER ==================== -->
                 <section id="view-downloads" class="tab-panel hidden flex-1 grid grid-cols-12 gap-3 h-full overflow-hidden">
@@ -675,6 +672,12 @@
                                 <i data-lucide="shield-alert" class="w-4 h-4"></i>
                                 <span>Downloads & Keep-alive</span>
                             </button>
+<button onclick="switchSettingsSub('controls')" id="set-tab-controls" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition"><i data-lucide="gamepad-2" class="w-4 h-4"></i><span>Controls</span></button>
+<button onclick="switchSettingsSub('account')" id="set-tab-account" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition"><i data-lucide="user" class="w-4 h-4"></i><span>Account</span></button>
+<button onclick="switchSettingsSub('storage')" id="set-tab-storage" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition"><i data-lucide="hard-drive" class="w-4 h-4"></i><span>Storage</span></button>
+<button onclick="switchSettingsSub('experimental')" id="set-tab-experimental" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition"><i data-lucide="flask-conical" class="w-4 h-4"></i><span>Experimental</span></button>
+<button onclick="switchSettingsSub('about')" id="set-tab-about" class="set-nav-btn w-full px-3 py-2 rounded-xl text-left text-xs font-medium text-slate-400 hover:text-white flex items-center gap-2.5 transition"><i data-lucide="info" class="w-4 h-4"></i><span>About</span></button>
+
 
                         </div>
 
@@ -808,7 +811,12 @@
                             </div>
                         </div>
 
-                    </div>
+                    <div id="set-panel-controls" class="set-subpanel hidden space-y-0.5"><div class="border-b border-white/10 pb-2 mb-1"><span class="text-[9px] font-mono uppercase accent-text font-bold">INPUT</span><h3 class="text-sm font-bold text-white">Controls</h3></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Touch sensitivity</div></div><input type="range" min="0" max="100" value="60" class="rng" aria-label="value"></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Gyro sensitivity</div></div><input type="range" min="0" max="100" value="40" class="rng" aria-label="value"></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Joystick deadzone</div></div><input type="range" min="0" max="100" value="15" class="rng" aria-label="value"></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Haptic feedback</div></div><label class="sw"><input type="checkbox" checked aria-label="toggle"><span></span></label></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Button size and opacity</div><div class="text-[10px] text-slate-400">Applies to every layout</div></div><button onclick="switchTab('controls')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Open editor</button></div></div>
+<div id="set-panel-account" class="set-subpanel hidden space-y-0.5"><div class="border-b border-white/10 pb-2 mb-1"><span class="text-[9px] font-mono uppercase accent-text font-bold">ACCOUNT</span><h3 class="text-sm font-bold text-white">Accounts</h3></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Microsoft account</div><div class="text-[10px] text-slate-400">Signed in as Player</div></div><button onclick="" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Switch</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Skin and cape</div></div><button onclick="switchTab('skin')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Open Skin</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Offline account</div><div class="text-[10px] text-slate-400">Play without signing in</div></div><label class="sw"><input type="checkbox" aria-label="toggle"><span></span></label></div></div>
+<div id="set-panel-storage" class="set-subpanel hidden space-y-0.5"><div class="border-b border-white/10 pb-2 mb-1"><span class="text-[9px] font-mono uppercase accent-text font-bold">STORAGE</span><h3 class="text-sm font-bold text-white">Files and backups</h3></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Game folder</div><div class="text-[10px] text-slate-400">Access granted through the system picker</div></div><button onclick="notify('Choose the game folder')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Choose folder</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Export settings</div></div><button onclick="notify('Settings exported')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Export JSON</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Import settings</div></div><button onclick="notify('Choose a settings file')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Import JSON</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Export worlds</div></div><button onclick="notify('Choose a folder to export worlds to')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Export (SAF)</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Chunk cache budget</div></div><select class="sel" aria-label="option"><option>Default (80 MiB)</option><option>256 MiB</option><option>512 MiB</option></select></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Clear cache</div></div><button onclick="notify('Cache cleared')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Clear</button></div></div>
+<div id="set-panel-experimental" class="set-subpanel hidden space-y-0.5"><div class="border-b border-white/10 pb-2 mb-1"><span class="text-[9px] font-mono uppercase accent-text font-bold">EXPERIMENTAL</span><h3 class="text-sm font-bold text-white">Experimental features</h3></div><div class="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 mb-1">These can affect stability. Turn off anything that causes problems.</div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Complex Voice Chat (ported by Asano Saryu)</div><div class="text-[10px] text-slate-400">Native 3D proximity UDP voice chat with RNNoise & AGC (ported by Asano Saryu)</div></div><label class="sw"><input type="checkbox" aria-label="toggle"><span></span></label></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">RNNoise input filter</div><div class="text-[10px] text-slate-400">Noise suppression on the microphone</div></div><label class="sw"><input type="checkbox" aria-label="toggle"><span></span></label></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">ADPF performance hints</div><div class="text-[10px] text-slate-400">CPU hints on supported devices</div></div><label class="sw"><input type="checkbox" checked aria-label="toggle"><span></span></label></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Detailed GPU profiling</div><div class="text-[10px] text-slate-400">Adds overhead, reports stay on device</div></div><label class="sw"><input type="checkbox" aria-label="toggle"><span></span></label></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Reset experimental</div></div><button onclick="notify('Experimental settings reset')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Reset</button></div></div>
+<div id="set-panel-about" class="set-subpanel hidden space-y-0.5"><div class="border-b border-white/10 pb-2 mb-1"><span class="text-[9px] font-mono uppercase accent-text font-bold">ABOUT</span><h3 class="text-sm font-bold text-white">About and diagnostics</h3></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Blaze Launcher</div><div class="text-[10px] text-slate-400">26.3</div></div><button onclick="notify('You are up to date')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Check for updates</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Device ABI</div><div class="text-[10px] text-slate-400">arm64-v8a</div></div></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Logs</div></div><button onclick="notify('Logs exported')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">Export logs</button></div><div class="flex items-center justify-between gap-3 py-2 border-b border-white/5"><div class="min-w-0"><div class="text-xs font-semibold text-white">Source code</div></div><button onclick="notify('Opens GitHub in your browser')" class="horizon-pill px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 hover:bg-white/10 transition whitespace-nowrap">GitHub</button></div></div>
+</div>
                 </section>
 
             </div>
@@ -821,8 +829,8 @@
 
         </div>
     </div>
-
-    <script>
+    <p class="rotate-hint">Landscape launcher. Rotate your phone for a larger view.</p>
+<script>
         lucide.createIcons();
 
         // ================= TAB NAVIGATION =================
@@ -830,15 +838,9 @@
             document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
             document.getElementById('view-' + tab).classList.remove('hidden');
 
-            document.querySelectorAll('.nav-pill-btn').forEach(b => {
-                b.classList.remove('bg-white/15', 'text-white', 'font-semibold');
-                b.classList.add('text-slate-400');
-            });
+            document.querySelectorAll('.nav-pill-btn').forEach(b => b.classList.remove('on'));
             const active = document.getElementById('nav-' + tab);
-            if (active) {
-                active.classList.add('bg-white/15', 'text-white', 'font-semibold');
-                active.classList.remove('text-slate-400');
-            }
+            if (active) active.classList.add('on');
             if (tab === 'skin') setTimeout(resizeSkinViewport, 50);
         }
 
@@ -998,17 +1000,18 @@
                     selectedGoy = el;
                     document.getElementById('goy-prop-title').innerText = el.dataset.label;
                     const rect = el.getBoundingClientRect();
-                    offX = e.clientX - rect.left;
-                    offY = e.clientY - rect.top;
+                    offX = (e.clientX - rect.left) / (window.__scale || 1);
+                    offY = (e.clientY - rect.top) / (window.__scale || 1);
                 };
             });
             canvas.onpointermove = e => {
                 if (!activeGoy) return;
                 const cRect = canvas.getBoundingClientRect();
-                let x = Math.round((e.clientX - cRect.left - offX) / 10) * 10;
-                let y = Math.round((e.clientY - cRect.top - offY) / 10) * 10;
-                x = Math.max(4, Math.min(cRect.width - activeGoy.offsetWidth - 4, x));
-                y = Math.max(4, Math.min(cRect.height - activeGoy.offsetHeight - 4, y));
+                const sc = window.__scale || 1;
+                let x = Math.round(((e.clientX - cRect.left) / sc - offX) / 10) * 10;
+                let y = Math.round(((e.clientY - cRect.top) / sc - offY) / 10) * 10;
+                x = Math.max(4, Math.min(cRect.width / sc - activeGoy.offsetWidth - 4, x));
+                y = Math.max(4, Math.min(cRect.height / sc - activeGoy.offsetHeight - 4, y));
                 activeGoy.style.left = x + 'px';
                 activeGoy.style.top = y + 'px';
                 activeGoy.style.right = 'auto';
@@ -1151,10 +1154,142 @@
         }
 
         window.onload = () => {
+            fitStage(); renderBrowse(); renderManager(); renderFiles();
             initGoyControls();
             initSkinViewer();
             window.addEventListener('resize', resizeSkinViewport);
         };
-    </script>
-</body>
-</html>
+    
+
+        // ================= FIT STAGE TO VIEWPORT =================
+        function fitStage() {
+            const wrap = document.getElementById('landscape-device-wrapper');
+            const scr = document.getElementById('landscape-screen');
+            const avail = document.body.clientWidth - parseFloat(getComputedStyle(document.body).paddingLeft) - parseFloat(getComputedStyle(document.body).paddingRight);
+            const s = Math.max(0.3, Math.min(1.8, avail / 960));
+            window.__scale = s;
+            wrap.style.width = (960 * s) + 'px';
+            wrap.style.height = (433 * s) + 'px';
+            scr.style.transform = 'scale(' + s + ')';
+        }
+        window.addEventListener('resize', fitStage);
+
+        // ================= BROWSE =================
+        const BR = { type: 'mods', src: 'horizon', q: '' };
+        const CAT = [
+            { t: 'mods', s: 'horizon', n: 'Zoom', d: 'Lets you zoom in and change the zoom strength with your scroll wheel', m: 'Horizon built-in' },
+            { t: 'mods', s: 'horizon', n: 'Minimap', d: 'Shows nearby terrain, players and mobs in the corner of your screen', m: 'Horizon built-in' },
+            { t: 'mods', s: 'horizon', n: 'Recipes', d: 'Adds more recipes to Minecraft', m: 'Horizon built-in' },
+            { t: 'mods', s: 'horizon', n: 'Legacy Shader Bridge', d: 'Packaged as .hnmod', m: '.hnmod', unsupported: true },
+            { t: 'mods', s: 'modrinth', n: 'Sodium', d: 'Rendering engine optimization', m: 'Modrinth, Java mod', browseOnly: true },
+            { t: 'mods', s: 'modrinth', n: 'Lithium', d: 'Game logic optimization', m: 'Modrinth, Java mod', browseOnly: true },
+            { t: 'packs', s: 'modrinth', n: 'Faithful 32x', d: 'Double resolution vanilla textures', m: 'Modrinth, 18 MB' },
+            { t: 'packs', s: 'modrinth', n: 'Bare Bones', d: 'Simplified vanilla look', m: 'Modrinth, 2 MB' },
+            { t: 'shaders', s: 'modrinth', n: 'Complementary Reimagined', d: 'Balanced shaders for most devices', m: 'Modrinth, 2 MB' },
+            { t: 'shaders', s: 'modrinth', n: 'BSL Shaders', d: 'Realistic lighting and water', m: 'Modrinth, 3 MB' },
+        ];
+        const ICON = { mods: 'puzzle', packs: 'image', shaders: 'sun' };
+        const queued = new Set();
+        function setBrowse(k, v) {
+            BR[k] = v;
+            document.querySelectorAll('[data-bt]').forEach(b => b.classList.toggle('on', b.dataset.bt === BR.type));
+            document.querySelectorAll('[data-bs]').forEach(b => b.classList.toggle('on', b.dataset.bs === BR.src));
+            renderBrowse();
+        }
+        function renderBrowse() {
+            const q = (document.getElementById('br-q').value || '').toLowerCase();
+            const items = CAT.filter(i => i.t === BR.type && i.s === BR.src && (i.n + ' ' + i.d).toLowerCase().includes(q));
+            const box = document.getElementById('br-list');
+            if (!items.length) {
+                box.innerHTML = '<div class="row-item text-xs text-slate-400">' + (BR.src === 'horizon' && BR.type !== 'mods'
+                    ? 'The Horizon catalog lists mods only. Switch to Modrinth for packs and shaders.' : 'No results.') + '</div>';
+                return;
+            }
+            box.innerHTML = items.map(i => {
+                const tag = i.unsupported ? '<span class="tag warn">Unsupported</span>' : i.browseOnly ? '<span class="tag">Browse only</span>' : '';
+                const dis = i.unsupported || i.browseOnly;
+                const label = i.unsupported ? 'Unsupported' : i.browseOnly ? 'Browse only' : queued.has(i.n) ? 'Queued' : 'Install';
+                return '<div class="row-item"><div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center flex-none">'
+                    + '<i data-lucide="' + ICON[i.t] + '" class="w-4 h-4 accent-text"></i></div>'
+                    + '<div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="text-xs font-bold text-white">' + i.n + '</span>' + tag + '</div>'
+                    + '<div class="text-[10px] text-slate-400 truncate">' + i.d + '</div><div class="text-[10px] accent-text">' + i.m + '</div></div>'
+                    + '<button class="btn-acc" ' + (dis || queued.has(i.n) ? 'disabled' : '') + ' onclick="installItem(\'' + i.n.replace(/'/g, '') + '\')">' + label + '</button></div>';
+            }).join('');
+            lucide.createIcons();
+        }
+        function installItem(name) {
+            const it = CAT.find(i => i.n === name);
+            if (!it || queued.has(name)) return;
+            queued.add(name);
+            const c = document.getElementById('dl-count');
+            c.textContent = String(parseInt(c.textContent, 10) + 1);
+            notify('Added to Downloads: ' + name);
+            INST.push({ n: name, t: it.t, s: '...', on: true, pending: true });
+            renderBrowse(); renderManager();
+            setTimeout(() => {
+                const x = INST.find(i => i.n === name); if (x) { x.pending = false; x.s = it.m.split(', ').pop(); }
+                c.textContent = String(Math.max(0, parseInt(c.textContent, 10) - 1));
+                renderManager();
+            }, 2500);
+        }
+
+        // ================= MANAGER =================
+        const INST = [
+            { n: 'Zoom', t: 'mods', s: '1.2 MB', on: true },
+            { n: 'Minimap', t: 'mods', s: '3.4 MB', on: true },
+            { n: 'Faithful 32x', t: 'packs', s: '18 MB', on: true },
+            { n: 'Complementary Reimagined', t: 'shaders', s: '2 MB', on: false },
+        ];
+        const MG = { type: 'all', sort: 0 };
+        const SORTS = ['Name', 'Type', 'Size'];
+        const TYPE_LBL = { all: 'All', mods: 'Mods', packs: 'Resource Packs', shaders: 'Shaders' };
+        function setMgr(k, v) {
+            if (k === 'view') {
+                document.querySelectorAll('[data-mv]').forEach(b => b.classList.toggle('on', b.dataset.mv === v));
+                document.getElementById('mg-lib').classList.toggle('hidden', v !== 'lib');
+                document.getElementById('mg-files').classList.toggle('hidden', v === 'lib');
+                return;
+            }
+            MG[k] = v; renderManager();
+        }
+        function cycleSort() {
+            MG.sort = (MG.sort + 1) % SORTS.length;
+            document.getElementById('mg-sort').textContent = 'Sort: ' + SORTS[MG.sort];
+            renderManager();
+        }
+        function renderManager() {
+            const q = (document.getElementById('mg-q').value || '').toLowerCase();
+            const count = t => INST.filter(i => t === 'all' || i.t === t).length;
+            document.getElementById('mg-tabs').innerHTML = Object.keys(TYPE_LBL).map(t =>
+                '<button class="chip-btn horizon-pill py-1.5 ' + (MG.type === t ? 'on' : '') + '" onclick="setMgr(\'type\',\'' + t + '\')">' + TYPE_LBL[t] + ' (' + count(t) + ')</button>').join('');
+            let list = INST.filter(i => (MG.type === 'all' || i.t === MG.type) && i.n.toLowerCase().includes(q));
+            const num = s => parseFloat(s) || 0;
+            list = list.slice().sort((a, b) => MG.sort === 0 ? a.n.localeCompare(b.n) : MG.sort === 1 ? a.t.localeCompare(b.t) : num(b.s) - num(a.s));
+            const box = document.getElementById('mg-list');
+            if (!list.length) {
+                box.innerHTML = '<div class="row-item"><div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center"><i data-lucide="folder" class="w-4 h-4 accent-text"></i></div>'
+                    + '<div><div class="text-xs font-bold text-white">No add-ons here yet</div><div class="text-[10px] text-slate-400">Import a mod, pack or shader, or install one from Browse.</div></div></div>';
+            } else {
+                box.innerHTML = list.map(i =>
+                    '<div class="row-item"><div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center flex-none"><i data-lucide="' + ICON[i.t] + '" class="w-4 h-4 accent-text"></i></div>'
+                    + '<div class="min-w-0 flex-1"><div class="text-xs font-bold text-white">' + i.n + '</div><div class="text-[10px] text-slate-400">' + TYPE_LBL[i.t] + ' · ' + (i.pending ? 'Downloading...' : i.s) + '</div></div>'
+                    + '<label class="sw"><input type="checkbox" ' + (i.on ? 'checked' : '') + ' aria-label="Enable ' + i.n + '" onchange="toggleInst(\'' + i.n + '\',this.checked)"><span></span></label>'
+                    + '<button aria-label="Remove ' + i.n + '" class="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-slate-300" onclick="removeInst(\'' + i.n + '\')"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button></div>').join('');
+            }
+            lucide.createIcons();
+        }
+        function toggleInst(n, v) { const x = INST.find(i => i.n === n); if (x) x.on = v; }
+        function removeInst(n) {
+            const k = INST.findIndex(i => i.n === n);
+            if (k > -1) { INST.splice(k, 1); queued.delete(n); notify('Removed ' + n); renderManager(); renderBrowse(); }
+        }
+        function renderFiles() {
+            const dirs = ['mods', 'resourcepacks', 'shaderpacks', 'saves'];
+            document.getElementById('mg-files').innerHTML = dirs.map(d =>
+                '<button class="row-item text-left" onclick="notify(\'Opening ' + d + ' in system Files\')"><div class="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center"><i data-lucide="folder" class="w-4 h-4 accent-text"></i></div>'
+                + '<div class="flex-1"><div class="text-xs font-bold text-white">' + d + '/</div><div class="text-[10px] text-slate-400">Open</div></div></button>').join('');
+            lucide.createIcons();
+        }
+</script>
+
+</body></html>

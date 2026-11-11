@@ -205,7 +205,12 @@ python3 tools/parity.py dedicated_server server_entities server_player_damage
 
 ## Android fork maintenance
 
-For Android development, fetch and review `upstream/main` before release builds,
+For Android development:
+- **Architecture:** Frontend Launcher UI is Lightweight Kotlin / Jetpack Compose Foundation in `packaging/android/java/dev/horizon/android/ui/` matching the visual specification in `docs/BlazeLauncher.html`. Backend is Pure Rust (`horizon-client`) via JNI bridge (`BlazeNativeBridge.kt` <-> `jni_bridge.rs`). `crates/horizon-client/src/android/launcher_pages.rs` is permanently deleted.
+- **Voice Chat:** Voice chat subsystem is **Complex Voice Chat (ported by Asano Saryu)** with subtitle "Native 3D proximity UDP voice chat with RNNoise & AGC (ported by Asano Saryu)".
+- **Build Constraints:** CI-only compilation for full APKs and heavy Rust checks to prevent host freeze/OOM.
+
+Fetch and review `upstream/main` before release builds,
 and during longer sessions when new fixes may address the current work. Merge
 reviewed stable history into `android`; resolve Android module paths and platform
 bridges explicitly, keep upstream deployment workflows inactive, and update
