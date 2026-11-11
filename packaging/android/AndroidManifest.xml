@@ -29,7 +29,7 @@
             android:screenOrientation="sensorLandscape"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|navigation|density|screenLayout"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+            android:theme="@style/BlazeLauncherTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
