@@ -4,16 +4,16 @@ use super::{
     backend, catalog,
 };
 use jni::{
+    JNIEnv,
     objects::{JClass, JString},
     sys::{jboolean, jint, jstring},
-    JNIEnv,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Mutex,
+        atomic::{AtomicBool, Ordering},
     },
 };
 

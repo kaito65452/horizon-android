@@ -361,8 +361,8 @@ fun SkinStudioView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(colors.cardBg)
-                            .border(1.dp, colors.cardBorder, RoundedCornerShape(12.dp))
+                            .background(colors.cardHeroBg)
+                            .border(1.dp, colors.pillBorder, RoundedCornerShape(12.dp))
                             .padding(10.dp)
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
