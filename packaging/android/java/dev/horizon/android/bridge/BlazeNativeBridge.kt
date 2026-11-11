@@ -210,6 +210,13 @@ data class BlazeAccount(
     val isActive: Boolean
 )
 
+data class AssetComponent(
+    val name: String,
+    val desc: String,
+    val isReady: Boolean,
+    val status: String
+)
+
 data class DownloadThread(
     val id: Int,
     val name: String,

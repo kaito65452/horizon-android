@@ -4,16 +4,16 @@ use super::{
     backend, catalog,
 };
 use jni::{
-    JNIEnv,
     objects::{JClass, JString},
     sys::{jboolean, jint, jstring},
+    JNIEnv,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     path::PathBuf,
     sync::{
-        Mutex,
         atomic::{AtomicBool, Ordering},
+        Mutex,
     },
 };
 
@@ -25,6 +25,8 @@ static DOWNLOAD_PROGRESS: Mutex<[f32; 8]> = Mutex::new([1.0; 8]);
 static DOWNLOAD_STAGE: Mutex<String> = Mutex::new(String::new());
 static DOWNLOAD_BYTES: Mutex<(u64, u64)> = Mutex::new((0, 0));
 static DOWNLOAD_ERROR: Mutex<Option<String>> = Mutex::new(None);
+static LAST_SPEED_SAMPLE: Mutex<Option<(std::time::Instant, u64)>> = Mutex::new(None);
+static REAL_DOWNLOAD_SPEED: Mutex<f32> = Mutex::new(0.0);
 
 fn resolve_home() -> PathBuf {
     if let Ok(guard) = HOME_OVERRIDE.lock() {
@@ -173,7 +175,7 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeL
     1
 }
 
-/// Start 8-thread download.
+/// Start installation download.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeStartMultiThreadDownload(
     _env: JNIEnv<'_>,
@@ -187,7 +189,13 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeS
         *err = None;
     }
     if let Ok(mut stage) = DOWNLOAD_STAGE.lock() {
-        *stage = "Initializing 8-thread asset stream...".to_string();
+        *stage = "Connecting to Mojang servers...".to_string();
+    }
+    if let Ok(mut sample) = LAST_SPEED_SAMPLE.lock() {
+        *sample = None;
+    }
+    if let Ok(mut spd) = REAL_DOWNLOAD_SPEED.lock() {
+        *spd = 0.0;
     }
     let home = resolve_home();
     std::thread::spawn(move || {
@@ -197,6 +205,23 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeS
             }
             if let Ok(mut bytes) = DOWNLOAD_BYTES.lock() {
                 *bytes = (p.done, p.total);
+            }
+            // Track real measured download speed
+            let now = std::time::Instant::now();
+            if let Ok(mut sample_guard) = LAST_SPEED_SAMPLE.lock() {
+                if let Some((prev_time, prev_bytes)) = *sample_guard {
+                    let elapsed = now.duration_since(prev_time).as_secs_f32();
+                    if elapsed >= 0.5 {
+                        let bytes_diff = p.done.saturating_sub(prev_bytes);
+                        let speed_mib = (bytes_diff as f32 / (1024.0 * 1024.0)) / elapsed;
+                        if let Ok(mut spd) = REAL_DOWNLOAD_SPEED.lock() {
+                            *spd = speed_mib;
+                        }
+                        *sample_guard = Some((now, p.done));
+                    }
+                } else {
+                    *sample_guard = Some((now, p.done));
+                }
             }
             if let Ok(mut prog) = DOWNLOAD_PROGRESS.lock() {
                 let frac = if p.total > 0 {
@@ -223,37 +248,42 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeS
                 *stage = "Verified and ready to launch".to_string();
             }
         }
+        if let Ok(mut spd) = REAL_DOWNLOAD_SPEED.lock() {
+            *spd = 0.0;
+        }
+        if let Ok(mut sample) = LAST_SPEED_SAMPLE.lock() {
+            *sample = None;
+        }
         DOWNLOAD_ACTIVE.store(false, Ordering::SeqCst);
     });
     1
 }
 
-/// Get 8-thread download progress telemetry as JSON.
+/// Get real download progress telemetry as JSON.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeGetDownloadProgressJson(
     mut env: JNIEnv<'_>,
     _class: JClass<'_>,
 ) -> jstring {
-    let thread_names = [
-        "Game assets",
-        "Textures",
-        "Audio",
-        "Native engine library",
-        "Control atlas",
-        "Control macros",
-        "Shader cache",
-        "Biome data",
-    ];
-
-    let progress_vals = DOWNLOAD_PROGRESS.lock().map(|g| *g).unwrap_or([1.0; 8]);
     let active = DOWNLOAD_ACTIVE.load(Ordering::Relaxed);
     let home = resolve_home();
     let ready = horizon_client::official_install::ready(&home);
     let stage = DOWNLOAD_STAGE
         .lock()
         .map(|s| s.clone())
-        .unwrap_or_else(|_| "Idle".to_string());
+        .unwrap_or_else(|_| {
+            if ready {
+                "Verified and ready to launch".to_string()
+            } else {
+                "Idle".to_string()
+            }
+        });
     let (done, total) = DOWNLOAD_BYTES.lock().map(|b| *b).unwrap_or((0, 0));
+    let speed_mib_s = if active {
+        REAL_DOWNLOAD_SPEED.lock().map(|s| *s).unwrap_or(0.0)
+    } else {
+        0.0
+    };
     let error = DOWNLOAD_ERROR.lock().ok().and_then(|e| e.clone());
 
     let overall_progress = if ready {
@@ -264,41 +294,53 @@ pub extern "system" fn Java_dev_horizon_android_bridge_BlazeNativeBridge_nativeG
         0.0
     };
 
-    let items: Vec<DownloadThreadTelemetry> = thread_names
-        .iter()
-        .enumerate()
-        .map(|(i, name)| {
-            let prog = if ready { 1.0 } else { progress_vals[i] };
-            let status = if ready || prog >= 1.0 {
-                "Verified"
-            } else if active {
-                "Downloading"
-            } else {
-                "Pending"
-            };
-            DownloadThreadTelemetry {
-                id: i + 1,
-                name: (*name).to_string(),
-                progress: prog,
-                speed_mib_s: if active && prog < 1.0 {
-                    12.4 + (i as f32 * 1.5)
-                } else {
-                    0.0
-                },
-                status: status.to_string(),
-            }
-        })
-        .collect();
+    let ver_dir = home
+        .join(".local/horizon-client")
+        .join(horizon_core::VANILLA_VERSION);
+    let jars_ready = ver_dir.join("android-downloads-v2.json").is_file();
+    let res_ready = ver_dir.join("horizon-resources.json").is_file();
+    let audio_ready = ver_dir.join("audio-complete.json").is_file();
+    let engine_ready = home.join("engine-data.zip").is_file();
+
+    let components = serde_json::json!([
+        {
+            "name": "Minecraft 26.3 Runtime JARs",
+            "desc": "Official client and server engine binaries",
+            "ready": jars_ready,
+            "status": if jars_ready { "Verified" } else if active { "Downloading..." } else { "Pending" }
+        },
+        {
+            "name": "Extracted Assets & Texture Atlas",
+            "desc": "Block models, entity states, fonts and shaders",
+            "ready": res_ready,
+            "status": if res_ready { "Verified" } else if active { "Extracting..." } else { "Pending" }
+        },
+        {
+            "name": "Audio Subsystem & Sound Index",
+            "desc": "Vanilla music, sound effects, voice chat index",
+            "ready": audio_ready,
+            "status": if audio_ready { "Verified" } else if active { "Indexing..." } else { "Pending" }
+        },
+        {
+            "name": "Engine Data & Touch Atlas",
+            "desc": "Touch controls, WGSL cache, baseline configs",
+            "ready": engine_ready,
+            "status": if engine_ready { "Verified" } else if active { "Unpacking..." } else { "Pending" }
+        }
+    ]);
 
     let resp = serde_json::json!({
         "ready": ready,
         "active": active,
         "stage": stage,
         "done": done,
+        "done_bytes": done,
         "total": total,
+        "total_bytes": total,
         "progress": overall_progress,
+        "speed_mib_s": speed_mib_s,
         "error": error,
-        "threads": items,
+        "components": components,
     });
 
     let json_str = serde_json::to_string(&resp).unwrap_or_else(|_| "{}".to_string());
