@@ -16,17 +16,50 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
+data class PlayerCape(
+    val id: String,
+    val state: String,
+    val url: String,
+    val alias: String
+) {
+    val isUsing: Boolean get() = state.equals("ACTIVE", ignoreCase = true)
+}
+
+data class PlayerSkin(
+    val id: String,
+    val state: String,
+    val url: String,
+    val variant: String
+) {
+    val isUsing: Boolean get() = state.equals("ACTIVE", ignoreCase = true)
+}
+
+data class PlayerProfile(
+    val id: String,
+    val name: String,
+    val skins: List<PlayerSkin> = emptyList(),
+    val capes: List<PlayerCape> = emptyList()
+) {
+    val activeSkin: PlayerSkin? get() = skins.firstOrNull { it.isUsing } ?: skins.firstOrNull()
+    val activeCape: PlayerCape? get() = capes.firstOrNull { it.isUsing }
+}
+
 data class SkinCapeResult(
     val skin: Bitmap,
     val model: String,
     val cape: Bitmap? = null,
-    val capeName: String? = null
+    val capeName: String? = null,
+    val capes: List<PlayerCape> = emptyList(),
+    val profile: PlayerProfile? = null
 )
 
 object WardrobeService {
+    private const val MINECRAFT_SERVICES_URL = "https://api.minecraftservices.com"
+    private const val SESSIONS_SERVER_URL = "https://sessionserver.mojang.com"
+
     private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     /**
@@ -131,12 +164,99 @@ object WardrobeService {
     }
 
     /**
-     * Downloads active skin and cape from Mojang Session Server by UUID (Zalith Launcher 2 Parity).
+     * Fetches PlayerProfile directly from official Minecraft Services API using Bearer token (Zalith Launcher 2 Parity).
+     * Endpoint: GET https://api.minecraftservices.com/minecraft/profile
+     */
+    suspend fun fetchPlayerProfile(accessToken: String): PlayerProfile = withContext(Dispatchers.IO) {
+        val url = "$MINECRAFT_SERVICES_URL/minecraft/profile"
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $accessToken")
+            .header("User-Agent", "BlazeLauncher/0.7.8 (Zalith-Parity)")
+            .build()
+
+        client.newCall(req).execute().use { res ->
+            if (!res.isSuccessful) {
+                throw IOException("HTTP ${res.code}: ${res.body?.string().orEmpty()}")
+            }
+            val body = res.body?.string() ?: throw IOException("Empty profile body")
+            val json = JSONObject(body)
+            val id = json.optString("id")
+            val name = json.optString("name")
+
+            val skinList = mutableListOf<PlayerSkin>()
+            val skinsArray = json.optJSONArray("skins")
+            if (skinsArray != null) {
+                for (i in 0 until skinsArray.length()) {
+                    val s = skinsArray.getJSONObject(i)
+                    skinList.add(
+                        PlayerSkin(
+                            id = s.optString("id"),
+                            state = s.optString("state", "INACTIVE"),
+                            url = s.optString("url"),
+                            variant = s.optString("variant", "CLASSIC")
+                        )
+                    )
+                }
+            }
+
+            val capeList = mutableListOf<PlayerCape>()
+            val capesArray = json.optJSONArray("capes")
+            if (capesArray != null) {
+                for (i in 0 until capesArray.length()) {
+                    val c = capesArray.getJSONObject(i)
+                    capeList.add(
+                        PlayerCape(
+                            id = c.optString("id"),
+                            state = c.optString("state", "INACTIVE"),
+                            url = c.optString("url"),
+                            alias = c.optString("alias", "Mojang Cape")
+                        )
+                    )
+                }
+            }
+
+            NetLog.logSuccess("Minecraft Services Profile", url, 1)
+            PlayerProfile(id, name, skinList, capeList)
+        }
+    }
+
+    /**
+     * Fetches authentic Microsoft player textures (Skin + Capes list) with zero Mojang rate-limiting.
+     */
+    suspend fun fetchMicrosoftProfileWithTextures(accessToken: String): SkinCapeResult? = withContext(Dispatchers.IO) {
+        try {
+            val profile = fetchPlayerProfile(accessToken)
+            val activeSkin = profile.activeSkin ?: throw IOException("No active skin in profile")
+            val rawSkinBmp = downloadBitmap(activeSkin.url) ?: throw IOException("Failed to download active skin bitmap from ${activeSkin.url}")
+            val modernSkin = if (rawSkinBmp.width == 64 && rawSkinBmp.height == 32) convertLegacySkin(rawSkinBmp) else rawSkinBmp
+            val model = if (activeSkin.variant.equals("SLIM", ignoreCase = true) || isSlimArm(modernSkin)) "slim" else "classic"
+
+            val activeCape = profile.activeCape
+            val capeBmp = activeCape?.let { downloadBitmap(it.url) }
+
+            NetLog.logSuccess("Microsoft Full Textures", activeSkin.url, 1)
+            SkinCapeResult(
+                skin = modernSkin,
+                model = model,
+                cape = capeBmp,
+                capeName = activeCape?.alias,
+                capes = profile.capes,
+                profile = profile
+            )
+        } catch (e: Throwable) {
+            NetLog.logError("Microsoft Full Textures", "$MINECRAFT_SERVICES_URL/minecraft/profile", e)
+            null
+        }
+    }
+
+    /**
+     * Downloads active skin and cape from Mojang Session Server by UUID.
      * Endpoint: https://sessionserver.mojang.com/session/minecraft/profile/<uuid>
      */
     suspend fun fetchMojangSessionProfile(uuid: String): SkinCapeResult? = withContext(Dispatchers.IO) {
         val cleanUuid = uuid.replace("-", "").trim()
-        val url = "https://sessionserver.mojang.com/session/minecraft/profile/$cleanUuid"
+        val url = "$SESSIONS_SERVER_URL/session/minecraft/profile/$cleanUuid"
         try {
             val req = Request.Builder()
                 .url(url)
@@ -180,7 +300,10 @@ object WardrobeService {
                     skin = modernSkin,
                     model = model,
                     cape = capeBmp,
-                    capeName = if (capeBmp != null) "Mojang Active Cape" else null
+                    capeName = if (capeBmp != null) "Mojang Active Cape" else null,
+                    capes = if (capeBmp != null && !capeUrl.isNullOrEmpty()) {
+                        listOf(PlayerCape(id = "mojang_active", state = "ACTIVE", url = capeUrl, alias = "Active Cape"))
+                    } else emptyList()
                 )
             }
         } catch (e: Throwable) {
@@ -231,7 +354,10 @@ object WardrobeService {
                 skin = modernSkin,
                 model = model,
                 cape = capeBmp,
-                capeName = if (capeBmp != null) "Ely.by Cloak" else null
+                capeName = if (capeBmp != null) "Ely.by Cloak" else null,
+                capes = if (capeBmp != null) {
+                    listOf(PlayerCape(id = "elyby_cloak", state = "ACTIVE", url = capeUrl, alias = "Ely.by Cloak"))
+                } else emptyList()
             )
         } catch (e: Throwable) {
             NetLog.logError("Ely.by Textures", skinUrl, e)
@@ -240,7 +366,7 @@ object WardrobeService {
     }
 
     /**
-     * Uploads skin to authentic Microsoft Minecraft account via official API.
+     * Uploads skin to authentic Microsoft Minecraft account via official API (Zalith Launcher 2 Parity).
      * Endpoint: POST https://api.minecraftservices.com/minecraft/profile/skins
      */
     suspend fun uploadSkinToMicrosoft(
@@ -248,7 +374,7 @@ object WardrobeService {
         skinBitmap: Bitmap,
         isSlim: Boolean
     ): Result<String> = withContext(Dispatchers.IO) {
-        val url = "https://api.minecraftservices.com/minecraft/profile/skins"
+        val url = "$MINECRAFT_SERVICES_URL/minecraft/profile/skins"
         try {
             val stream = ByteArrayOutputStream()
             skinBitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
@@ -283,11 +409,56 @@ object WardrobeService {
         }
     }
 
-    private fun downloadBitmap(url: String): Bitmap? {
+    /**
+     * Sets or resets the active cape on Microsoft account (Zalith Launcher 2 Parity).
+     * Endpoint: PUT or DELETE https://api.minecraftservices.com/minecraft/profile/capes/active
+     */
+    suspend fun changeActiveCape(
+        accessToken: String,
+        capeId: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val url = "$MINECRAFT_SERVICES_URL/minecraft/profile/capes/active"
+        try {
+            val reqBuilder = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer $accessToken")
+                .header("User-Agent", "BlazeLauncher/0.7.8 (Zalith-Parity)")
+
+            if (capeId.isBlank()) {
+                reqBuilder.delete()
+            } else {
+                val jsonBody = JSONObject().put("capeId", capeId).toString()
+                val mediaType = "application/json".toMediaTypeOrNull()
+                reqBuilder.put(jsonBody.toRequestBody(mediaType))
+            }
+
+            client.newCall(reqBuilder.build()).execute().use { res ->
+                if (!res.isSuccessful) {
+                    val errBody = res.body?.string().orEmpty()
+                    throw IOException("HTTP ${res.code}: $errBody")
+                }
+                val msg = if (capeId.isBlank()) "Cape removed successfully!" else "Cape activated successfully!"
+                NetLog.logSuccess("Change Active Cape", url, 1)
+                Result.success(msg)
+            }
+        } catch (e: Throwable) {
+            NetLog.logError("Change Active Cape", url, e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Safely downloads and decodes a Bitmap from an online URL, automatically upgrading
+     * textures.minecraft.net to HTTPS.
+     */
+    fun downloadBitmap(url: String): Bitmap? {
+        val safeUrl = if (url.startsWith("http://textures.minecraft.net/")) {
+            url.replace("http://textures.minecraft.net/", "https://textures.minecraft.net/")
+        } else url
         return try {
             val req = Request.Builder()
-                .url(url)
-                .header("User-Agent", "BlazeLauncher/0.7.8")
+                .url(safeUrl)
+                .header("User-Agent", "BlazeLauncher/0.7.8 (Zalith-Parity)")
                 .build()
             client.newCall(req).execute().use { res ->
                 if (!res.isSuccessful) return null
@@ -300,76 +471,18 @@ object WardrobeService {
     }
 
     /**
-     * Downloads skin from Microsoft/Mojang profile services.
+     * Backward-compatible alias for Microsoft skin fetch.
      */
     suspend fun fetchMicrosoftSkin(accessToken: String): Pair<Bitmap, String>? = withContext(Dispatchers.IO) {
-        val endpoint = "https://api.minecraftservices.com/minecraft/profile"
-        try {
-            val req = Request.Builder()
-                .url(endpoint)
-                .addHeader("Authorization", "Bearer $accessToken")
-                .build()
-
-            client.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) throw IOException("HTTP ${res.code}")
-                val body = res.body?.string() ?: throw IOException("Empty profile")
-                val json = JSONObject(body)
-                val skins = json.optJSONArray("skins")
-                var skinUrl: String? = null
-                var variant = "CLASSIC"
-
-                if (skins != null) {
-                    for (i in 0 until skins.length()) {
-                        val s = skins.getJSONObject(i)
-                        if (s.optString("state") == "ACTIVE") {
-                            skinUrl = s.optString("url")
-                            variant = s.optString("variant", "CLASSIC")
-                            break
-                        }
-                    }
-                }
-
-                if (skinUrl.isNullOrEmpty()) throw IOException("No active skin")
-
-                val imgReq = Request.Builder().url(skinUrl).build()
-                client.newCall(imgReq).execute().use { imgRes ->
-                    val bytes = imgRes.body?.bytes() ?: throw IOException("Empty image")
-                    var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                    if (bmp.width == 64 && bmp.height == 32) {
-                        bmp = convertLegacySkin(bmp)
-                    }
-                    val model = if (variant.equals("SLIM", ignoreCase = true) || isSlimArm(bmp)) "slim" else "classic"
-                    NetLog.logSuccess("Microsoft Skin", skinUrl, 1)
-                    Pair(bmp, model)
-                }
-            }
-        } catch (e: Throwable) {
-            NetLog.logError("Microsoft Skin", endpoint, e)
-            null
-        }
+        val res = fetchMicrosoftProfileWithTextures(accessToken) ?: return@withContext null
+        Pair(res.skin, res.model)
     }
 
     /**
-     * Downloads skin from Ely.by skin system.
+     * Backward-compatible alias for Ely.by skin fetch.
      */
     suspend fun fetchElyBySkin(username: String): Pair<Bitmap, String>? = withContext(Dispatchers.IO) {
-        val url = "http://skinsystem.ely.by/textures/$username"
-        try {
-            val req = Request.Builder().url(url).build()
-            client.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) throw IOException("HTTP ${res.code}")
-                val bytes = res.body?.bytes() ?: throw IOException("Empty image")
-                var bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                if (bmp.width == 64 && bmp.height == 32) {
-                    bmp = convertLegacySkin(bmp)
-                }
-                val model = if (isSlimArm(bmp)) "slim" else "classic"
-                NetLog.logSuccess("Ely.by Skin", url, 1)
-                Pair(bmp, model)
-            }
-        } catch (e: Throwable) {
-            NetLog.logError("Ely.by Skin", url, e)
-            null
-        }
+        val res = fetchElyBySkinAndCape(username) ?: return@withContext null
+        Pair(res.skin, res.model)
     }
 }

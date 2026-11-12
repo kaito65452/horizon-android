@@ -35,6 +35,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.horizon.android.bridge.BlazeNativeBridge
+import dev.horizon.android.service.PlayerCape
+import dev.horizon.android.service.PlayerProfile
+import dev.horizon.android.service.SkinCapeResult
 import dev.horizon.android.service.WardrobeService
 import dev.horizon.android.ui.animation.pressBounce
 import dev.horizon.android.ui.components.*
@@ -69,7 +72,9 @@ fun SkinStudioView(
     var animState by remember { mutableStateOf("walk") } // walk, idle, crouch
     var armGeometry by remember { mutableStateOf("classic") } // classic (4px), slim (3px)
     var selectedPreset by remember { mutableStateOf("steve") }
-    var selectedCapePreset by remember { mutableStateOf("migrator") }
+    var selectedCapePreset by remember { mutableStateOf("none") }
+    var activeCapeId by remember { mutableStateOf("") }
+    var accountCapes by remember { mutableStateOf<List<PlayerCape>>(emptyList()) }
 
     // 64x64 Dual-Layer Toggles
     var hatLayer by remember { mutableStateOf(true) }
@@ -99,24 +104,6 @@ fun SkinStudioView(
         selectedPreset = "alex"
     }
 
-    fun loadDefaultSunny() {
-        val bmp = createSunnyTexture()
-        skinBitmap = bmp
-        armGeometry = "slim"
-        selectedPreset = "sunny"
-    }
-
-    fun setCape(preset: String) {
-        selectedCapePreset = preset
-        capeBitmap = when (preset) {
-            "migrator" -> createMigratorCape()
-            "vanilla" -> createVanillaCape()
-            "15th" -> createAnniversaryCape()
-            "cherry" -> createCherryCape()
-            else -> null
-        }
-    }
-
     // Load existing skin and account info on startup
     LaunchedEffect(Unit) {
         try {
@@ -129,26 +116,39 @@ fun SkinStudioView(
                 val bmp = BitmapFactory.decodeFile(wardrobeSkin.absolutePath)
                 if (bmp != null) {
                     skinBitmap = bmp
-                    armGeometry = if (isSlimArmGeometry(bmp)) "slim" else "classic"
+                    armGeometry = if (WardrobeService.isSlimArm(bmp)) "slim" else "classic"
                     selectedPreset = "custom"
                 } else {
                     loadDefaultSteve()
                 }
             } else {
-                loadDefaultSteve()
+                val isMicrosoft = activeType.equals("microsoft", ignoreCase = true)
+                val token = if (isMicrosoft) BlazeNativeBridge.getActiveAccessToken() else ""
+                if (isMicrosoft && token.isNotEmpty()) {
+                    val res = WardrobeService.fetchMicrosoftProfileWithTextures(token)
+                    if (res != null) {
+                        skinBitmap = res.skin
+                        armGeometry = res.model
+                        capeBitmap = res.cape
+                        accountCapes = res.capes
+                        selectedPreset = "account"
+                        selectedCapePreset = res.capeName ?: "none"
+                        activeCapeId = res.profile?.activeCape?.id ?: ""
+                    } else {
+                        loadDefaultSteve()
+                    }
+                } else {
+                    loadDefaultSteve()
+                }
             }
 
             val wardrobeCape = File(context.filesDir, "wardrobe/capes/current.png")
-            if (wardrobeCape.exists()) {
+            if (wardrobeCape.exists() && capeBitmap == null) {
                 val cape = BitmapFactory.decodeFile(wardrobeCape.absolutePath)
                 if (cape != null) {
                     capeBitmap = cape
                     selectedCapePreset = "custom"
-                } else {
-                    setCape("migrator")
                 }
-            } else {
-                setCape("migrator")
             }
         } catch (_: Throwable) {
             loadDefaultSteve()
@@ -176,7 +176,7 @@ fun SkinStudioView(
                             }
                         }
                         skinBitmap = bmp
-                        armGeometry = if (WardrobeService.isSlimArm(bmp) || isSlimArmGeometry(bmp)) "slim" else "classic"
+                        armGeometry = if (WardrobeService.isSlimArm(bmp)) "slim" else "classic"
                         selectedPreset = "custom"
                         statusMessage = "Imported custom ${bmp.width}x${bmp.height} skin via SAF"
                     } else {
@@ -447,17 +447,18 @@ fun SkinStudioView(
                                         if (isOperating) return@HorizonButton
                                         coroutineScope.launch {
                                             isOperating = true
-                                            statusMessage = "Fetching skin & cape for $activeName..."
+                                            statusMessage = "Fetching skin & capes for $activeName..."
                                             try {
-                                                val result = when (activeType.lowercase()) {
-                                                    "microsoft" -> {
-                                                        if (activeUUID.isNotEmpty()) {
-                                                            WardrobeService.fetchMojangSessionProfile(activeUUID)
-                                                        } else {
-                                                            WardrobeService.fetchProfileByName(activeName)
-                                                        }
+                                                val isMicrosoft = activeType.equals("microsoft", ignoreCase = true)
+                                                val token = if (isMicrosoft) BlazeNativeBridge.getActiveAccessToken() else ""
+                                                val result: SkinCapeResult? = when {
+                                                    isMicrosoft && token.isNotEmpty() -> {
+                                                        WardrobeService.fetchMicrosoftProfileWithTextures(token)
                                                     }
-                                                    "elyby", "ely.by" -> {
+                                                    isMicrosoft && activeUUID.isNotEmpty() -> {
+                                                        WardrobeService.fetchMojangSessionProfile(activeUUID)
+                                                    }
+                                                    activeType.lowercase() in listOf("elyby", "ely.by") -> {
                                                         WardrobeService.fetchElyBySkinAndCape(activeName)
                                                     }
                                                     else -> {
@@ -469,14 +470,17 @@ fun SkinStudioView(
                                                     skinBitmap = result.skin
                                                     armGeometry = result.model
                                                     selectedPreset = "account"
+                                                    accountCapes = result.capes
                                                     if (result.cape != null) {
                                                         capeBitmap = result.cape
-                                                        selectedCapePreset = "account"
+                                                        selectedCapePreset = result.capeName ?: "account"
+                                                        activeCapeId = result.profile?.activeCape?.id ?: ""
                                                         statusMessage = "Loaded ${result.model} skin & ${result.capeName ?: "cape"}!"
                                                     } else {
                                                         capeBitmap = null
+                                                        activeCapeId = ""
                                                         selectedCapePreset = "none"
-                                                        statusMessage = "Loaded ${result.model} skin for $activeName (no cape found)"
+                                                        statusMessage = "Loaded ${result.model} skin for $activeName"
                                                     }
                                                 } else {
                                                     statusMessage = "Could not find online skin for $activeName"
@@ -522,6 +526,15 @@ fun SkinStudioView(
                                                 )
                                                 if (res.isSuccess) {
                                                     statusMessage = res.getOrNull() ?: "Skin uploaded successfully to Microsoft account!"
+                                                    val updated = WardrobeService.fetchMicrosoftProfileWithTextures(token)
+                                                    if (updated != null) {
+                                                        skinBitmap = updated.skin
+                                                        armGeometry = updated.model
+                                                        accountCapes = updated.capes
+                                                        if (updated.cape != null) {
+                                                            capeBitmap = updated.cape
+                                                        }
+                                                    }
                                                 } else {
                                                     statusMessage = "Upload error: ${res.exceptionOrNull()?.message}"
                                                 }
@@ -548,60 +561,89 @@ fun SkinStudioView(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             PresetPill(
-                                label = "Steve",
+                                label = "Steve (Classic)",
                                 active = selectedPreset == "steve",
                                 onClick = { loadDefaultSteve() },
                                 modifier = Modifier.weight(1f)
                             )
                             PresetPill(
-                                label = "Alex",
+                                label = "Alex (Slim)",
                                 active = selectedPreset == "alex",
                                 onClick = { loadDefaultAlex() },
-                                modifier = Modifier.weight(1f)
-                            )
-                            PresetPill(
-                                label = "Sunny",
-                                active = selectedPreset == "sunny",
-                                onClick = { loadDefaultSunny() },
                                 modifier = Modifier.weight(1f)
                             )
                         }
                     }
 
-                    // Cape Presets Row
+                    // Capes Row (Account Capes / Authentic Capes)
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        androidx.compose.foundation.text.BasicText(
-                            text = "Cape Presets",
-                            style = androidx.compose.ui.text.TextStyle(color = Color(0xFFCBD5E1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.foundation.text.BasicText(
+                                text = if (accountCapes.isNotEmpty()) "Account Capes (${accountCapes.size})" else "Cape",
+                                style = androidx.compose.ui.text.TextStyle(color = Color(0xFFCBD5E1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            )
+                            if (selectedCapePreset.isNotEmpty() && selectedCapePreset != "none") {
+                                androidx.compose.foundation.text.BasicText(
+                                    text = selectedCapePreset,
+                                    style = androidx.compose.ui.text.TextStyle(color = colors.activePalette.primary, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                                )
+                            }
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             PresetPill(
-                                label = "Migrator",
-                                active = selectedCapePreset == "migrator",
-                                onClick = { setCape("migrator") },
-                                modifier = Modifier.weight(1f)
-                            )
-                            PresetPill(
-                                label = "Vanilla",
-                                active = selectedCapePreset == "vanilla",
-                                onClick = { setCape("vanilla") },
-                                modifier = Modifier.weight(1f)
-                            )
-                            PresetPill(
-                                label = "15th Anniv",
-                                active = selectedCapePreset == "15th",
-                                onClick = { setCape("15th") },
-                                modifier = Modifier.weight(1f)
-                            )
-                            PresetPill(
                                 label = "None",
-                                active = selectedCapePreset == "none",
-                                onClick = { setCape("none") },
-                                modifier = Modifier.weight(0.8f)
+                                active = capeBitmap == null || selectedCapePreset == "none",
+                                onClick = {
+                                    activeCapeId = ""
+                                    capeBitmap = null
+                                    selectedCapePreset = "none"
+                                    val token = BlazeNativeBridge.getActiveAccessToken()
+                                    if (activeType.equals("microsoft", ignoreCase = true) && token.isNotEmpty()) {
+                                        coroutineScope.launch {
+                                            val res = WardrobeService.changeActiveCape(token, "")
+                                            if (res.isSuccess) statusMessage = "Cape reset on Microsoft account"
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.weight(0.7f)
                             )
+                            if (accountCapes.isNotEmpty()) {
+                                accountCapes.take(3).forEach { cape ->
+                                    val isSelected = activeCapeId == cape.id || (activeCapeId.isEmpty() && cape.isUsing && capeBitmap != null)
+                                    PresetPill(
+                                        label = cape.alias.take(12),
+                                        active = isSelected,
+                                        onClick = {
+                                            activeCapeId = cape.id
+                                            selectedCapePreset = cape.alias
+                                            coroutineScope.launch {
+                                                val bmp = WardrobeService.downloadBitmap(cape.url)
+                                                if (bmp != null) capeBitmap = bmp
+                                                val token = BlazeNativeBridge.getActiveAccessToken()
+                                                if (activeType.equals("microsoft", ignoreCase = true) && token.isNotEmpty()) {
+                                                    val res = WardrobeService.changeActiveCape(token, cape.id)
+                                                    if (res.isSuccess) statusMessage = "Activated ${cape.alias} on Microsoft account!"
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            } else {
+                                PresetPill(
+                                    label = if (capeBitmap != null) "Custom Cape" else "No Online Capes",
+                                    active = capeBitmap != null,
+                                    onClick = { capePicker.launch(arrayOf("image/png", "image/*")) },
+                                    modifier = Modifier.weight(1.3f)
+                                )
+                            }
                         }
                     }
 
@@ -1361,90 +1403,3 @@ private fun createAlexTexture(): Bitmap {
     return bmp
 }
 
-private fun createSunnyTexture(): Bitmap {
-    val bmp = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888)
-    val skinCol = android.graphics.Color.rgb(110, 75, 55)
-    val hairCol = android.graphics.Color.rgb(25, 20, 20)
-    val shirtCol = android.graphics.Color.rgb(210, 140, 50)
-    val jeansCol = android.graphics.Color.rgb(45, 65, 85)
-
-    for (y in 0 until 64) {
-        for (x in 0 until 64) {
-            val col = when {
-                y in 0..8 && x in 8..31 -> hairCol
-                y in 8..15 && x in 8..15 -> skinCol
-                y in 8..15 && (x in 0..7 || x in 16..31) -> hairCol
-                y in 20..31 && x in 16..39 -> shirtCol
-                y in 20..31 && x in 40..46 -> if (y >= 28) skinCol else shirtCol
-                y in 16..31 && x in 0..15 -> jeansCol
-                y in 48..63 && x in 0..31 -> jeansCol
-                y in 48..63 && x in 32..46 -> if (y >= 60) skinCol else shirtCol
-                else -> android.graphics.Color.TRANSPARENT
-            }
-            bmp.setPixel(x, y, col)
-        }
-    }
-    return bmp
-}
-
-private fun createMigratorCape(): Bitmap {
-    val bmp = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888)
-    val base = android.graphics.Color.rgb(139, 0, 0)
-    val gold = android.graphics.Color.rgb(255, 215, 0)
-    for (y in 0 until 32) {
-        for (x in 0 until 64) {
-            val isDeco = (y in 6..12 && x in 4..7) || (y in 8..10 && x in 3..8) || (y in 6..12 && x in 14..17)
-            bmp.setPixel(x, y, if (isDeco) gold else base)
-        }
-    }
-    return bmp
-}
-
-private fun createVanillaCape(): Bitmap {
-    val bmp = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888)
-    val base = android.graphics.Color.rgb(25, 45, 120)
-    val yellow = android.graphics.Color.rgb(240, 200, 30)
-    for (y in 0 until 32) {
-        for (x in 0 until 64) {
-            val isBorder = x in 1..2 || x in 9..10 || x in 11..12 || x in 19..20 || y in 1..2 || y in 14..15
-            bmp.setPixel(x, y, if (isBorder) yellow else base)
-        }
-    }
-    return bmp
-}
-
-private fun createAnniversaryCape(): Bitmap {
-    val bmp = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888)
-    val base = android.graphics.Color.rgb(18, 24, 38)
-    val emerald = android.graphics.Color.rgb(16, 185, 129)
-    for (y in 0 until 32) {
-        for (x in 0 until 64) {
-            val isCreeper = (y in 6..7 && (x == 4 || x == 7 || x == 14 || x == 17)) ||
-                (y == 8 && (x in 5..6 || x in 15..16)) ||
-                (y in 9..11 && (x == 4 || x == 7 || x == 14 || x == 17))
-            bmp.setPixel(x, y, if (isCreeper) emerald else base)
-        }
-    }
-    return bmp
-}
-
-private fun createCherryCape(): Bitmap {
-    val bmp = Bitmap.createBitmap(64, 32, Bitmap.Config.ARGB_8888)
-    val pink = android.graphics.Color.rgb(244, 114, 182)
-    val green = android.graphics.Color.rgb(6, 95, 70)
-    for (y in 0 until 32) {
-        for (x in 0 until 64) {
-            val isPetal = (x + y) % 5 == 0
-            bmp.setPixel(x, y, if (isPetal) green else pink)
-        }
-    }
-    return bmp
-}
-
-private fun isSlimArmGeometry(bmp: Bitmap): Boolean {
-    if (bmp.width >= 64 && bmp.height >= 64) {
-        val pixel = bmp.getPixel(54, 20)
-        return (pixel ushr 24 and 0xFF) == 0
-    }
-    return false
-}
